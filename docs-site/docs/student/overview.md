@@ -10,17 +10,36 @@ See [Roles and permissions](../reference/roles-and-permissions.md) for the full 
 
 Your instructor can enroll you directly or give you a registration code. A registration code works only when the course is published, the enrollment window is open, and the code is correct.
 
-An enrolled course does not appear to students until it is published. If you expect to see a course, ask the instructor to confirm that it is published and that your account is on the roster.
+Two things can keep you out of a course you belong to, and the screen tells you which. A course
+that has not been published yet does not appear at all. A course that has been published but has
+not reached its start date is listed under **Upcoming Courses**, and opening it shows the date it
+starts instead of its contents. Registration usually opens before teaching does, so joining a
+course and then waiting for it is normal.
+
+If you expect to see a course and it is missing entirely, ask the instructor to confirm that it is
+published and that your account is on the roster.
 
 Students cannot remove themselves from a course. Contact the course staff if your enrollment needs to change.
 
 ## Find assignments
 
-The dashboard and calendar show published assignments from courses you can access. Unpublished assignments are hidden.
+The dashboard and calendar show published assignments from the courses that are open to you.
+Unpublished assignments are hidden, and so is work from a course that has not started yet.
 
 On the calendar, the **Courses** box on the right lists your courses with a checkbox each. They all start checked; uncheck a course to hide its assignments from the calendar and the Upcoming Assignments list, and check it again to bring them back. Your choice is remembered on this device the next time you open the calendar.
 
+Open a course and you get two tabs. **Assignments** lists everything set for you: when it is due,
+what it is worth, how many problems it has, and whether late work is accepted. Click a column
+heading to sort by it. **Grades** is described further down.
+
+An assignment with a release date stays in that list before it opens, marked **Not open yet**. You
+can see that it exists and when it starts. The instructions and the problems appear on the day.
+
 Assignment pages show deadlines in your effective timezone. When the course uses a different timezone, AFCT shows the course time as well. This is useful when you travel or take a course hosted in another region.
+
+If your instructor gives you an extension, or gives one to your whole group, the date you see is
+yours. The calendar, the dashboard and the assignment page all show the deadline that applies to
+you rather than the one set for the class.
 
 ## Submit work
 
@@ -35,8 +54,27 @@ screen.
 A few things to know before you submit:
 
 - A problem can allow unlimited attempts or set a maximum, and each accepted upload counts as an attempt. Submitted attempts cannot be edited or deleted, so check your work before you send it. To correct it, submit another attempt if the problem still allows one.
+- Your instructor can grant extra attempts, to you or to your whole group. The maximum shown on the problem already includes them, so it is the number you actually have.
 - After the due date, AFCT accepts work only when late submissions are enabled and any late cutoff has not passed. The server enforces deadlines, so changing a device clock or timezone does not change the result.
 - AFCT may also require a short cooldown between attempts on the same problem. The Submission Center tells you when to try again.
+
+## Check your grades
+
+The **Grades** tab is one table: every assignment, what you scored, and what that is as a
+percentage. Each row starts closed. Open one with the arrow at its left and the problems inside it
+appear underneath, each with its own score, so you can see where the marks went rather than only
+what they added up to.
+
+The arrow opens the row. The assignment name is a link to the assignment, and a problem name is a
+link to that problem, so nothing you click does two things at once.
+
+Read the status beside each score, because two of them mean the number is not final:
+
+- **Graded**: everything on the assignment has been marked.
+- **Partially graded**: some of it has. The score is the total so far, not your result.
+- **Not graded**: none of it has been marked yet.
+- **Not submitted**, on a problem: nothing was handed in and the deadline has passed, so it counts
+  as zero rather than staying blank. The next section covers what still changes that.
 
 ## Review results and comments
 
@@ -54,9 +92,21 @@ the screen says so rather than leaving the feedback blank. Two things you still 
 a submission could not be graded at all, you are told why, and a comment written by your
 instructor or a TA always reaches you.
 
-Comments belong to a specific assignment, problem, and student. You can add a comment and read replies in your thread. Students cannot delete comments.
+Comments belong to a specific assignment and problem, and to one student or to one group. You can
+add a comment and read replies in your thread. Students cannot delete comments.
+
+A comment you write goes to your course staff, not to your groupmates, even on group work. If you
+need to tell the rest of your group something, tell them the way you normally would.
 
 For group assignments, you and your group share one set of submissions per problem: any member can submit, everyone sees the group's work, and autograding gives the whole group the same grade (a grader can adjust an individual member's grade). Coordinate with your group so you do not submit over each other. Access to another group's work remains restricted.
+
+Because the attempts are shared, the table names whoever sent each one, and the assignment page
+lists your groupmates. Your instructor may write to the whole group instead of to each of you; those
+comments reach every member and sit in the thread like any other.
+
+If an assignment is group work and you are not in a group, the page says so and you can still submit
+on your own. That is sometimes deliberate. If you were expecting to be in a group, ask your
+instructor.
 
 ## Update your profile
 

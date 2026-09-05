@@ -638,3 +638,85 @@ describe('GET student context, granted attempts', () => {
     expect(body.problemLimits.p1).toEqual({ max: 2, granted: 0 });
   });
 });
+
+/**
+ * Feedback written to a group has to reach the group.
+ *
+ * On group work the schema expects staff to address the group rather than each member, so the
+ * shared submission carries one thread. The staff review route has always matched
+ * `aboutGroupId`; this one matched only the caller's own name, so an instructor's comment on
+ * group work was written, stored, shown back to the instructor, and seen by nobody it was for.
+ */
+describe('GET student context, comments on group work', () => {
+  const setup = (membership: boolean) => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      id: 'r1',
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      isPublished: true,
+      groupSetId: 'gs1',
+      missingWorkIsZero: false,
+      dueDate: new Date('2026-03-05T00:00:00.000Z'),
+      unlockAt: null,
+      lateCutoff: null,
+      allowLateSubmissions: false,
+      assignedToEveryone: true,
+      course: { isArchived: false },
+      overrides: [],
+      problems: [
+        {
+          problemId: 'p1',
+          maxSubmissions: 3,
+          showFeedback: true,
+          maxPoints: 10,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+    if (membership) {
+      prismaMock.groupMembership.findFirst.mockResolvedValue({ groupId: 'g1' });
+      prismaMock.studentGroup.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Team 1',
+        memberships: [{ roster: { user: { id: 'u1', firstName: 'Ada', lastName: 'L' } } }],
+      });
+    }
+    prismaMock.submission.findMany.mockResolvedValue([]);
+    prismaMock.comment.findMany.mockResolvedValue([]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+  };
+
+  const whereOfCommentQuery = () =>
+    (prismaMock.comment.findMany.mock.calls[0][0] as { where: { OR: unknown[] } }).where;
+
+  it("asks for comments addressed to the caller's group", async () => {
+    setup(true);
+
+    await GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+
+    expect(whereOfCommentQuery().OR).toContainEqual({ aboutGroupId: 'g1' });
+  });
+
+  it('still asks for their own, which is all an individual assignment has', async () => {
+    setup(true);
+
+    await GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+
+    const or = whereOfCommentQuery().OR;
+    expect(or).toContainEqual({ aboutStudentId: 'u1' });
+    expect(or).toContainEqual({ authorId: 'u1' });
+  });
+
+  it("asks for no group's thread when the caller is in no group", async () => {
+    setup(false);
+
+    await GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+
+    // Never an unscoped `aboutGroupId` clause: that would hand them another group's feedback.
+    expect(whereOfCommentQuery().OR).toHaveLength(2);
+  });
+});

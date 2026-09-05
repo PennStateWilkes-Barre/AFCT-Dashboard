@@ -273,6 +273,40 @@ describe('withCourseAuth', () => {
       expect(createLogMock.mock.calls[0][2].metadata.reason).toBe('course not published');
     });
 
+    /**
+     * The same class of refusal as the unpublished one above: the student is enrolled, has
+     * done nothing wrong, and can do nothing about it. Logged as its own reason so a reader
+     * is not sent to the roster looking for a fault that is a date.
+     */
+    const enrolledButNotStarted = () => {
+      authMock.mockResolvedValue({ user: { id: 'u1' } });
+      canAccessMock.mockResolvedValue(false);
+      prismaMock.roster.findFirst.mockResolvedValue({
+        role: 'STUDENT',
+        status: 'ENROLLED',
+        course: { isPublished: true, startDate: new Date('2099-01-01') },
+      });
+    };
+
+    it('says a course has not started, rather than refusing without a reason', async () => {
+      enrolledButNotStarted();
+
+      const res = await withCourseAuth(vi.fn(), read)(new Request('http://localhost/x'), ctx());
+
+      expect(res.status).toBe(403);
+      expect(await (res as Response).json()).toEqual({
+        error: 'This course has not started yet, so it is not open to students.',
+      });
+    });
+
+    it('records that reason too, not the role', async () => {
+      enrolledButNotStarted();
+
+      await withCourseAuth(vi.fn(), read)(new Request('http://localhost/x'), ctx());
+
+      expect(createLogMock.mock.calls[0][2].metadata.reason).toBe('course not started');
+    });
+
     it('keeps saying only Forbidden once the course is published', async () => {
       authMock.mockResolvedValue({ user: { id: 'u1' } });
       canAccessMock.mockResolvedValue(false);

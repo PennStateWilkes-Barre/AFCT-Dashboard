@@ -77,6 +77,8 @@ describe('StudentGradesTable derivations', () => {
     expect(problemStatusLabel(problem({ grade: null, status: 'COMPLETED' }))).toBe('Processed');
     expect(problemStatusLabel(problem({ grade: null, status: 'FAILED' }))).toBe('Processed');
     expect(problemStatusLabel(problem({ grade: null, status: 'PENDING' }))).toBe('Not graded');
+    // A derived zero is a grade, so it would read as "Graded" without its own branch.
+    expect(problemStatusLabel(problem({ grade: 0, missing: true }))).toBe('Not submitted');
     // Nothing handed in is a different fact from nothing marked, and it is the one the
     // student guide already words this way.
     expect(problemStatusLabel(problem({ grade: null, status: '', submissionCount: 0 }))).toBe(
@@ -302,6 +304,88 @@ describe('StudentGradesTable', () => {
     await waitFor(() => expect(screen.getByText('Regular Languages')).toBeInTheDocument());
 
     expect(screen.queryByText('Problem 1: DFA Design')).not.toBeInTheDocument();
+  });
+
+  /**
+   * A zero for work never handed in and a zero somebody marked are the same number, and the
+   * whole point of the missing-work design is that a student can tell them apart. The
+   * assignment page already says so; the grades page called it "Graded".
+   */
+  it('says Not submitted rather than Graded for a zero nobody marked', async () => {
+    mockFetch({
+      assignments: [
+        {
+          id: 'a5',
+          title: 'Missed Lab',
+          description: null,
+          dueDate: '2027-01-01T12:00:00Z',
+          isGroup: false,
+          maxPoints: 10,
+          grade: 0,
+          problems: [problem({ id: 'p1', title: 'DFA', maxPoints: 10, grade: 0, missing: true })],
+        },
+      ],
+    });
+
+    renderWithClient(<StudentGradesTable courseId="c1" />);
+    await waitFor(() => expect(screen.getByText('Missed Lab')).toBeInTheDocument());
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'Expand Missed Lab problems' }));
+
+    const row = screen.getByRole('link', { name: 'Problem 1: DFA' }).closest('tr')!;
+    expect(within(row).getAllByText('Not submitted').length).toBeGreaterThan(0);
+    expect(within(row).queryByText('Graded')).not.toBeInTheDocument();
+  });
+
+  /**
+   * A locked assignment carries no problems, so summing them reported it as worth 0 points and
+   * left a chevron that opened onto nothing.
+   */
+  describe('an assignment that has not opened yet', () => {
+    const locked = {
+      assignments: [
+        {
+          id: 'a6',
+          title: 'Future Lab',
+          description: null,
+          dueDate: '2099-01-01T12:00:00Z',
+          isGroup: false,
+          locked: true,
+          maxPoints: 60,
+          grade: null,
+          problems: [],
+        },
+      ],
+    };
+
+    it('keeps the points it is really worth', async () => {
+      mockFetch(locked);
+      renderWithClient(<StudentGradesTable courseId="c1" />);
+      await waitFor(() => expect(screen.getByText('Future Lab')).toBeInTheDocument());
+
+      const row = assignmentRow('Future Lab');
+      expect(within(row).getAllByText('— / 60').length).toBeGreaterThan(0);
+      expect(within(row).queryByText('— / 0')).not.toBeInTheDocument();
+    });
+
+    it('says it is not open rather than not graded', async () => {
+      mockFetch(locked);
+      renderWithClient(<StudentGradesTable courseId="c1" />);
+      await waitFor(() => expect(screen.getByText('Future Lab')).toBeInTheDocument());
+
+      expect(
+        within(assignmentRow('Future Lab')).getAllByText('Not open yet').length,
+      ).toBeGreaterThan(0);
+    });
+
+    it('offers no expander, because there is nothing behind it', async () => {
+      mockFetch(locked);
+      renderWithClient(<StudentGradesTable courseId="c1" />);
+      await waitFor(() => expect(screen.getByText('Future Lab')).toBeInTheDocument());
+
+      expect(screen.queryByRole('button', { name: /Future Lab problems/ })).not.toBeInTheDocument();
+    });
   });
 
   it('shows a loading state while the query is pending', () => {

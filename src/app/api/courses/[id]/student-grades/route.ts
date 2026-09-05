@@ -28,7 +28,10 @@ export const GET = withCourseAuth(
       const assignments = await getStudentCourseAssignments(user.id, courseId);
 
       const payload = assignments.map((assignment) => {
-        const maxPoints = assignment.problems.reduce((sum, p) => sum + p.maxPoints, 0);
+        // The assignment's own total, not a sum over the problem list: that list is empty
+        // while the assignment is still locked, and summing it reported the assignment as
+        // being worth 0 points on the student's own grades page.
+        const maxPoints = assignment.maxPoints;
         const assignmentGrade = assignment.problems.reduce((sum, p) => sum + (p.grade ?? 0), 0);
         const hasGrade = assignment.problems.some((p) => p.grade !== null);
 
@@ -36,6 +39,8 @@ export const GET = withCourseAuth(
           id: assignment.id,
           title: assignment.title,
           description: assignment.description,
+          // Not open yet, so it has no problems to show and no score to explain.
+          locked: assignment.locked,
           // Individual vs group, derived from the group set link the same way the course
           // route derives it. There is no stored flag, and the gradebook labels the row
           // with it so a student can tell a shared grade from their own.
@@ -52,6 +57,10 @@ export const GET = withCourseAuth(
             status: p.status,
             submissionCount: p.submissionCount,
             grade: p.grade,
+            // Whether that grade is a zero for work never handed in rather than one somebody
+            // marked. Both are the number 0, and the page has to tell them apart: the
+            // assignment page next door already says "Not submitted" beside it.
+            missing: p.missing ?? false,
           })),
         };
       });

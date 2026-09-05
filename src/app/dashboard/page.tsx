@@ -176,7 +176,15 @@ export default async function DashboardPage({
             // neither did the instructor who scoped it to them.
             OR: [
               { courseId: { in: staffCourseIds } },
-              { courseId: { in: studentCourseIds }, ...assignedToStudentWhere(id) },
+              {
+                courseId: { in: studentCourseIds },
+                // Published AND opened. `studentCourseIds` is already built from the
+                // published list, but this panel is a student's "what is due" and the cost of
+                // being wrong is a deadline for work they cannot reach, so the rule is stated
+                // here rather than inherited from how the list above happened to be filtered.
+                course: { isPublished: true, startDate: { lte: now } },
+                ...assignedToStudentWhere(id),
+              },
             ],
             // Base due OR this user's override due is in the future, so an extension
             // still surfaces once the base date has passed.

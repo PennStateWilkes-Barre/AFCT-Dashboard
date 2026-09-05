@@ -59,7 +59,9 @@ describe('getAssignmentsForUserRange', () => {
       {
         courseId: { in: ['student-course'] },
         isPublished: true,
-        course: { isPublished: true },
+        // Published AND started: a student cannot open a course before its start date, so its
+        // deadlines must not appear on their calendar either.
+        course: { isPublished: true, startDate: { lte: expect.any(Date) } },
         AND: [
           {
             OR: [
@@ -106,7 +108,9 @@ describe('getAssignmentsForUserRange', () => {
       {
         courseId: { in: [] },
         isPublished: true,
-        course: { isPublished: true },
+        // Published AND started: a student cannot open a course before its start date, so its
+        // deadlines must not appear on their calendar either.
+        course: { isPublished: true, startDate: { lte: expect.any(Date) } },
         AND: [
           {
             OR: [

@@ -47,6 +47,11 @@ export type AssignmentWithDetails = {
   courseIsArchived?: boolean;
   dueDate: string | Date;
   unlockAt?: string | Date | null;
+  /**
+   * True while the assignment has not reached this student's release time. Its description
+   * and problems are withheld, so a page that ignores this renders an empty shell.
+   */
+  locked?: boolean;
   assignedToEveryone?: boolean;
   groupSetId?: string | null;
   maxPoints: number;

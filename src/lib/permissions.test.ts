@@ -104,6 +104,32 @@ describe('canAccessCourse', () => {
     await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(false);
   });
 
+  it('a student may NOT access a published course that has not started yet', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      status: 'ENROLLED',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2099-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(false);
+  });
+
+  it('a student may access it once the start date has passed', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      status: 'ENROLLED',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2000-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(true);
+  });
+
+  it('staff may build a course before it opens', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'FACULTY',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2099-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u' }, 'c')).resolves.toBe(true);
+  });
+
   it('staff (FACULTY/TA) may access their course even while unpublished', async () => {
     prismaMock.roster.findFirst.mockResolvedValue({
       role: 'FACULTY',

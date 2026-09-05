@@ -199,7 +199,17 @@ export const GET = withCourseAuth(
           where: {
             assignmentId,
             problemId: { in: problemIds },
-            OR: [{ aboutStudentId: userId }, { authorId: userId }],
+            OR: [
+              { aboutStudentId: userId },
+              { authorId: userId },
+              // Feedback written to their GROUP. The schema notes that on group work staff
+              // usually address the group rather than each member, so the shared submission
+              // gets one thread, and the staff review route has always read it that way. This
+              // side did not, so an instructor's feedback on group work reached nobody it was
+              // written for. Scoped to the caller's own group, which is the same id the cap
+              // and the submissions above are scoped to.
+              ...(myGroupId ? [{ aboutGroupId: myGroupId }] : []),
+            ],
           },
           include: {
             author: { select: { id: true, firstName: true, lastName: true } },

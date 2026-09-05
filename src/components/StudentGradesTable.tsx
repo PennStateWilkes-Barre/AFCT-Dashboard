@@ -13,11 +13,14 @@ import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { apiPaths } from '@/lib/api-paths';
 import { formatDateInTimeZone, formatTimeInTimeZone } from '@/lib/date-format';
 import { TEXT_LINK_CLASS } from '@/lib/link-styles';
+import { MISSING_WORK_LABEL } from '@/lib/missing-work';
 import { cn } from '@/lib/utils';
 
 type StudentGradesProblem = {
   id: string;
   title: string | null;
+  /** True when the grade is a zero for work never handed in rather than one somebody marked. */
+  missing?: boolean;
   maxPoints: number;
   maxSubmissions: number;
   submissionCount: number;
@@ -32,6 +35,8 @@ type StudentGradesAssignment = {
   description?: string | null;
   /** Derived server-side from the assignment's group set link; there is no stored flag. */
   isGroup: boolean;
+  /** Not open yet: no problems are sent, so there is nothing to expand and nothing scored. */
+  locked?: boolean;
   dueDate: string | null;
   maxPoints: number;
   grade: number | null;
@@ -122,6 +127,9 @@ function usePersistentExpanded(courseId: string): [string[], (assignmentId: stri
 export function problemStatusLabel(problem: StudentGradesProblem): string {
   const status = problem.status?.toLowerCase() ?? '';
   if (status === 'processing') return 'Evaluating';
+  // Before "Graded", because a derived zero IS a grade and would otherwise read as one a
+  // person gave. Same wording the assignment page uses, from the same constant.
+  if (problem.missing) return MISSING_WORK_LABEL;
   if (problem.grade !== null) return 'Graded';
   if (status === 'failed' || status === 'completed') return 'Processed';
   // "Not graded" is true of a problem nobody has submitted to, but it is not the fact the
@@ -135,9 +143,14 @@ export function problemStatusLabel(problem: StudentGradesProblem): string {
  * whose problems are half marked is the case a student most needs to see, because it
  * tells them the score in front of them is not final.
  */
-export function assignmentStatusLabel(problems: StudentGradesProblem[]): string {
+export function assignmentStatusLabel(problems: StudentGradesProblem[], locked = false): string {
+  // A locked assignment has no problems sent for it, which would otherwise read as "Not
+  // graded" when the truth is that it has not opened.
+  if (locked) return 'Not open yet';
   const graded = problems.filter((p) => p.grade !== null).length;
   if (graded === 0) return 'Not graded';
+  // A derived zero counts toward the score, so it counts as scored here; the problem row
+  // beside it is where "Not submitted" is said.
   if (graded === problems.length) return 'Graded';
   return 'Partially graded';
 }
@@ -272,8 +285,13 @@ export function StudentGradesTable({ courseId }: { courseId: string }) {
                 starts collapsed, so it would have shown on arrival. */}
             <tbody>
               {assignments.map((assignment, assignmentIndex) => {
-                const isExpanded = expanded.includes(assignment.id);
-                const status = assignmentStatusLabel(assignment.problems);
+                const isLocked = assignment.locked === true;
+                const status = assignmentStatusLabel(assignment.problems, isLocked);
+                // Nothing to open: a locked assignment's problems are withheld until it opens,
+                // and the chevron used to toggle onto an empty group, announcing "expanded"
+                // with nothing to show for it.
+                const canExpand = !isLocked && assignment.problems.length > 0;
+                const isExpanded = canExpand && expanded.includes(assignment.id);
                 const type = assignment.isGroup ? 'Group' : 'Individual';
                 // The date with the time beside it, because "due Friday" and "due Friday at
                 // 11:59 PM" are different pieces of information to someone deciding whether
@@ -303,29 +321,35 @@ export function StudentGradesTable({ courseId }: { courseId: string }) {
                     >
                       <TableCell>
                         <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => toggle(assignment.id)}
-                            // aria-expanded and no aria-controls: the problems are several
-                            // sibling rows with no element of their own to name, and pointing
-                            // at the group would name a region containing this button. The
-                            // rows follow it in reading order, which is what a disclosure
-                            // needs.
-                            aria-expanded={isExpanded}
-                            // The icon stays small; the target does not. 32px square, which is
-                            // reachable on a phone without making every row that tall.
-                            // No background at rest; the hover is the neutral muted grey,
-                            // which reads against the row's primary tint where a lighter
-                            // wash of the same hue would have disappeared into it.
-                            className="hover:bg-muted focus-visible:ring-ring text-muted-foreground hover:text-foreground -ml-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
-                            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${assignment.title} problems`}
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="size-4" aria-hidden="true" />
-                            ) : (
-                              <ChevronRight className="size-4" aria-hidden="true" />
-                            )}
-                          </button>
+                          {canExpand ? (
+                            <button
+                              type="button"
+                              onClick={() => toggle(assignment.id)}
+                              // aria-expanded and no aria-controls: the problems are several
+                              // sibling rows with no element of their own to name, and pointing
+                              // at the group would name a region containing this button. The
+                              // rows follow it in reading order, which is what a disclosure
+                              // needs.
+                              aria-expanded={isExpanded}
+                              // The icon stays small; the target does not. 32px square, which is
+                              // reachable on a phone without making every row that tall.
+                              // No background at rest; the hover is the neutral muted grey,
+                              // which reads against the row's primary tint where a lighter
+                              // wash of the same hue would have disappeared into it.
+                              className="hover:bg-muted focus-visible:ring-ring text-muted-foreground hover:text-foreground -ml-1 flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${assignment.title} problems`}
+                            >
+                              {isExpanded ? (
+                                <ChevronDown className="size-4" aria-hidden="true" />
+                              ) : (
+                                <ChevronRight className="size-4" aria-hidden="true" />
+                              )}
+                            </button>
+                          ) : (
+                            // The same 32px the button occupies, so titles stay in one column
+                            // whether or not a row can be opened.
+                            <span className="-ml-1 block size-8 shrink-0" aria-hidden="true" />
+                          )}
                           <div className="min-w-0">
                             <Link
                               href={`/dashboard/courses/${courseId}/${assignment.id}`}

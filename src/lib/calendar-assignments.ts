@@ -64,7 +64,10 @@ export async function getAssignmentsForUserRange(params: {
         {
           courseId: { in: studentCourseIdsArr },
           isPublished: true,
-          course: { isPublished: true },
+          // Published AND started. `canAccessCourse` refuses a student the contents of a
+          // course before its start date, so listing its work here would put deadlines on
+          // their calendar that they cannot open.
+          course: { isPublished: true, startDate: { lte: new Date() } },
           AND: [
             // Base due OR an override that applies to this student falls in the range. Their
             // group's counts: an extension granted to a group is the group members' deadline,

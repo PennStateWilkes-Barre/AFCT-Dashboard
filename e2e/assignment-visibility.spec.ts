@@ -41,9 +41,7 @@ test.beforeAll(async ({ browser }) => {
   const roster = (await (
     await page.request.get(`/api/courses/${COURSE}/roster?role=STUDENT&pageSize=50`)
   ).json()) as { rows: Array<{ id: string; email: string; role: string }> };
-  const other = roster.rows.find(
-    (m) => m.role === 'STUDENT' && m.email !== USERS.student.email,
-  );
+  const other = roster.rows.find((m) => m.role === 'STUDENT' && m.email !== USERS.student.email);
   // The fixture course starts with one student, which is all the other specs need. The
   // "assigned to someone else" case needs a second, so fall back to the faculty's own id
   // only if the roster somehow already has one.
@@ -284,8 +282,27 @@ test.describe('course access', () => {
 
     expect(courseIds.length).toBeGreaterThan(0);
     for (const id of courseIds) {
-      const res = await page.request.get(`/api/courses/${id}`);
-      expect(res.status(), `dashboard linked course ${id} but it does not open`).toBeLessThan(400);
+      // The link has to lead somewhere. A course the student is enrolled in but which has not
+      // started yet is deliberately listed and deliberately not readable: the page answers
+      // with "opens on <date>" rather than its contents, so following the link works even
+      // though the API behind it refuses.
+      const page404 = await page.request.get(`/dashboard/courses/${id}`);
+      expect(
+        page404.status(),
+        `dashboard linked course ${id} but the page does not load`,
+      ).toBeLessThan(400);
+
+      // And when the API does refuse, it must be for a reason the product intends. A bare
+      // "Forbidden" here is the phantom-course case this test exists to catch: the dashboard
+      // query and the access gate disagreeing about who may see what.
+      const api = await page.request.get(`/api/courses/${id}`);
+      if (api.status() >= 400) {
+        const body = (await api.json().catch(() => ({}))) as { error?: string };
+        expect(
+          body.error ?? '',
+          `dashboard linked course ${id} and the API refused it without a reason`,
+        ).toMatch(/has not started yet|has not been published/i);
+      }
     }
   });
 });

@@ -8,7 +8,7 @@ import { useSession } from 'next-auth/react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { showToast } from '@/lib/toast';
-import { ArrowLeft, ClipboardList } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Lock } from 'lucide-react';
 import { useEmptyStringSymbol } from '@/hooks/use-empty-string-symbol';
 import {
   IdentityPanel,
@@ -373,6 +373,11 @@ export default function StudentAssignmentPage({
   // Individual vs group, derived from the group set link; there is no stored flag. It matters
   // to a student before they start: a group assignment shares one set of submissions.
   const typeDisplay = assignment?.groupSetId ? 'Group' : 'Individual';
+  // When it opens, in the student's own timezone plus the course's where they differ, the
+  // same way the deadline beside it is written.
+  const unlockDisplay = assignment?.unlockAt
+    ? formatDeadlineDual(assignment.unlockAt, timezone, assignment.course?.timezone ?? null, hour12)
+    : null;
   // Either form counts: a rich-only assignment still has something to show.
   const hasDescription = Boolean(assignment?.description || assignment?.descriptionJson);
   /**
@@ -534,7 +539,26 @@ export default function StudentAssignmentPage({
         </Card>
       ) : null}
 
-      {assignment.problems.length > 0 ? (
+      {/* Not open yet.
+          The release time withholds the description and the problems, so without this the
+          page rendered its banner and then nothing at all: no prompt, no problem list, and no
+          reason given. The assignment's existence is not the secret (it is listed on the
+          course page with its opening date), so the honest thing is to say when it opens. */}
+      {assignment.locked ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+            <Lock className="text-muted-foreground size-6" aria-hidden="true" />
+            <h2 className="text-lg font-semibold">This assignment has not opened yet</h2>
+            <p className="text-muted-foreground max-w-prose text-sm">
+              {unlockDisplay
+                ? `Its problems and instructions become available on ${unlockDisplay}.`
+                : 'Its problems and instructions are not available yet.'}
+            </p>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {!assignment.locked && assignment.problems.length > 0 ? (
         <Card>
           <CardHeader className="pb-3">
             {/* The assignment's name is the banner's h1 two inches above; repeating it as the
@@ -621,6 +645,10 @@ export default function StudentAssignmentPage({
         <SubmissionViewerDialog
           open={openDialog.open}
           onOpenChange={(open) => setOpenDialog({ open, submission: null })}
+          // Preview only. The standalone viewer window is a staff tool: it exists for
+          // comparing and arranging several machines while marking, and a student looking at
+          // one attempt of their own has nothing to do with it.
+          allowOpenInWindow={false}
           problemType={
             assignment.problems.find((u) => u.problem.id === openDialog?.submission?.problemId)
               ?.problem?.type

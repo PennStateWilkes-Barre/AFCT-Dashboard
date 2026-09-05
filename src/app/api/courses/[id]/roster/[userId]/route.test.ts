@@ -18,6 +18,9 @@ const prismaMock = vi.hoisted(() => ({
   assignmentOverride: {
     deleteMany: vi.fn(),
   },
+  submissionGrant: {
+    deleteMany: vi.fn(),
+  },
   submission: {
     findFirst: vi.fn(),
   },
@@ -306,6 +309,11 @@ describe('DELETE /api/courses/[id]/roster/[userId]', () => {
       where: { userId: 'u2', assignmentId: { in: ['a1'] } },
     });
     expect(prismaMock.assignmentOverride.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'u2', assignmentId: { in: ['a1'] } },
+    });
+    // And their extra-attempt grants, which reactivate the same way: granted, removed before
+    // using them, re-added later, and back holding a cap nobody decided to give them.
+    expect(prismaMock.submissionGrant.deleteMany).toHaveBeenCalledWith({
       where: { userId: 'u2', assignmentId: { in: ['a1'] } },
     });
   });

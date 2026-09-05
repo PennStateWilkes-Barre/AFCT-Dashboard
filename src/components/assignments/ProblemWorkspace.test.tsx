@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import ProblemWorkspace from './ProblemWorkspace';
@@ -372,5 +373,150 @@ describe('the Submitted by column', () => {
     );
 
     expect(screen.getByRole('columnheader', { name: /Submitted by/ })).toBeInTheDocument();
+  });
+});
+
+/**
+ * The comment shape the student page actually sends.
+ *
+ * The staff view passes comments with a nested `author`; `student-context` sends a flat
+ * `authorName` and `authorRole`, and this converter is what bridges them. It was the branch a
+ * student's own page runs through every time and the one branch nothing exercised.
+ */
+describe('comments as the student page sends them', () => {
+  // The flat shape `student-context` sends, as a StudentProblemComment.
+  const studentShaped = {
+    id: 'cm1',
+    content: 'Try a dead state for the reject case.',
+    createdAt: '2026-03-01T10:00:00.000Z',
+    authorId: 'prof',
+    authorName: 'Ada Lovelace',
+    authorRole: 'FACULTY' as const,
+    problemId: 'p1',
+  };
+
+  it('splits the flat name into an author the panel can render', () => {
+    render(<ProblemWorkspace {...baseProps} comments={[studentShaped]} />);
+
+    expect(screen.getByText('Try a dead state for the reject case.')).toBeInTheDocument();
+    expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
+  });
+
+  it('keeps a multi-word surname whole rather than dropping it', () => {
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        comments={[{ ...studentShaped, authorName: 'Ada King Lovelace' }]}
+      />,
+    );
+
+    expect(screen.getByText(/Ada King Lovelace/)).toBeInTheDocument();
+  });
+
+  it('survives a comment with no author name at all', () => {
+    // A deleted account leaves the name empty; the thread still has to render.
+    render(<ProblemWorkspace {...baseProps} comments={[{ ...studentShaped, authorName: '' }]} />);
+
+    expect(screen.getByText('Try a dead state for the reject case.')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Downloading your own attempt back, which is how a student gets the file they sent in order
+ * to carry on from it. Entirely untested until now.
+ */
+describe('downloading an attempt', () => {
+  const submission = {
+    id: 's1',
+    status: 'COMPLETED',
+    correct: true,
+    fileName: 'stored-abc123.jff',
+    originalFileName: 'traffic light.jff',
+    submittedAt: '2026-03-01T10:00:00.000Z',
+    feedback: null,
+    problemId: 'p1',
+  };
+
+  /**
+   * The download builds an anchor and clicks it, so the anchor's own click is what to
+   * intercept. Spying on `document.createElement` recurses the second time a test installs the
+   * spy over the first one, which is a slower way to learn the same thing.
+   */
+  const clickDownload = async (over: Record<string, unknown> = {}) => {
+    const clicked: { href?: string; download?: string } = {};
+    const realClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      clicked.href = this.href;
+      clicked.download = this.download;
+    };
+    try {
+      render(<ProblemWorkspace {...baseProps} submissions={[{ ...submission, ...over }]} />);
+      await userEvent.click(screen.getByRole('button', { name: 'Attempt actions' }));
+      await userEvent.click(screen.getByRole('menuitem', { name: /download/i }));
+    } finally {
+      HTMLAnchorElement.prototype.click = realClick;
+    }
+    return clicked;
+  };
+
+  it('sends the stored file and names it what the student called it', async () => {
+    const clicked = await clickDownload();
+
+    expect(clicked.href).toContain('stored-abc123.jff');
+    expect(clicked.href).toContain('download=1');
+    // The name they gave it, not the one storage gave it.
+    expect(clicked.download).toBe('traffic light.jff');
+  });
+
+  it('offers no actions at all for an attempt whose file is gone', async () => {
+    // Nothing to download and nothing to preview, so the menu is absent rather than present
+    // with a dead item in it.
+    render(<ProblemWorkspace {...baseProps} submissions={[{ ...submission, fileName: null }]} />);
+
+    expect(screen.queryByRole('button', { name: 'Attempt actions' })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The two things on this page that fold away. Both default the way they do for a reason: the
+ * discussion is open because feedback is what a student came for, and the group is closed
+ * because the member count in its heading answers the usual question on its own.
+ */
+describe('the panels that collapse', () => {
+  it('starts with the discussion open and closes it on request', async () => {
+    render(<ProblemWorkspace {...baseProps} />);
+
+    const toggle = screen.getByRole('button', { name: 'Collapse discussion' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Expand discussion' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
+  it('starts with the group members closed and opens them on request', async () => {
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        isGroupWork
+        group={{ id: 'g1', name: 'Team Turing' }}
+        groupMembers={[{ id: 'u2', firstName: 'Ada', lastName: 'Lovelace' }]}
+        subjectName="You"
+      />,
+    );
+
+    const toggle = screen.getByRole('button', { name: 'Expand members' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Collapse members' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByText('You, Ada Lovelace')).toBeVisible();
   });
 });

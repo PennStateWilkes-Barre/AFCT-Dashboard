@@ -6,6 +6,7 @@ import { effectiveMaxSubmissions } from '@/lib/submission-limits';
 import { discloseSubmissionFeedback, feedbackVisibilityMap } from '@/lib/feedback-visibility';
 import { isMissingZero, submittedKey } from '@/lib/missing-work';
 import { withCourseAuth } from '@/lib/api/with-auth';
+import { logThrottledView } from '@/lib/api/activity';
 
 /**
  * Everything the caller needs to see their own work on an assignment, grouped by
@@ -52,7 +53,7 @@ function submitterName(
 }
 
 export const GET = withCourseAuth(
-  async (_req, ctx, { user, courseId }) => {
+  async (req, ctx, { user, courseId }) => {
     const { aid: assignmentId } = await ctx.params;
     const userId = user.id;
 
@@ -358,6 +359,51 @@ export const GET = withCourseAuth(
       const assignmentGrade = hasAnyGrade
         ? gradesList.reduce((sum: number, grade) => sum + (grade ?? 0), 0)
         : null;
+
+      /**
+       * That this student was shown feedback somebody wrote to them.
+       *
+       * RQ1 and RQ2 are about what students do with feedback, and the log could not answer
+       * "did they ever look at it": a student reading their own record is not a disclosure,
+       * so nothing on this path was recorded (see the note on `withCourseAuth`, which has no
+       * success-logging option at all). This is instrumentation, deliberately narrow.
+       *
+       * Only when there is something of somebody else's to read. A student opening a problem
+       * nobody has written on has reviewed nothing, and a row saying otherwise would be noise
+       * in the one place the study has to trust.
+       *
+       * Throttled per assignment: this route is refetched on a 30-second stale time and again
+       * after the student posts a comment, so a row per request would measure polling rather
+       * than reading. `viewKey` is what separates two assignments in the same course.
+       *
+       * What it does NOT say: that they read the words. The panel is open by default, so this
+       * records "the page put staff comments in front of them", which is the strongest claim
+       * a server-side signal can make. Nor does it cover the evaluator's feedback, which the
+       * native client serves from `/api/client/v1/submissions` without ever asking this route.
+       */
+      const commentsFromOthers = comments.filter((c) => c.author.id !== userId);
+      if (commentsFromOthers.length > 0) {
+        // A system admin commenting has no roster row in the course, so their role is null and
+        // they count as "somebody else" but not as course staff. Both counts are recorded
+        // rather than one, so the analysis picks its own definition instead of inheriting this
+        // one.
+        const staffComments = commentsFromOthers.filter(
+          (c) => c.roster?.role === 'FACULTY' || c.roster?.role === 'TA',
+        );
+        await logThrottledView(req, {
+          userId,
+          action: 'STUDENT_COMMENTS_VIEWED',
+          category: 'ASSIGNMENT',
+          courseId,
+          assignmentId,
+          key: assignmentId,
+          metadata: {
+            commentCount: commentsFromOthers.length,
+            staffCommentCount: staffComments.length,
+            problemsWithComments: new Set(commentsFromOthers.map((c) => c.problemId)).size,
+          },
+        });
+      }
 
       return NextResponse.json({
         assignmentGrade,

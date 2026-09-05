@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withCourseAuth } from '@/lib/api/with-auth';
+import { logThrottledView } from '@/lib/api/activity';
 import { getStudentCourseAssignments } from '@/lib/student-assignments';
 
 /**
@@ -23,7 +24,7 @@ import { getStudentCourseAssignments } from '@/lib/student-assignments';
  *   500: { description: Server error. }
  */
 export const GET = withCourseAuth(
-  async (_req, _ctx, { user, courseId }) => {
+  async (req, _ctx, { user, courseId }) => {
     try {
       const assignments = await getStudentCourseAssignments(user.id, courseId);
 
@@ -63,6 +64,24 @@ export const GET = withCourseAuth(
             missing: p.missing ?? false,
           })),
         };
+      });
+
+      // That they looked at their grades. The read is their own record, so it is not a
+      // disclosure and was never logged; RQ1 and RQ2 ask what students do with feedback, and
+      // "did they check" is part of that. Throttled per course through the same helper the
+      // staff-facing views use.
+      await logThrottledView(req, {
+        userId: user.id,
+        action: 'STUDENT_GRADES_VIEWED',
+        category: 'GRADE',
+        courseId,
+        key: courseId,
+        metadata: {
+          assignmentCount: payload.length,
+          // How much of it was actually marked, which separates checking a page full of
+          // grades from checking one that has nothing on it yet.
+          gradedCount: payload.filter((a) => a.grade !== null).length,
+        },
       });
 
       return NextResponse.json({ assignments: payload });

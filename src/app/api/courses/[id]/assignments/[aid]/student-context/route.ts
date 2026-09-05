@@ -6,7 +6,7 @@ import { effectiveMaxSubmissions } from '@/lib/submission-limits';
 import { discloseSubmissionFeedback, feedbackVisibilityMap } from '@/lib/feedback-visibility';
 import { isMissingZero, submittedKey } from '@/lib/missing-work';
 import { withCourseAuth } from '@/lib/api/with-auth';
-import { logThrottledView } from '@/lib/api/activity';
+import { logStudentFeedbackViewed, logThrottledView } from '@/lib/api/activity';
 
 /**
  * Everything the caller needs to see their own work on an assignment, grouped by
@@ -381,7 +381,15 @@ export const GET = withCourseAuth(
        * a server-side signal can make. Nor does it cover the evaluator's feedback, which the
        * native client serves from `/api/client/v1/submissions` without ever asking this route.
        */
+      // Three separate questions the study asks of the same page load, so three events rather
+      // than one with flags: did they open the assignment at all, was the evaluator's feedback
+      // in front of them, and had somebody written to them. Each throttles on its own action,
+      // and they run together so a hot read path pays one round trip rather than three.
+      const feedbackShown = Object.values(submissionsByProblem)
+        .flat()
+        .filter((sub) => sub.feedbackVisible && sub.feedback).length;
       const commentsFromOthers = comments.filter((c) => c.author.id !== userId);
+      let commentEvent: Promise<void> | null = null;
       if (commentsFromOthers.length > 0) {
         // A system admin commenting has no roster row in the course, so their role is null and
         // they count as "somebody else" but not as course staff. Both counts are recorded
@@ -390,7 +398,7 @@ export const GET = withCourseAuth(
         const staffComments = commentsFromOthers.filter(
           (c) => c.roster?.role === 'FACULTY' || c.roster?.role === 'TA',
         );
-        await logThrottledView(req, {
+        commentEvent = logThrottledView(req, {
           userId,
           action: 'STUDENT_COMMENTS_VIEWED',
           category: 'ASSIGNMENT',
@@ -404,6 +412,35 @@ export const GET = withCourseAuth(
           },
         });
       }
+
+      await Promise.all([
+        // The engagement baseline, recorded whether or not there was anything to read. "They
+        // opened it and there was nothing there" is a finding, and only an unconditional event
+        // can distinguish it from not having looked.
+        //
+        // The assignment, not the problem: choosing a problem on this page is local state over
+        // one payload and never reaches the server, so problem-level engagement exists only in
+        // the native client, which fetches each problem's attempts as it goes.
+        logThrottledView(req, {
+          userId,
+          action: 'STUDENT_ASSIGNMENT_OPENED',
+          category: 'ASSIGNMENT',
+          courseId,
+          assignmentId,
+          key: assignmentId,
+          metadata: { problemCount: problemIds.length },
+        }),
+        feedbackShown > 0
+          ? logStudentFeedbackViewed(req, {
+              userId,
+              courseId,
+              assignmentId,
+              surface: 'web',
+              withFeedback: feedbackShown,
+            })
+          : null,
+        commentEvent,
+      ]);
 
       return NextResponse.json({
         assignmentGrade,

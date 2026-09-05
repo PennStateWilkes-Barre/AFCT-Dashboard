@@ -1,27 +1,8 @@
 'use client';
 
-import type { ColumnDef } from '@tanstack/react-table';
 import { useState } from 'react';
-import {
-  ChevronUp,
-  ClipboardCheck,
-  Download,
-  MoreHorizontal,
-  FileText,
-  MessageSquare,
-  RotateCcw,
-  Users,
-} from 'lucide-react';
+import { ChevronUp, ClipboardCheck, FileText, MessageSquare, Users } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu';
-import { StatusBadge } from '@/components/ui/status-badge';
 import { DataTable } from '@/components/ui/data-table';
 import ProblemHeader from '@/components/ProblemHeader';
 import ProblemGradeForm from '@/components/ProblemGradeForm';
@@ -32,13 +13,11 @@ import type { GradeAudience } from '@/components/ProblemGradeForm';
 import type { Comment as DiscussionComment, CommentAudience } from '@/components/DiscussionPanel';
 import type { StudentProblemComment } from '@/lib/assignment-details';
 import type { ProblemSubmission } from '@/lib/problem-submission';
+import { buildSubmissionColumns } from '@/components/assignments/submission-columns';
 import { apiPaths } from '@/lib/api-paths';
-import { getTimingStatusChip, getReviewStatusChip, type StatusChip } from '@/lib/submission-status';
-import { formatDateInTimeZone, formatTimeInTimeZone } from '@/lib/date-format';
+import { getReviewStatusChip } from '@/lib/submission-status';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { GradeSyncCard } from '@/components/assignments/GradeSyncCard';
-import { TEXT_LINK_CLASS } from '@/lib/link-styles';
-import { cn } from '@/lib/utils';
 import { FEEDBACK_WITHHELD_MESSAGE } from '@/lib/feedback-visibility';
 
 type Problem = {
@@ -245,211 +224,21 @@ export default function ProblemWorkspace({
     link.click();
   };
 
-  // Status (timing) and Result (evaluator verdict) each render one of these. StatusBadge
-  // takes its colour from the chip's own variant, so the label and its colour are decided in
-  // lib/submission-status rather than per table, and a dot conveying meaning by colour alone
-  // is replaced by a badge whose text carries it.
-  const renderStatusChip = (chip: StatusChip) => <StatusBadge chip={chip} />;
-
-  // Built inline so each cell's action buttons capture the current handlers/flags.
-  // Status and Result expose a string accessor + multiselect filter so DataTable's own
-  // Filters popover replaces the previous custom status chips.
-  const submissionColumns: ColumnDef<ProblemSubmission>[] = [
-    {
-      id: 'attempt',
-      header: 'Attempt',
-      accessorFn: (s) => attemptNumbers.get(s.id) ?? 0,
-      cell: ({ row }) => (
-        <span className="tabular-nums">{attemptNumbers.get(row.original.id) ?? '—'}</span>
-      ),
-      meta: { align: 'center' },
-    },
-    {
-      id: 'submitted',
-      header: 'Submitted',
-      accessorFn: (s) => new Date(s.submittedAt).getTime(),
-      cell: ({ row }) => {
-        const submission = row.original;
-        const submittedAt = new Date(submission.submittedAt);
-        const isLate =
-          submission.status?.toLowerCase() === 'late' ||
-          (hasValidDueDate && submittedAt.getTime() > dueDate!.getTime());
-        return (
-          <div className="flex flex-col gap-1">
-            <span>{formatDateInTimeZone(submittedAt, timezone)}</span>
-            <span className="text-muted-foreground text-xs">
-              {formatTimeInTimeZone(submittedAt, timezone, hour12)}
-            </span>
-            {isLate ? (
-              <Badge variant="warning" className="mt-1">
-                Late
-              </Badge>
-            ) : null}
-          </div>
-        );
-      },
-      meta: { priority: 1 },
-    },
-    ...(showSubmitter
-      ? [
-          {
-            id: 'submittedBy',
-            header: 'Submitted by',
-            accessorFn: (s: ProblemSubmission) =>
-              typeof s.submittedBy === 'string' ? s.submittedBy : '',
-            cell: ({ row }: { row: { original: ProblemSubmission } }) =>
-              typeof row.original.submittedBy === 'string' ? row.original.submittedBy : '—',
-            meta: { priority: 2 },
-          } as ColumnDef<ProblemSubmission>,
-        ]
-      : []),
-    {
-      id: 'status',
-      header: 'Status',
-      accessorFn: (s) => getTimingStatusChip(s, hasValidDueDate, dueDate).label,
-      enableSorting: false,
-      cell: ({ row }) =>
-        renderStatusChip(getTimingStatusChip(row.original, hasValidDueDate, dueDate)),
-      meta: {
-        priority: 1,
-        filterVariant: 'multiselect',
-        filterLabel: 'Status',
-        filterOptions: [
-          { label: 'On time', value: 'On time' },
-          { label: 'Late', value: 'Late' },
-        ],
-      },
-    },
-    {
-      id: 'result',
-      header: 'Result',
-      accessorFn: (s) => getReviewStatusChip(s).label,
-      enableSorting: false,
-      cell: ({ row }) => renderStatusChip(getReviewStatusChip(row.original)),
-      meta: {
-        priority: 1,
-        filterVariant: 'multiselect',
-        filterLabel: 'Result',
-        filterOptions: [
-          { label: 'Pending', value: 'Pending' },
-          { label: 'Processing', value: 'Processing' },
-          { label: 'Failed', value: 'Failed' },
-          { label: 'Correct', value: 'Correct' },
-          { label: 'Incorrect', value: 'Incorrect' },
-        ],
-      },
-    },
-    {
-      id: 'feedback',
-      header: 'Feedback',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const feedback = row.original.feedback;
-        // Withheld and empty are different things, and the dash alone says the wrong one: a
-        // student would read it as the evaluator having had nothing to tell them.
-        if (row.original.feedbackVisible === false)
-          return <span className="text-muted-foreground text-xs">{FEEDBACK_WITHHELD_MESSAGE}</span>;
-        if (!feedback)
-          return (
-            <span className="text-muted-foreground">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No feedback</span>
-            </span>
-          );
-        // TableCell bakes in whitespace-nowrap; override it here so long evaluator
-        // output wraps (and keeps its own line breaks) inside a bounded width.
-        return (
-          <div className="max-w-[28rem] text-xs break-words whitespace-pre-wrap">
-            {String(feedback)}
-          </div>
-        );
-      },
-      /*
-       * Priority 1, not 2.
-       * Priority 2 hides a column below 768px, and this table becomes cards below 640px, so
-       * between those two widths the cell was removed from the page altogether with no card
-       * to fall back on. A student in a half-width window lost the counterexample and the link
-       * to their own submission, with nothing saying either existed. This table carries a
-       * handful of attempts for one problem, so it has the room.
-       */
-      meta: { priority: 1 },
-    },
-    {
-      id: 'file',
-      header: 'File',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const submission = row.original;
-        if (!submission.fileName)
-          return (
-            <span className="text-muted-foreground">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No file</span>
-            </span>
-          );
-        return (
-          // The name previews; everything else lives in the row's menu.
-          <button
-            type="button"
-            onClick={() => onViewSubmission(submission)}
-            className={cn(TEXT_LINK_CLASS, 'break-all')}
-            title={`Preview ${submission.originalFileName || 'submission'}`}
-          >
-            {submission.originalFileName || submission.fileName}
-          </button>
-        );
-      },
-      /*
-       * Priority 1, not 2.
-       * Priority 2 hides a column below 768px, and this table becomes cards below 640px, so
-       * between those two widths the cell was removed from the page altogether with no card
-       * to fall back on. A student in a half-width window lost the counterexample and the link
-       * to their own submission, with nothing saying either existed. This table carries a
-       * handful of attempts for one problem, so it has the room.
-       */
-      meta: { priority: 1 },
-    },
-    {
-      id: 'actions',
-      header: '',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const submission = row.original;
-        if (!submission.fileName) return null;
-        // A re-run while one is already queued or running would do nothing useful, so the
-        // item is disabled rather than hidden: the action still reads as available in
-        // general, just not right now.
-        const pendingOrProcessing =
-          submission.status?.toLowerCase() === 'pending' ||
-          submission.status?.toLowerCase() === 'processing';
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Attempt actions">
-                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleDownload(submission)}>
-                <Download className="h-4 w-4" aria-hidden="true" />
-                Download file
-              </DropdownMenuItem>
-              {isPrivilegedUser ? (
-                <DropdownMenuItem
-                  disabled={pendingOrProcessing}
-                  onClick={() => onRerunSubmission?.(submission)}
-                >
-                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  Rerun the autograder
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        );
-      },
-      meta: { align: 'right' },
-    },
-  ];
+  // The attempts table's columns, in their own file: 196 lines of column definitions were the
+  // bulk of this one, and every other table here keeps them in a `*-columns.tsx` beside it.
+  // Rebuilt each render on purpose, so an action cell never holds a stale handler.
+  const submissionColumns = buildSubmissionColumns({
+    timeZone: timezone,
+    hour12,
+    dueDate,
+    hasValidDueDate,
+    attemptNumbers,
+    isPrivilegedUser,
+    showSubmitter,
+    onViewSubmission,
+    onDownload: handleDownload,
+    onRerunSubmission,
+  });
 
   // Named because two places ask it: whether the grade card exists at all, and whether its
   // first section needs a rule under it.

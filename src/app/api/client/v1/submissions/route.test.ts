@@ -4,6 +4,7 @@ const resolveMock = vi.hoisted(() => vi.fn());
 const createSubmissionMock = vi.hoisted(() => vi.fn());
 const canAccessMock = vi.hoisted(() => vi.fn());
 const canManageMock = vi.hoisted(() => vi.fn());
+const feedbackViewedMock = vi.hoisted(() => vi.fn());
 const prismaMock = vi.hoisted(() => ({
   submission: { findMany: vi.fn() },
   assignment: { findUnique: vi.fn() },
@@ -29,6 +30,10 @@ vi.mock('@/lib/assignment-groups', () => ({
   resolveStudentSubmissionGroupId: resolveGroupMock,
 }));
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/api/activity', () => ({
+  logStudentFeedbackViewed: feedbackViewedMock,
+  logError: vi.fn(),
+}));
 
 import { GET, POST } from './route';
 
@@ -286,5 +291,61 @@ describe('GET /api/client/v1/submissions (history), feedback visibility', () => 
       feedback: 'The file could not be parsed.',
       feedbackVisible: true,
     });
+  });
+});
+
+/**
+ * The client is where most students read their feedback, and it never calls the web routes,
+ * so without this the study would only ever see the browser.
+ */
+describe('recording that the client showed a student their feedback', () => {
+  const makeGet = (query: string) =>
+    new Request(`http://localhost/api/client/v1/submissions?${query}`, {
+      headers: { authorization: 'Bearer good' },
+    });
+
+  const listOnce = async (showFeedback: boolean, over: Record<string, unknown> = {}) => {
+    prismaMock.assignmentProblem.findUnique.mockResolvedValue({
+      assignmentId: 'a1',
+      showFeedback,
+    });
+    prismaMock.submission.findMany.mockResolvedValue([
+      {
+        id: 's1',
+        status: 'COMPLETED',
+        correct: false,
+        submittedAt: new Date('2026-03-01T10:00:00.000Z'),
+        originalFileName: 'mine.jff',
+        feedback: 'accepts "01" but should reject it',
+        student: { firstName: 'Ada', lastName: 'Lovelace' },
+        ...over,
+      },
+    ]);
+    const res = await GET(makeGet('assignmentId=a1&problemId=p1'), ctx);
+    expect(res.status).toBe(200);
+  };
+
+  it('records the view, keyed to the one problem it asked about', async () => {
+    await listOnce(true);
+
+    expect(feedbackViewedMock).toHaveBeenCalledTimes(1);
+    expect(feedbackViewedMock.mock.calls[0][1]).toMatchObject({
+      userId: 'u1',
+      surface: 'client',
+      withFeedback: 1,
+      problemId: 'p1',
+    });
+  });
+
+  it('records nothing when the instructor has turned feedback off', async () => {
+    await listOnce(false);
+
+    expect(feedbackViewedMock).not.toHaveBeenCalled();
+  });
+
+  it('records nothing while the evaluator has not answered yet', async () => {
+    await listOnce(true, { status: 'PENDING', feedback: null });
+
+    expect(feedbackViewedMock).not.toHaveBeenCalled();
   });
 });

@@ -234,7 +234,12 @@ export function StudentGradesTable({ courseId }: { courseId: string }) {
         // The Assignments tab next door is a DataTable, and this is what makes the two tabs
         // read as one interface rather than two tables that happen to sit on one page.
         <div className="overflow-hidden rounded-md border bg-[var(--table-background)]">
-          <Table aria-labelledby="student-grades-title">
+          {/* Named, not labelled by the heading above it. The Table primitive turns a named
+              table into a focusable `role="region"` so a wide one can be scrolled from the
+              keyboard, and pointing that at the section's own heading gave two nested
+              landmarks the same name. Every DataTable names its table this way for the same
+              reason. */}
+          <Table aria-label="Grades table">
             {/* Deliberate proportions. Left to itself the table spreads five columns over the
                 full width and the grade, which is the thing being read, ends up a screen away
                 from the assignment it belongs to. A hidden column contributes no cells, so a

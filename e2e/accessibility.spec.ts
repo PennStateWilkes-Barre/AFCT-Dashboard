@@ -563,6 +563,29 @@ test.describe('accessibility: surfaces added since the last audit', () => {
     const { violations } = await scan(page);
     expect(violations, summarize(violations)).toEqual([]);
   });
+
+  /**
+   * The two tabs of a student's course page. Both were card lists until recently and are now
+   * tables, one built on the shared DataTable and one hand-rolled for its parent/child rows,
+   * and neither had ever been scanned.
+   */
+  test('the student assignments tab', async ({ page }) => {
+    await signIn(page, 'student');
+    await page.goto(`/dashboard/courses/${COURSE}?tab=assignments`);
+    await expect(page.getByRole('heading', { name: 'Assignments' })).toBeVisible({
+      timeout: 60_000,
+    });
+    const { violations } = await scan(page);
+    expect(violations, summarize(violations)).toEqual([]);
+  });
+
+  test('the student grades tab', async ({ page }) => {
+    await signIn(page, 'student');
+    await page.goto(`/dashboard/courses/${COURSE}?tab=grades`);
+    await expect(page.getByRole('heading', { name: 'Grades' })).toBeVisible({ timeout: 60_000 });
+    const { violations } = await scan(page);
+    expect(violations, summarize(violations)).toEqual([]);
+  });
 });
 
 /**

@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const authMock = vi.hoisted(() => vi.fn());
 const contentGateMock = vi.hoisted(() => vi.fn());
+const throttledViewMock = vi.hoisted(() => vi.fn());
+const feedbackViewedMock = vi.hoisted(() => vi.fn());
 const prismaMock = vi.hoisted(() => ({
   assignment: { findFirst: vi.fn() },
   roster: { findFirst: vi.fn() },
@@ -15,6 +17,11 @@ const prismaMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/auth', () => ({ auth: authMock }));
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/api/activity', () => ({
+  logThrottledView: throttledViewMock,
+  logStudentFeedbackViewed: feedbackViewedMock,
+  VIEW_THROTTLE_MS: 600_000,
+}));
 vi.mock('@/lib/assignment-student-gate', () => ({
   resolveStudentContentGate: contentGateMock,
 }));
@@ -718,5 +725,211 @@ describe('GET student context, comments on group work', () => {
 
     // Never an unscoped `aboutGroupId` clause: that would hand them another group's feedback.
     expect(whereOfCommentQuery().OR).toHaveLength(2);
+  });
+});
+
+/**
+ * Whether a student was shown feedback somebody wrote to them.
+ *
+ * Instrumentation for RQ1/RQ2, which ask what students do with feedback and which the log
+ * could not answer: a student reading their own record is not a disclosure, so this path
+ * recorded nothing at all.
+ */
+describe('recording that a student was shown comments', () => {
+  const comment = (over: Record<string, unknown> = {}) => ({
+    id: 'cm1',
+    content: 'Look at your transition on b.',
+    createdAt: new Date('2026-03-02T10:00:00.000Z'),
+    problemId: 'p1',
+    author: { id: 'prof', firstName: 'Ada', lastName: 'L' },
+    roster: { role: 'FACULTY' },
+    ...over,
+  });
+
+  const setup = (comments: unknown[]) => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      id: 'r1',
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      isPublished: true,
+      groupSetId: null,
+      missingWorkIsZero: false,
+      dueDate: new Date('2026-03-05T00:00:00.000Z'),
+      unlockAt: null,
+      lateCutoff: null,
+      allowLateSubmissions: false,
+      assignedToEveryone: true,
+      course: { isArchived: false },
+      overrides: [],
+      problems: [
+        {
+          problemId: 'p1',
+          maxSubmissions: 3,
+          showFeedback: true,
+          maxPoints: 10,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+    prismaMock.submission.findMany.mockResolvedValue([]);
+    prismaMock.comment.findMany.mockResolvedValue(comments);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+  };
+
+  const read = async () => {
+    const res = await GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+    expect(res.status).toBe(200);
+    return res.json();
+  };
+
+  it('records the view when staff have written to them', async () => {
+    setup([comment()]);
+
+    await read();
+
+    const entry = throttledViewMock.mock.calls.find(
+      (c) => c[1].action === 'STUDENT_COMMENTS_VIEWED',
+    )![1];
+    expect(entry).toMatchObject({
+      userId: 'u1',
+      action: 'STUDENT_COMMENTS_VIEWED',
+      courseId: 'c1',
+      assignmentId: 'a1',
+      // Keyed per assignment, or two assignments in one course would share a throttle window
+      // and the second would go unrecorded.
+      key: 'a1',
+    });
+    expect(entry.metadata).toMatchObject({ commentCount: 1, staffCommentCount: 1 });
+  });
+
+  const actionsLogged = () => throttledViewMock.mock.calls.map((c) => c[1].action);
+
+  it('records the assignment as opened even when there is nothing to read', async () => {
+    setup([]);
+
+    await read();
+
+    // The engagement baseline: "they opened it and there was nothing there" is a finding, and
+    // only an unconditional event separates it from not having looked.
+    expect(actionsLogged()).toEqual(['STUDENT_ASSIGNMENT_OPENED']);
+  });
+
+  it("does not count the student's own comments as feedback to them", async () => {
+    // Their own question, sitting on the problem, is not somebody writing to them.
+    setup([comment({ author: { id: 'u1', firstName: 'Stu', lastName: 'Dent' }, roster: null })]);
+
+    await read();
+
+    expect(actionsLogged()).not.toContain('STUDENT_COMMENTS_VIEWED');
+  });
+
+  it('separates staff comments from other people writing to them', async () => {
+    // A system admin has no roster row in the course, so they are somebody else but not staff.
+    setup([
+      comment(),
+      comment({ id: 'cm2', author: { id: 'root', firstName: 'A', lastName: 'D' }, roster: null }),
+    ]);
+
+    await read();
+
+    expect(
+      throttledViewMock.mock.calls.find((c) => c[1].action === 'STUDENT_COMMENTS_VIEWED')![1]
+        .metadata,
+    ).toMatchObject({ commentCount: 2, staffCommentCount: 1 });
+  });
+});
+
+/**
+ * That the evaluator's feedback was in front of them.
+ *
+ * Recorded from here and from the native client's own submissions route, under one action
+ * with a `surface`, because students read feedback in both and the client never calls this.
+ */
+describe('recording that a student was shown evaluator feedback', () => {
+  const setup = (submissions: unknown[], showFeedback = true) => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      id: 'r1',
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      isPublished: true,
+      groupSetId: null,
+      missingWorkIsZero: false,
+      dueDate: new Date('2026-03-05T00:00:00.000Z'),
+      unlockAt: null,
+      lateCutoff: null,
+      allowLateSubmissions: false,
+      assignedToEveryone: true,
+      course: { isArchived: false },
+      overrides: [],
+      problems: [
+        {
+          problemId: 'p1',
+          maxSubmissions: 3,
+          showFeedback,
+          maxPoints: 10,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+    prismaMock.submission.findMany.mockResolvedValue(submissions);
+    prismaMock.comment.findMany.mockResolvedValue([]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+  };
+
+  const graded = (over: Record<string, unknown> = {}) => ({
+    id: 's1',
+    submittedAt: new Date('2026-03-01T10:00:00.000Z'),
+    feedback: 'Rejected the string aab.',
+    correct: false,
+    fileName: 'a.jff',
+    originalFileName: 'a.jff',
+    problemId: 'p1',
+    status: 'COMPLETED',
+    student: { firstName: 'Stu', lastName: 'Dent' },
+    ...over,
+  });
+
+  const read = async () =>
+    GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+
+  it('records it when the problem shows feedback and there is some', async () => {
+    setup([graded()]);
+
+    await read();
+
+    expect(feedbackViewedMock).toHaveBeenCalledTimes(1);
+    expect(feedbackViewedMock.mock.calls[0][1]).toMatchObject({
+      userId: 'u1',
+      courseId: 'c1',
+      assignmentId: 'a1',
+      surface: 'web',
+      withFeedback: 1,
+    });
+  });
+
+  it('records nothing when the instructor has turned feedback off', async () => {
+    // The page was read and taught them nothing; counting it as feedback-viewing would put
+    // exactly the wrong number in front of whoever analyses this.
+    setup([graded()], false);
+
+    await read();
+
+    expect(feedbackViewedMock).not.toHaveBeenCalled();
+  });
+
+  it('records nothing while the attempt is still waiting on the evaluator', async () => {
+    setup([graded({ status: 'PENDING', feedback: null })]);
+
+    await read();
+
+    expect(feedbackViewedMock).not.toHaveBeenCalled();
   });
 });

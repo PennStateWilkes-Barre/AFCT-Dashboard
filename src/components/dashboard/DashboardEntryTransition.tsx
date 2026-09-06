@@ -4,10 +4,10 @@ import { LOGIN_TRANSITION_KEY } from '@/lib/login-transition';
 /**
  * The dashboard half of the sign-in transition.
  *
- * The login page covers the screen with a cobalt-to-navy wipe and then navigates. This puts
- * the same navy back down on the other side of that load, fades it out, and brings the sidebar,
- * the header and the page in behind it. Everything it animates is plain CSS, in globals.css
- * plus the later timing refinements in login-transition-tuning.css.
+ * The login page now fades to the AFCT navy before the full navigation. This puts the same
+ * navy back down on the other side of that load and fades it away, so the dashboard is revealed
+ * as one stable composition instead of arriving as several animated regions. The matching
+ * colours are what hide the full page navigation between the two halves.
  *
  * **Why an inline script and not a client component.** The flag lives in sessionStorage, which
  * a server render cannot see, so a React component could only discover it once the dashboard
@@ -25,11 +25,10 @@ import { LOGIN_TRANSITION_KEY } from '@/lib/login-transition';
  */
 
 /**
- * Cleanup happens after the slowest tuned entrance finishes. This is deliberately a little
- * longer than the visible motion so removing the attribute can never snap an element out of
- * its final animation frame on a busy browser.
+ * The visible fade is 520ms. Keep the attribute around a little longer than that so a busy
+ * browser cannot remove the transition state before the overlay reaches its final frame.
  */
-const ENTRY_TOTAL_MS = 920;
+const ENTRY_TOTAL_MS = 620;
 
 export const DASHBOARD_ENTRY_SCRIPT = `(function(){try{
 if(sessionStorage.getItem(${JSON.stringify(LOGIN_TRANSITION_KEY)})!=='true')return;

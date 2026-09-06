@@ -7,7 +7,7 @@ import { LOGIN_TRANSITION_KEY } from '@/lib/login-transition';
  * The login page covers the screen with a cobalt-to-navy wipe and then navigates. This puts
  * the same navy back down on the other side of that load, fades it out, and brings the sidebar,
  * the header and the page in behind it. Everything it animates is plain CSS, in globals.css
- * under "Sign-in transition".
+ * plus the later timing refinements in login-transition-tuning.css.
  *
  * **Why an inline script and not a client component.** The flag lives in sessionStorage, which
  * a server render cannot see, so a React component could only discover it once the dashboard
@@ -24,8 +24,12 @@ import { LOGIN_TRANSITION_KEY } from '@/lib/login-transition';
  * key and returns, and no client JavaScript at all.
  */
 
-/** Kept in one place so the timings here and in globals.css cannot drift apart. */
-const ENTRY_TOTAL_MS = 500;
+/**
+ * Cleanup happens after the slowest tuned entrance finishes. This is deliberately a little
+ * longer than the visible motion so removing the attribute can never snap an element out of
+ * its final animation frame on a busy browser.
+ */
+const ENTRY_TOTAL_MS = 850;
 
 export const DASHBOARD_ENTRY_SCRIPT = `(function(){try{
 if(sessionStorage.getItem(${JSON.stringify(LOGIN_TRANSITION_KEY)})!=='true')return;

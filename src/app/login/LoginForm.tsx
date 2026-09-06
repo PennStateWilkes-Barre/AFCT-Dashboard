@@ -509,9 +509,20 @@ export default function LoginForm({
             the signup form overflows the screen the page grows by both, and the bottom half is
             what leaves room for the drawer hanging off the card's foot. Symmetric so the card
             stays where it was: padding on one side only would move it. */}
+        {/* Centred in the leftover height, then lifted a little from xl up. The reference is
+            the "Stronger Learning" headline across the page, not the AFCT lockup above it: two
+            things starting on roughly the same line is what ties the halves of the screen
+            together, and the lockup is too high to be that line.
+
+            A translate rather than a margin or a padding, so it stays a purely visual nudge:
+            nothing reflows, the block still occupies the space it centred into, and the card
+            cannot start pushing the development strip around on a short window. Left alone at
+            lg, where both height and width are tighter and centred is simply the safer place
+            to be. */}
         <div
           className={cn(
             'flex w-full max-w-[680px] flex-1 flex-col justify-center',
+            'xl:-translate-y-3 2xl:-translate-y-4',
             isDev && 'py-20',
           )}
         >

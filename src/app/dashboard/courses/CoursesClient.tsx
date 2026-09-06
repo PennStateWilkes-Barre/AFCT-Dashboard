@@ -25,6 +25,7 @@ import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { apiPaths } from '@/lib/api-paths';
 import type { CourseListItem } from '@/lib/courses-list';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
+import { queryKeys } from '@/lib/query-keys';
 
 type CourseWithRoster = CourseListItem;
 
@@ -61,7 +62,7 @@ export default function CoursesClient({ initialCourses }: { initialCourses: Cour
   // archived list and the sidebar nav, so invalidate the whole ['courses'] prefix rather
   // than only this table's own query -- the sidebar used to keep showing the stale set.
   const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['courses'] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.courses.all() });
   }, [queryClient]);
 
   const columnsMemo = useMemo(

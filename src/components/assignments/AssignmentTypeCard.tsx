@@ -10,6 +10,7 @@ import { showToast } from '@/lib/toast';
 import { apiClient, ApiError } from '@/lib/api/fetch-client';
 import { apiPaths } from '@/lib/api-paths';
 import type { GroupSetSummaryDTO } from '@/lib/group-set-service';
+import { queryKeys } from '@/lib/query-keys';
 
 const TYPE_OPTIONS = [
   {
@@ -61,7 +62,7 @@ export function AssignmentTypeCard({
   }, [groupSetId]);
 
   const groupSetsQuery = useQuery({
-    queryKey: ['course', courseId, 'group-sets'],
+    queryKey: queryKeys.course.groupSets(courseId),
     queryFn: () => apiClient.get<GroupSetSummaryDTO[]>(apiPaths.courseGroupSets(courseId)),
     staleTime: 30_000,
   });

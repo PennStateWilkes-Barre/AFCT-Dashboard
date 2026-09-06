@@ -15,6 +15,7 @@ import { formatDateInTimeZone, formatTimeInTimeZone } from '@/lib/date-format';
 import { TEXT_LINK_CLASS } from '@/lib/link-styles';
 import { MISSING_WORK_LABEL } from '@/lib/missing-work';
 import { cn } from '@/lib/utils';
+import { queryKeys } from '@/lib/query-keys';
 
 type StudentGradesProblem = {
   id: string;
@@ -189,7 +190,7 @@ export function StudentGradesTable({ courseId }: { courseId: string }) {
   const [expanded, toggle] = usePersistentExpanded(courseId);
 
   const gradesQuery = useQuery({
-    queryKey: ['course', courseId, 'student-grades'],
+    queryKey: queryKeys.course.studentGrades(courseId),
     queryFn: async () => {
       const res = await fetch(apiPaths.courseStudentGrades(courseId));
       if (!res.ok) {

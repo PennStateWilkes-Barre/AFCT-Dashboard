@@ -21,6 +21,7 @@ import {
 import { SettingsSection, SETTINGS_COMPACT } from '@/components/settings/settings-layout';
 import { COMMON_TIMEZONES, formatTimezoneLabel } from '@/lib/timezones';
 import { apiPaths } from '@/lib/api-paths';
+import { queryKeys } from '@/lib/query-keys';
 
 // Sentinel for the "follow my device/system" choice. Radix Select forbids an
 // empty-string item value, so we use a token and translate it to '' on submit;
@@ -120,7 +121,7 @@ export function ProfileSection({ user, onSave }: ProfileSectionProps) {
 
       // The display-timezone hook reads /api/me through this cached key; refetch
       // it so a changed (or cleared) timezone takes effect without a reload.
-      await queryClient.invalidateQueries({ queryKey: ['profile'] });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.profile() });
 
       showToast.updated('Profile');
     } catch {

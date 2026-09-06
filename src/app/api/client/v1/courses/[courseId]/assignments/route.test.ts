@@ -170,4 +170,23 @@ describe('whose group memberships the client is told about', () => {
       where: { userId: 'u1' },
     });
   });
+
+  /**
+   * And only about the group sets these assignments actually use. Without that key the client
+   * is handed every group this student is in anywhere, which is a bigger answer than the
+   * question and lets a name from an unrelated course's set reach the label.
+   */
+  it('asks only about the group sets these assignments use', async () => {
+    getAssignmentsMock.mockResolvedValue([
+      assignment({ id: 'grp', groupSetId: 'gs1' }),
+      assignment({ id: 'indiv', groupSetId: null }),
+    ]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([]);
+
+    await GET(makeReq('Bearer good'), ctx);
+
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { userId: 'u1', groupSetId: { in: ['gs1'] } },
+    });
+  });
 });

@@ -74,6 +74,43 @@ export function RotatingAuthAutomaton({
     };
   }, [count]);
 
+  /**
+   * Development only: step through the drawings with the left and right arrow keys.
+   *
+   * There are five of these and one shows every two and a half minutes, so looking at them all
+   * meant waiting ten minutes or editing ROTATION_MS. This is a review aid, so it is compiled
+   * out of production rather than shipped and hidden. Two reasons it should not ship: the
+   * drawing is `aria-hidden` decoration and has no business being interactive for anyone
+   * signing in, and a login page that responds to arrow keys is a surprise, not a feature.
+   *
+   * `process.env.NODE_ENV` is inlined at build time, so the whole effect drops out of a
+   * production bundle rather than sitting there behind a runtime check.
+   */
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production' || count < 2) return;
+
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      // A shortcut of somebody else's, left alone.
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // Never take a keystroke from a field. The sign-in form is on the same screen and arrow
+      // keys move the caret in it, which matters more than flipping a picture.
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest('input, textarea, select, [contenteditable]')
+      ) {
+        return;
+      }
+      // Only once we know it is ours, so the page still scrolls normally otherwise.
+      event.preventDefault();
+      setActive((i) => (i + (event.key === 'ArrowRight' ? 1 : count - 1)) % count);
+    };
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [count]);
+
   // An empty folder is a valid state, and the panel simply has no decoration in it. Rendering
   // the wrapper anyway would leave an empty box holding the space.
   if (count === 0) return null;

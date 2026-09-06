@@ -78,8 +78,14 @@ function GithubMark({ className }: { className?: string }) {
  * Three rows rather than `justify-between`, which is the composition decision here. Pushing an
  * identity block to the top and a footer to the bottom leaves whatever is left as a hole in the
  * middle, and at 1080px that hole was most of the panel. The middle row is the flexible one and
- * the automaton lives in it, so the empty space is distributed around a subject instead of
- * being the subject.
+ * it is where the substance goes, so the empty space is distributed around a subject instead
+ * of being the subject.
+ *
+ * That middle row carries the feature list and the automaton side by side from xl, in a nested
+ * two-column grid. They shared a column once, stacked, and it did not work: the list pushed the
+ * drawing down into a strip above the footer, because the row gave the drawing only the height
+ * the copy had not already spent. Side by side, the drawing is sized by its own column's width
+ * instead, and the row is as tall as the taller of the two rather than the sum.
  *
  * Everything decorative is `aria-hidden` and behind the copy. Hidden below the split
  * breakpoint entirely: a phone gets the compact brand header in `LoginForm` instead, because
@@ -217,68 +223,66 @@ export function LoginBrandPanel({
               is what keeps it secondary.
 
               16px, stepping to 18px only at 2xl. The panel's tight case is height, not width
-              (see the note above about a 720px window at xl), and this block sits directly
-              above the automaton, which takes whatever height is left. Holding 16px at xl
-              keeps two lines here from eating into the drawing on a short laptop screen. */}
+              (see the note above about a 720px window at xl), and everything this block spends
+              comes out of the row below it. Less pressing since the automaton stopped being
+              sized by leftover height, but the footer is still pinned to the bottom and the
+              copy still has to fit above it. */}
           <p className="text-sidebar-muted-foreground mt-5 max-w-lg text-base leading-normal font-normal 2xl:mt-6 2xl:text-lg">
             Learn, teach, and assess computing theory with intelligent feedback and streamlined
             tools.
           </p>
-
-          {/* A real list, marked up as one, with the markers turned off. "No bullet points" is
-              about how it looks; a screen reader still deserves to be told this is three of
-              something before it starts reading them.
-
-              Narrower than the sentence above it (30rem against 32rem), which is what stops the
-              column creeping toward the login card as it gets taller. The icons align to the
-              first line of each row rather than centring on the block, so the three glyphs sit
-              on one vertical rhythm whether a description wraps to one line or two. */}
-          <ul className="mt-8 max-w-[30rem] space-y-5">
-            {FEATURES.map(({ icon: Icon, title, body }) => (
-              <li key={title} className="flex items-start gap-3">
-                {/* A tinted disc rather than a bare glyph: at this size an unframed icon reads
-                    as debris beside text, and the ring gives it an edge without a border that
-                    would compete with the login card's. Both values are alpha on the same
-                    cobalt the footer icons use, so the set stays one family. */}
-                <span
-                  aria-hidden="true"
-                  className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-400/10 ring-1 ring-blue-400/20"
-                >
-                  <Icon className="size-4 text-blue-300" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sidebar-foreground text-sm leading-snug font-semibold">
-                    {title}
-                  </p>
-                  <p className="text-sidebar-muted-foreground mt-1 text-[0.8125rem] leading-snug">
-                    {body}
-                  </p>
-                </div>
-              </li>
-            ))}
-          </ul>
         </div>
       </div>
 
-      {/* The middle row, and the reason the panel is a grid. The automaton takes whatever
-          height is left between the copy and the footer and centres in it, so the same markup
-          is a comfortable composition on a 768px laptop and on a 1440px display. The diagram
-          itself changes every few minutes; see RotatingAuthAutomaton.
+      {/* Row two: the flexible row, and now a shared one. The feature list and the automaton
+          sit side by side from xl, which is the point of this layout. The drawing takes its
+          size from the width of its own column, so it can no longer be squeezed flat by
+          however much vertical space the copy above happens to leave.
 
-          Offset down and to the right, which is a change of intent: it used to be nudged up
-          off centre to claim the air above it, but that air is now the feature list. Sitting
-          low and right puts it in the open corner beside and below that column instead of
-          squarely underneath it. It cannot overlap the copy at any size, because the copy is
-          row one and this is row two; the translate only moves it within its own band. The
-          shift grows with the panel, since a wider panel has more open corner to move into.
+          Below xl there is not enough width for two columns and the drawing is dropped rather
+          than stacked under the list. Stacking it would make the panel taller, which is the
+          thing this arrangement exists to avoid. */}
+      <div className="mt-8 grid min-h-0 items-start gap-8 xl:grid-cols-[minmax(0,1.15fr)_minmax(14rem,0.85fr)]">
+        {/* A real list, marked up as one, with the markers turned off. "No bullet points" is
+            about how it looks; a screen reader still deserves to be told this is three of
+            something before it starts reading them.
 
-          `max-h-full` is what keeps this honest on a short window: the row is
-          `minmax(0,1fr)`, so as the copy above grows the drawing gives up height rather than
-          pushing the footer off the screen. */}
-      <div className="relative flex min-h-0 items-center justify-center">
+            Narrower than the sentence above it (30rem against 32rem), which is what stops the
+            column creeping toward the login card as it gets taller. The icons align to the
+            first line of each row rather than centring on the block, so the three glyphs sit
+            on one vertical rhythm whether a description wraps to one line or two. */}
+        <ul className="max-w-[30rem] space-y-5">
+          {FEATURES.map(({ icon: Icon, title, body }) => (
+            <li key={title} className="flex items-start gap-3">
+              {/* A tinted disc rather than a bare glyph: at this size an unframed icon reads
+                  as debris beside text, and the ring gives it an edge without a border that
+                  would compete with the login card's. Both values are alpha on the same
+                  cobalt the footer icons use, so the set stays one family. */}
+              <span
+                aria-hidden="true"
+                className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-400/10 ring-1 ring-blue-400/20"
+              >
+                <Icon className="size-4 text-blue-300" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-sidebar-foreground text-sm leading-snug font-semibold">
+                  {title}
+                </p>
+                <p className="text-sidebar-muted-foreground mt-1 text-[0.8125rem] leading-snug">
+                  {body}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {/* Centred in its own cell and pushed to the outer edge, away from the copy it must
+            not crowd. `aspect-[444/234]` turns the width into a height, so nothing here reads
+            the row's height and there is no `max-h-full` left to shrink it. The diagram itself
+            changes every few minutes; see RotatingAuthAutomaton. */}
         <RotatingAuthAutomaton
           automata={automata}
-          className="pointer-events-none aspect-[444/234] max-h-full w-[30rem] max-w-[96%] translate-x-4 translate-y-2 text-blue-300 opacity-[0.22] xl:w-[35rem] xl:translate-x-8 2xl:w-[40rem] 2xl:translate-x-12"
+          className="pointer-events-none hidden aspect-[444/234] w-full max-w-[20rem] self-center justify-self-end text-blue-300 opacity-[0.22] xl:block 2xl:max-w-[24rem]"
         />
       </div>
 

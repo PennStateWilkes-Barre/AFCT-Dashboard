@@ -9,6 +9,8 @@ import { showToast } from '@/lib/toast';
 import { LtiPlatformSchema } from '@/schemas/lti';
 import { SettingsAsideCard, SettingsAsideLayout, SettingsSection } from '@/components/settings/settings-layout';
 import { CopyableValue } from './CopyableValue';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '@/lib/query-keys';
 
 type Platform = {
   id: string;
@@ -77,7 +79,6 @@ function ManualConfigurationCard({ base }: { base: string }) {
 
 export function LtiTab({ siteUrl }: { siteUrl: string }) {
   const base = siteUrl.replace(/\/+$/, '');
-  const [platforms, setPlatforms] = useState<Platform[] | null>(null);
   const [draft, setDraft] = useState(EMPTY);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -85,21 +86,35 @@ export function LtiTab({ siteUrl }: { siteUrl: string }) {
   const [link, setLink] = useState<{ url: string; expiresAt: string } | null>(null);
   const [creatingLink, setCreatingLink] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
+  /**
+   * Cached, so switching between System Settings tabs does not re-ask each time, and so a
+   * registration made elsewhere shows up here. Retry-once comes with it: a flaky response
+   * used to leave the list empty with a toast and no second attempt.
+   */
+  const queryClient = useQueryClient();
+  const platformsQuery = useQuery({
+    queryKey: queryKeys.admin.ltiPlatforms(),
+    queryFn: async () => {
       const res = await fetch('/api/admin/lti/platforms');
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { platforms: Platform[] };
-      setPlatforms(data.platforms);
-    } catch {
-      setPlatforms([]);
-      showToast.error('Could not load the registered LMSs. Refresh the page to try again.');
-    }
-  }, []);
+      if (!res.ok) throw new Error('Failed to load platforms');
+      return ((await res.json()) as { platforms: Platform[] }).platforms;
+    },
+  });
+  // `null` is the loading row below; a failed read resolves to an empty list rather than a
+  // permanent spinner, the way the old catch did.
+  const platforms: Platform[] | null = platformsQuery.isPending
+    ? null
+    : (platformsQuery.data ?? []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (platformsQuery.isError)
+      showToast.error('Could not load the registered LMSs. Refresh the page to try again.');
+  }, [platformsQuery.isError]);
+
+  const load = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.admin.ltiPlatforms() }),
+    [queryClient],
+  );
 
   const save = async () => {
     // Checked here with the same schema the route uses, so a typo is caught next to the field

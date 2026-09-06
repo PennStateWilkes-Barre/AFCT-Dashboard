@@ -46,8 +46,24 @@ describe('query key prefixes reach what they are meant to', () => {
       queryKeys.course.activity('c1'),
       queryKeys.course.activityPage('c1', { page: 1 }),
       queryKeys.course.activityFilters('c1'),
+      queryKeys.course.lmsLink('c1'),
     ];
     for (const key of entries) expect(isPrefixOf(prefix, key)).toBe(true);
+  });
+
+  it('me.all covers the account page reads', () => {
+    const prefix = queryKeys.me.all();
+    expect(isPrefixOf(prefix, queryKeys.me.clientTokens())).toBe(true);
+    expect(isPrefixOf(prefix, queryKeys.me.identities())).toBe(true);
+  });
+
+  /**
+   * A deliberate non-relationship. The LTI platform list is its own resource with its own
+   * endpoint, and it sits on a System Settings tab only for where it is drawn: saving a
+   * system setting should not throw the platform list away.
+   */
+  it('keeps the LTI platform list outside the settings prefix', () => {
+    expect(isPrefixOf(queryKeys.admin.settings(), queryKeys.admin.ltiPlatforms())).toBe(false);
   });
 
   it('the gradebook and activity prefixes cover their own pages', () => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { Circle, MousePointer2, type LucideIcon } from 'lucide-react';
+import { Circle, MousePointer, type LucideIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -27,7 +27,7 @@ const TOOLS: ReadonlyArray<{
   {
     tool: 'select',
     label: 'Select',
-    icon: MousePointer2,
+    icon: MousePointer,
     description: 'Select and move elements',
   },
   { tool: 'state', label: 'State', icon: Circle, description: 'Add a state' },

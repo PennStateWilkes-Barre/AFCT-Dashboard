@@ -256,7 +256,11 @@ function PanelFrame({
         // it off the grid, not enough to read as a sheet over the page. Dark mode needs a
         // heavier alpha for the same reading, since a near-black shadow on a near-black ground
         // is no shadow at all. The tool palette opposite uses a lighter version of it.
-        '@[48rem]/viewer:inset-y-3 @[48rem]/viewer:right-3 @[48rem]/viewer:left-auto @[48rem]/viewer:max-h-none @[48rem]/viewer:w-80 @[48rem]/viewer:rounded-lg @[48rem]/viewer:border',
+        // As tall as it needs to be, not as tall as the pane. A state with two transitions was
+        // a full-height column of empty card, which is what a docked sidebar looks like and the
+        // opposite of a panel resting on the drawing. It grows with its contents and stops one
+        // gutter short of the foot, after which the body inside it scrolls.
+        '@[48rem]/viewer:top-3 @[48rem]/viewer:right-3 @[48rem]/viewer:bottom-auto @[48rem]/viewer:left-auto @[48rem]/viewer:max-h-[calc(100%-1.5rem)] @[48rem]/viewer:w-80 @[48rem]/viewer:rounded-lg @[48rem]/viewer:border',
         '@[48rem]/viewer:shadow-[0_4px_18px_rgba(15,23,42,0.10)] @[48rem]/viewer:dark:shadow-[0_4px_18px_rgba(0,0,0,0.45)]',
         // It arrives and leaves as a drawer, from whichever edge it is attached to: up from the
         // foot of the drawing when it is one, in from the right when it is the sidebar. The

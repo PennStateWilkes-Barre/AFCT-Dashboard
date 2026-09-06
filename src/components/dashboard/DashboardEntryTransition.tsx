@@ -31,10 +31,9 @@ export const DASHBOARD_ENTRY_SCRIPT = `(function(){try{
 if(sessionStorage.getItem(${JSON.stringify(LOGIN_TRANSITION_KEY)})!=='true')return;
 sessionStorage.removeItem(${JSON.stringify(LOGIN_TRANSITION_KEY)});
 if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
-var r=document.documentElement,o=document.getElementById('afct-entry-overlay');
+var r=document.documentElement;
 r.setAttribute('data-afct-entering','');
-if(o)o.hidden=false;
-window.setTimeout(function(){r.removeAttribute('data-afct-entering');if(o)o.hidden=true;},${ENTRY_TOTAL_MS});
+window.setTimeout(function(){r.removeAttribute('data-afct-entering');},${ENTRY_TOTAL_MS});
 }catch(e){}})();`;
 
 export default async function DashboardEntryTransition() {
@@ -42,9 +41,10 @@ export default async function DashboardEntryTransition() {
 
   return (
     <>
-      {/* Hidden until the script says otherwise, so a dashboard reached any other way (or with
-          scripts blocked) never shows it. Decorative: it says nothing and takes no focus. */}
-      <div id="afct-entry-overlay" aria-hidden="true" hidden />
+      {/* Always rendered and always identical to what the server sent, so there is nothing
+          for hydration to disagree about. `display: none` until the attribute above says
+          otherwise. Decorative: it says nothing and takes no focus. */}
+      <div id="afct-entry-overlay" aria-hidden="true" />
       <script nonce={nonce} dangerouslySetInnerHTML={{ __html: DASHBOARD_ENTRY_SCRIPT }} />
     </>
   );

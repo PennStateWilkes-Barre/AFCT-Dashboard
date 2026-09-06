@@ -24,7 +24,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   window.sessionStorage.clear();
   document.documentElement.removeAttribute('data-afct-entering');
-  document.body.innerHTML = '<div id="afct-entry-overlay" hidden></div>';
   setReducedMotion(false);
 });
 
@@ -33,14 +32,14 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const overlay = () => document.getElementById('afct-entry-overlay') as HTMLElement;
+// The overlay itself is inert markup: CSS shows it only while this attribute is present, so
+// the attribute is the whole of the script's visible effect.
 const entering = () => document.documentElement.hasAttribute('data-afct-entering');
 
 describe('the dashboard entry script', () => {
   it('does nothing on an ordinary dashboard load', () => {
     runEntryScript();
     expect(entering()).toBe(false);
-    expect(overlay().hidden).toBe(true);
   });
 
   it('plays once when the login page armed it, then clears the flag', () => {
@@ -48,16 +47,13 @@ describe('the dashboard entry script', () => {
 
     runEntryScript();
     expect(entering()).toBe(true);
-    expect(overlay().hidden).toBe(false);
     // Cleared on read: a refresh, a back-navigation or the next visit must not replay it.
     expect(window.sessionStorage.getItem(LOGIN_TRANSITION_KEY)).toBeNull();
 
     // Second load of the dashboard in the same session.
     document.documentElement.removeAttribute('data-afct-entering');
-    overlay().hidden = true;
     runEntryScript();
     expect(entering()).toBe(false);
-    expect(overlay().hidden).toBe(true);
   });
 
   it('tidies up after itself once the animation is over', () => {
@@ -66,7 +62,6 @@ describe('the dashboard entry script', () => {
 
     vi.advanceTimersByTime(1000);
     expect(entering()).toBe(false);
-    expect(overlay().hidden).toBe(true);
   });
 
   /**
@@ -79,7 +74,6 @@ describe('the dashboard entry script', () => {
     runEntryScript();
 
     expect(entering()).toBe(false);
-    expect(overlay().hidden).toBe(true);
     expect(window.sessionStorage.getItem(LOGIN_TRANSITION_KEY)).toBeNull();
   });
 

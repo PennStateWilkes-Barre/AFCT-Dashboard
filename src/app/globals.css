@@ -1538,19 +1538,23 @@ input[type='week'] {
 
 /* --- Arriving at the dashboard ------------------------------------------------------- */
 
+/* Present on every dashboard load and shown on almost none of them. Driving it from
+   `display` rather than from an attribute on the element itself is deliberate: the script
+   above runs before React hydrates, and the only thing it touches is <html>, which is the
+   one element the app already tells React not to reconcile. The overlay's own markup is
+   therefore always exactly what the server sent. */
 #afct-entry-overlay {
+  display: none;
   position: fixed;
   inset: 0;
   z-index: 60;
   pointer-events: none;
   background: var(--sidebar);
-  /* Invisible by default so that if the animation below never applies, unhiding this element
-     cannot leave a navy sheet over the dashboard. */
-  opacity: 0;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  #afct-entry-overlay {
+  [data-afct-entering] #afct-entry-overlay {
+    display: block;
     animation: afct-entry-fade 220ms ease-out forwards;
   }
 

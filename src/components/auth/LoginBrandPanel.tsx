@@ -1,4 +1,11 @@
-import { BookOpen, Code2, Scale } from 'lucide-react';
+import {
+  BookOpen,
+  ChartNoAxesColumnIncreasing,
+  Code2,
+  GraduationCap,
+  Scale,
+  Zap,
+} from 'lucide-react';
 
 import { AuthBrandMark } from './AuthBrandMark';
 import { RotatingAuthAutomaton } from './RotatingAuthAutomaton';
@@ -11,6 +18,32 @@ const FOOTER_LINK =
 
 /** Every footer icon, so one change moves the set rather than three of four. */
 const FOOTER_ICON = 'size-4 shrink-0 text-blue-400';
+
+/**
+ * What AFCT does, in three lines, for the two audiences that sign in here.
+ *
+ * Data rather than markup so the three items cannot drift apart: one row shape, one set of
+ * classes, and adding a fourth is a line here rather than a copied block. Kept short on
+ * purpose. This is the panel beside a login form, not a product page, so each description is
+ * one sentence and none of them sell.
+ */
+const FEATURES = [
+  {
+    icon: Zap,
+    title: 'Immediate, Actionable Feedback',
+    body: 'Get clear feedback that supports learning and guides improvement.',
+  },
+  {
+    icon: GraduationCap,
+    title: 'Built for Learning and Teaching',
+    body: 'Tools that help students practice and instructors support progress.',
+  },
+  {
+    icon: ChartNoAxesColumnIncreasing,
+    title: 'Streamlined Assessment',
+    body: 'Simplify submissions, evaluation, grading, and progress tracking.',
+  },
+] as const;
 
 /**
  * GitHub's own mark, drawn here because lucide dropped its brand icons.
@@ -191,19 +224,61 @@ export function LoginBrandPanel({
             Learn, teach, and assess computing theory with intelligent feedback and streamlined
             tools.
           </p>
+
+          {/* A real list, marked up as one, with the markers turned off. "No bullet points" is
+              about how it looks; a screen reader still deserves to be told this is three of
+              something before it starts reading them.
+
+              Narrower than the sentence above it (30rem against 32rem), which is what stops the
+              column creeping toward the login card as it gets taller. The icons align to the
+              first line of each row rather than centring on the block, so the three glyphs sit
+              on one vertical rhythm whether a description wraps to one line or two. */}
+          <ul className="mt-8 max-w-[30rem] space-y-5">
+            {FEATURES.map(({ icon: Icon, title, body }) => (
+              <li key={title} className="flex items-start gap-3">
+                {/* A tinted disc rather than a bare glyph: at this size an unframed icon reads
+                    as debris beside text, and the ring gives it an edge without a border that
+                    would compete with the login card's. Both values are alpha on the same
+                    cobalt the footer icons use, so the set stays one family. */}
+                <span
+                  aria-hidden="true"
+                  className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-400/10 ring-1 ring-blue-400/20"
+                >
+                  <Icon className="size-4 text-blue-300" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sidebar-foreground text-sm leading-snug font-semibold">
+                    {title}
+                  </p>
+                  <p className="text-sidebar-muted-foreground mt-1 text-[0.8125rem] leading-snug">
+                    {body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
 
       {/* The middle row, and the reason the panel is a grid. The automaton takes whatever
           height is left between the copy and the footer and centres in it, so the same markup
-          is a comfortable composition on a 768px laptop and on a 1440px display.
-          Nudged up a notch off dead centre: there is more usable air above it than below,
-          where the wave is already occupying the bottom of the frame. The diagram itself
-          changes every few minutes; see RotatingAuthAutomaton. */}
+          is a comfortable composition on a 768px laptop and on a 1440px display. The diagram
+          itself changes every few minutes; see RotatingAuthAutomaton.
+
+          Offset down and to the right, which is a change of intent: it used to be nudged up
+          off centre to claim the air above it, but that air is now the feature list. Sitting
+          low and right puts it in the open corner beside and below that column instead of
+          squarely underneath it. It cannot overlap the copy at any size, because the copy is
+          row one and this is row two; the translate only moves it within its own band. The
+          shift grows with the panel, since a wider panel has more open corner to move into.
+
+          `max-h-full` is what keeps this honest on a short window: the row is
+          `minmax(0,1fr)`, so as the copy above grows the drawing gives up height rather than
+          pushing the footer off the screen. */}
       <div className="relative flex min-h-0 items-center justify-center">
         <RotatingAuthAutomaton
           automata={automata}
-          className="pointer-events-none aspect-[444/234] max-h-full w-[30rem] max-w-[96%] -translate-y-5 text-blue-300 opacity-[0.22] xl:w-[35rem] 2xl:w-[40rem]"
+          className="pointer-events-none aspect-[444/234] max-h-full w-[30rem] max-w-[96%] translate-x-4 translate-y-2 text-blue-300 opacity-[0.22] xl:w-[35rem] xl:translate-x-8 2xl:w-[40rem] 2xl:translate-x-12"
         />
       </div>
 

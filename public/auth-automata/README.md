@@ -20,13 +20,13 @@ behind. That styling lives in `globals.css` under `.auth-automaton`, and it find
 what they are, since the files carry no classes. Follow these and a new drawing gets the same
 treatment for free:
 
-| Part | How it is drawn |
-| --- | --- |
-| A state | `<circle r="28">` |
-| An accepting state | two circles, `r="32"` and `r="26"` |
-| A state label (`q0`) | `<text font-size="18">` |
-| A transition | `<line>` or `<path>` |
-| A transition label (`a`) | `<text font-size="15">` |
+| Part                     | How it is drawn                    |
+| ------------------------ | ---------------------------------- |
+| A state                  | `<circle r="28">`                  |
+| An accepting state       | two circles, `r="32"` and `r="26"` |
+| A state label (`q0`)     | `<text font-size="18">`            |
+| A transition             | `<line>` or `<path>`               |
+| A transition label (`a`) | `<text font-size="15">`            |
 
 None of this is required. A drawing that ignores it still renders, it just renders flat, the
 way every drawing did before the styling existed.

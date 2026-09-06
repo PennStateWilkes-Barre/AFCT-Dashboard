@@ -12,6 +12,12 @@
  */
 
 @media (prefers-reduced-motion: no-preference) {
+  /* The previous treatment also scaled the auth card back slightly on success. Neutralise that
+     here so the visual language is genuinely just a fade. */
+  .auth-form-surface [class~='scale-[0.975]'] {
+    scale: 1;
+  }
+
   /* Login side. LoginForm still renders the old sized <span>, but for this treatment the
      geometry is deliberately ignored: the span becomes a fixed viewport-sized navy surface.
      The small opening hold lets the Signed in state register before the fade begins. */

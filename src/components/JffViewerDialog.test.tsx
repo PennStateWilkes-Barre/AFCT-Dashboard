@@ -817,6 +817,103 @@ describe('clicking a state', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('q0');
   });
 
+  it('names the machine under the title, so a window of four files says which is which', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tapNode('0');
+
+    const panel = await screen.findByRole('group', { name: /properties of state/i });
+    expect(panel).toHaveTextContent('Finite Automaton');
+  });
+
+  /** A state whose coordinates the panel can read, which is what the Advanced section needs. */
+  const positionedNode = (id: string, pos: { x: number; y: number }) => {
+    const node = {
+      isNode: () => true,
+      hasClass: () => false,
+      id: () => id,
+      empty: () => false,
+      data: () => undefined,
+      position: vi.fn((next?: { x: number; y: number }) => {
+        if (next) Object.assign(pos, next);
+        return pos;
+      }),
+      addClass: () => node,
+      removeClass: () => node,
+    };
+    return node;
+  };
+
+  const tapTarget = (target: unknown) => {
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown }) => void) | undefined;
+    act(() => tap?.({ target }));
+  };
+
+  /**
+   * Advanced is about order, not concealment: the coordinates are a reason to open this panel
+   * at all. So it starts open, and a reader who closes it keeps it closed while they work,
+   * including across clicking a different state, which rebuilds the panel underneath.
+   */
+  it('opens Advanced by default and keeps it shut once the reader shuts it', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapTarget(positionedNode('0', { x: 100, y: 200 }));
+
+    const advanced = await screen.findByRole('button', { name: 'Advanced' });
+    expect(advanced).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('X')).toHaveValue(100);
+    expect(screen.getByLabelText('Y')).toHaveValue(200);
+
+    fireEvent.click(advanced);
+    await waitFor(() => expect(screen.queryByLabelText('X')).toBeNull());
+
+    tapTarget(positionedNode('1', { x: 300, y: 400 }));
+
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('q1'));
+    expect(screen.getByRole('button', { name: 'Advanced' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
+  /**
+   * Half-typed coordinates.
+   *
+   * The box used to read its value straight back off the canvas, which made two ordinary
+   * keystrokes impossible. Clearing it sent `Number('')`, which is 0 and perfectly finite, so
+   * the state shot to the left edge; and typing a minus sign sent `NaN`, which was thrown away,
+   * so the box put the old number back and ate the keystroke. Both happen on the way to a value
+   * the reader was about to finish typing.
+   */
+  it('lets a coordinate be half-typed without moving the state', async () => {
+    const pos = { x: 100, y: 200 };
+    const node = positionedNode('0', pos);
+    h.cy.getElementById.mockReturnValue(node);
+
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapTarget(node);
+    const x = (await screen.findByLabelText('X')) as HTMLInputElement;
+
+    // Clearing the box used to send Number('') === 0 and shoot the state to the left edge.
+    fireEvent.change(x, { target: { value: '' } });
+    expect(x.value).toBe('');
+    expect(pos).toEqual({ x: 100, y: 200 });
+
+    // A lone minus sign is the start of a number, not a value. (A number input reports it as
+    // an empty value, here and in a browser; what matters is that the state stays put and the
+    // box does not refill itself with the old number, which is what ate the keystroke.)
+    fireEvent.change(x, { target: { value: '-' } });
+    expect(x.value).not.toBe('100');
+    expect(pos).toEqual({ x: 100, y: 200 });
+
+    // And finishing the number does move it.
+    fireEvent.change(x, { target: { value: '-40' } });
+    expect(pos).toMatchObject({ x: -40, y: 200 });
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.
@@ -850,8 +947,8 @@ describe('clicking a state', () => {
     await waitForEngine();
     tapNode('0');
 
-    const initial = await screen.findByLabelText('Initial state');
-    const final = screen.getByLabelText('Final state');
+    const initial = await screen.findByLabelText('Initial');
+    const final = screen.getByLabelText('Final');
     // q0 is the initial state in the fixture and q1 is the final one.
     expect(initial).toBeChecked();
     expect(final).not.toBeChecked();
@@ -859,7 +956,7 @@ describe('clicking a state', () => {
     fireEvent.click(final);
 
     expect(await screen.findByRole('button', { name: /file changed/i })).toBeInTheDocument();
-    expect(screen.getByLabelText('Final state')).toBeChecked();
+    expect(screen.getByLabelText('Final')).toBeChecked();
   });
 
   it('lists what touches the state, and opens a transition when one is clicked', async () => {
@@ -893,7 +990,10 @@ describe('clicking a state', () => {
       await screen.findByRole('list', { name: /outgoing transitions of state q0/i }),
     ).toHaveTextContent('q1');
     expect(screen.queryByRole('list', { name: /incoming transitions/i })).toBeNull();
-    expect(screen.getByText('Outgoing (1)')).toBeInTheDocument();
+    // The count sits at the end of the heading row rather than in the words.
+    expect(
+      within(screen.getByRole('group', { name: /properties of state/i })).getByText('1'),
+    ).toBeInTheDocument();
 
     // And q1 the other way round: nothing leaves it.
     tapNode('1');
@@ -997,7 +1097,9 @@ describe('clicking a transition', () => {
     await waitForEngine();
     tapEdge('0', '1');
     const panel = await screen.findByRole('group', { name: /transition from/i });
-    expect(panel).toHaveTextContent(/Transition\s+q0\s*→\s*q1/);
+    // The title says what it is; the line under it says which pair.
+    expect(panel).toHaveTextContent(/Transition/);
+    expect(panel).toHaveTextContent(/q0\s*→\s*q1/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Close transition properties' }));
     await waitFor(() =>

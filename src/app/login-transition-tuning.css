@@ -1,0 +1,113 @@
+/*
+ * Motion tuning for the one-shot sign-in -> dashboard handoff.
+ *
+ * The structural transition rules and base keyframes live in globals.css. These later rules
+ * deliberately tune only the successful-authentication handoff: the first version completed
+ * both halves in a few hundred milliseconds and the large radial wipe therefore read as a
+ * snap. Giving the same movement a gentler acceleration, a brief covered beat, and a slower
+ * dashboard reveal makes the full-page navigation feel continuous rather than abrupt.
+ *
+ * Imported after globals.css from the root layout so these longhands win the cascade without
+ * duplicating the structural styles for the overlays. Reduced-motion remains owned by the
+ * existing no-preference media query: none of this runs for someone who asked for less motion.
+ */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The login page still navigates after 340ms, so this side must finish inside that existing
+     safety timer. The custom curve spends the opening beat barely moving, then grows smoothly;
+     it feels calmer without delaying authentication or risking a half-finished wipe at unload. */
+  .auth-exit-overlay > span {
+    animation-name: afct-login-wipe-soft;
+    animation-duration: 320ms;
+    animation-delay: 0ms;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Hold the navy cover for the first ~100ms, then reveal the dashboard over a longer fade.
+     The shell starts settling in behind that surface instead of all three regions appearing
+     during the first two tenths of a second. */
+  [data-afct-entering] #afct-entry-overlay {
+    animation-name: afct-entry-fade-soft;
+    animation-duration: 560ms;
+    animation-delay: 0ms;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  [data-afct-entering] [data-slot='sidebar-container'] {
+    animation-name: afct-entry-rail-soft;
+    animation-duration: 340ms;
+    animation-delay: 180ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  [data-afct-entering] [data-entry='navbar'] {
+    animation-name: afct-entry-header-soft;
+    animation-duration: 340ms;
+    animation-delay: 280ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  [data-afct-entering] [data-entry='main'] {
+    animation-name: afct-entry-page-soft;
+    animation-duration: 380ms;
+    animation-delay: 380ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+@keyframes afct-login-wipe-soft {
+  0% {
+    transform: translate(-50%, -50%) scale(0);
+  }
+  /* A tiny initial movement gives the Signed in state a perceptible beat before the wipe owns
+     the screen, without introducing an explicit pause that would make the UI feel stalled. */
+  16% {
+    transform: translate(-50%, -50%) scale(0.025);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes afct-entry-fade-soft {
+  0%,
+  18% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes afct-entry-rail-soft {
+  from {
+    opacity: 0;
+    transform: translateX(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-header-soft {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-page-soft {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

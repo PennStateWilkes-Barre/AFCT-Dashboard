@@ -777,3 +777,73 @@ describe('DELETE /api/courses/[id]/assignments/[aid]', () => {
     expect(prismaMock.assignment.delete).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * What the assignment lookups and the unpublish guard are scoped to.
+ *
+ * The assignment id comes from the path, so the only thing tying it to the course the caller
+ * was proven staff of is the `courseId` on these lookups. The prisma mock answers from its
+ * fixture whatever the `where` says, so without it a faculty member of one course can edit or
+ * delete an assignment in another. The unpublish guard has the opposite failure: without its
+ * `assignmentId` it sees any submission or grade anywhere and refuses every unpublish.
+ */
+describe('what the assignment lookups and unpublish guard are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('finds the assignment for PATCH only inside this course', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ ...existingAssignment });
+    prismaMock.assignment.update.mockResolvedValue({ ...existingAssignment, title: 'New' });
+
+    const res = await PATCH(
+      new Request('http://localhost/api/courses/c1/assignments/a1', {
+        method: 'PATCH',
+        body: JSON.stringify({ title: 'New' }),
+      }),
+      mutationParams,
+    );
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({ id: 'a1', courseId: 'c1' });
+  });
+
+  it('finds the assignment for DELETE only inside this course', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1' });
+    prismaMock.submission.count.mockResolvedValue(0);
+    prismaMock.comment.count.mockResolvedValue(0);
+    prismaMock.assignment.delete.mockResolvedValue({ id: 'a1', courseId: 'c1', title: 'Old' });
+
+    const res = await DELETE(
+      new Request('http://localhost/api/courses/c1/assignments/a1', { method: 'DELETE' }),
+      mutationParams,
+    );
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({ id: 'a1', courseId: 'c1' });
+  });
+
+  it('asks about work on this assignment only before allowing an unpublish', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ ...existingAssignment });
+    prismaMock.assignmentProblem.findFirst.mockResolvedValue(null);
+    prismaMock.assignmentProblemGrade.findFirst.mockResolvedValue(null);
+    prismaMock.assignment.update.mockResolvedValue({
+      ...existingAssignment,
+      isPublished: false,
+    });
+
+    const res = await PATCH(
+      new Request('http://localhost/api/courses/c1/assignments/a1', {
+        method: 'PATCH',
+        body: JSON.stringify({ isPublished: false }),
+      }),
+      mutationParams,
+    );
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignmentProblem.findFirst)).toEqual({
+      assignmentId: 'a1',
+      submissions: { some: {} },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findFirst)).toEqual({ assignmentId: 'a1' });
+  });
+});

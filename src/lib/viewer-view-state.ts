@@ -112,7 +112,19 @@ export type ViewerViewState = {
    * thing in storage by a wide margin, for steps nobody walks back to.
    */
   history?: ViewerHistory;
+  /**
+   * States the reader has added to the drawing, which the file does not have.
+   *
+   * Coordinates in JFLAP's units, the same as the file's own, so a downloaded arrangement puts
+   * them where they are on screen. Like every other field here this is a mark-up of the file
+   * rather than a change to it: the submitted `.jff` is untouched, and closing the window
+   * forgets these along with everything else.
+   */
+  addedStates?: ViewerAddedState[];
 };
+
+/** A state the reader drew, in the file's own coordinate units. */
+export type ViewerAddedState = { id: string; name: string; xPos: number; yPos: number };
 
 /** One step of the viewer's undo history: the whole drawing as it stood before a change. */
 export type ViewerHistoryStep = {
@@ -123,6 +135,7 @@ export type ViewerHistoryStep = {
   initialState?: string | null;
   finals?: Record<string, boolean>;
   transitions?: Record<number, ViewerTransitionEdit>;
+  addedStates?: ViewerAddedState[];
 };
 
 export type ViewerHistory = { undo: ViewerHistoryStep[]; redo: ViewerHistoryStep[] };
@@ -203,8 +216,28 @@ function isViewState(value: unknown): value is ViewerViewState {
     }
   }
   if (s.history !== undefined && !isHistory(s.history)) return false;
+  if (s.addedStates !== undefined && !isAddedStates(s.addedStates)) return false;
   if (!s.positions || typeof s.positions !== 'object') return false;
   return Object.values(s.positions as Record<string, unknown>).every(isPoint);
+}
+
+function isAddedStates(value: unknown): value is ViewerAddedState[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const st = entry as Record<string, unknown>;
+      return (
+        typeof st.id === 'string' &&
+        st.id.length > 0 &&
+        typeof st.name === 'string' &&
+        typeof st.xPos === 'number' &&
+        Number.isFinite(st.xPos) &&
+        typeof st.yPos === 'number' &&
+        Number.isFinite(st.yPos)
+      );
+    })
+  );
 }
 
 function isHistoryStep(value: unknown): value is ViewerHistoryStep {
@@ -237,6 +270,7 @@ function isHistoryStep(value: unknown): value is ViewerHistoryStep {
   if (!isBoolMap(step.finals)) return false;
   if (step.transitions !== undefined && (!step.transitions || typeof step.transitions !== 'object'))
     return false;
+  if (step.addedStates !== undefined && !isAddedStates(step.addedStates)) return false;
   return true;
 }
 
@@ -303,8 +337,12 @@ export function viewStateFits(state: ViewerViewState, nodeIds: readonly string[]
  * only when it changes, so an entry can carry a history older than the arrangement beside it.
  */
 export function historyFits(history: ViewerHistory, nodeIds: readonly string[]): boolean {
-  const ids = new Set(nodeIds);
-  const stepFits = (step: ViewerHistoryStep) =>
-    Object.keys(step.positions).every((id) => ids.has(id));
+  const stepFits = (step: ViewerHistoryStep) => {
+    // A step's positions cover the graph as it stood, which includes any states the reader had
+    // drawn by then. Those are not on the machine now if the step that made them has been
+    // undone, so the step carries them and they count as known.
+    const ids = new Set([...nodeIds, ...(step.addedStates ?? []).map((st) => st.id)]);
+    return Object.keys(step.positions).every((id) => ids.has(id));
+  };
   return history.undo.every(stepFits) && history.redo.every(stepFits);
 }

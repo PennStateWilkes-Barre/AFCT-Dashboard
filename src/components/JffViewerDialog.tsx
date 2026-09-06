@@ -55,6 +55,11 @@ import {
   useViewerChromePresent,
 } from '@/components/viewer/viewer-actions';
 import {
+  CanvasToolPalette,
+  DEFAULT_CANVAS_TOOL,
+  type CanvasTool,
+} from '@/components/viewer/CanvasToolPalette';
+import {
   Grid,
   Copy,
   Minus,
@@ -237,19 +242,22 @@ function PanelFrame({
         'bg-card absolute z-10 flex flex-col',
         // The drawer: across the foot of the drawing, and never more than a little over half of
         // it, so a hub state with twenty transitions scrolls rather than swallowing the machine.
-        // Its shadow falls upward, onto the canvas it is covering.
+        // Flush to the three edges it touches, which is what a sheet on a phone is, and its
+        // shadow falls upward, onto the canvas it is covering.
         'inset-x-0 bottom-0 max-h-[min(60%,20rem)] rounded-t-lg border-t',
         'shadow-[0_-6px_16px_rgba(15,23,42,0.06)] dark:shadow-[0_-6px_16px_rgba(0,0,0,0.35)]',
-        // The sidebar: down the right-hand edge, full height. 20rem leaves a usable canvas at
-        // the width this switches on and matches the app's other side panels.
+        // The inspector: a panel resting on the drawing rather than a wall built against the
+        // edge of it. Inset on all three sides so the canvas runs behind and around it, which
+        // is what says it is floating; bordered the whole way round and rounded, because a
+        // panel that stops short of the edges has four of them now. 20rem leaves a usable
+        // canvas at the width this switches on and matches the app's other side panels.
         //
-        // The shadow is cast to the LEFT, onto the drawing, which is the only direction that
-        // says anything: to the right there is nothing to fall on. Light and wide rather than
-        // the deep drop a dialog gets, because this is a panel resting on the canvas, not a
-        // sheet over the page. Dark mode needs a heavier alpha for the same reading, since a
-        // near-black shadow on a near-black ground is no shadow at all.
-        '@[48rem]/viewer:inset-y-0 @[48rem]/viewer:right-0 @[48rem]/viewer:left-auto @[48rem]/viewer:max-h-none @[48rem]/viewer:w-80 @[48rem]/viewer:rounded-none @[48rem]/viewer:border-t-0 @[48rem]/viewer:border-l',
-        '@[48rem]/viewer:shadow-[-6px_0_16px_rgba(15,23,42,0.06)] @[48rem]/viewer:dark:shadow-[-6px_0_16px_rgba(0,0,0,0.4)]',
+        // The shadow is soft and wide rather than the deep drop a dialog gets: enough to lift
+        // it off the grid, not enough to read as a sheet over the page. Dark mode needs a
+        // heavier alpha for the same reading, since a near-black shadow on a near-black ground
+        // is no shadow at all. The tool palette opposite uses a lighter version of it.
+        '@[48rem]/viewer:inset-y-3 @[48rem]/viewer:right-3 @[48rem]/viewer:left-auto @[48rem]/viewer:max-h-none @[48rem]/viewer:w-80 @[48rem]/viewer:rounded-lg @[48rem]/viewer:border',
+        '@[48rem]/viewer:shadow-[0_4px_18px_rgba(15,23,42,0.10)] @[48rem]/viewer:dark:shadow-[0_4px_18px_rgba(0,0,0,0.45)]',
         // It arrives and leaves as a drawer, from whichever edge it is attached to: up from the
         // foot of the drawing when it is one, in from the right when it is the sidebar. The
         // sidebar case cancels the vertical slide rather than adding to it, or it would arrive
@@ -928,6 +936,38 @@ export function JffCytoscapeViewer({
   const isDark = darkMode ?? resolvedTheme === 'dark';
   // The cytoscape engine (fetch/parse/layout/interaction + zoom/export actions) lives in
   // a hook; this component owns only the toolbar chrome and the grid overlay.
+  /**
+   * What clicking the canvas means, and the only place that answer lives.
+   *
+   * The hook is told the consequence rather than the tool (`placeStateOnClick`), so it stays
+   * about the machine and the palette stays about the palette. Adding a tool later is a case
+   * in the palette's own list plus whatever it makes a click mean.
+   */
+  const [activeTool, setActiveTool] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
+
+  /**
+   * Escape leaves the State tool.
+   *
+   * On the window rather than on the viewer, because placing a state leaves focus nowhere in
+   * particular: a click on a canvas focuses no element, so a handler on the container would
+   * never hear the key that is meant to get the reader out of placement mode. Bound only while
+   * a tool other than Select is up, so an ordinary viewer listens for nothing.
+   *
+   * Not while they are typing. The inspector's boxes are inside this viewer, and Escape there
+   * closes the panel; taking the tool away as well would be two answers to one key.
+   */
+  useEffect(() => {
+    if (activeTool === DEFAULT_CANVAS_TOOL) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
+      setActiveTool(DEFAULT_CANVAS_TOOL);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [activeTool]);
+
   const {
     containerRef,
     settled,
@@ -978,6 +1018,7 @@ export function JffCytoscapeViewer({
     epsSymbol,
     darkMode: isDark,
     honorPositionsDefault,
+    placeStateOnClick: activeTool === 'state',
     initialZoom,
     viewStateKey,
     onViewportChange,
@@ -1411,6 +1452,18 @@ export function JffCytoscapeViewer({
             </div>
           ) : null}
         </div>
+
+        {/* The canvas's own tools, opposite the inspector and treated the same way: floating over
+            the drawing, never taking width from it. Only where the inspector would show, which
+            in a split window is the side being worked in: two palettes would be two answers to
+            "which machine does this draw on".
+
+            A click on it never reaches cytoscape, so it cannot draw a state under itself. That
+            is true of the toolbar, the tabs and the menus for the same reason: only the canvas
+            fires the tap that places one. */}
+        {showInspector ? (
+          <CanvasToolPalette activeTool={activeTool} onSelectTool={setActiveTool} />
+        ) : null}
 
         {panel === null ? null : (
           <PanelFrame open={panelOpen}>

@@ -930,6 +930,55 @@ describe('clicking a state', () => {
     expect(pos).toMatchObject({ x: -40, y: 200 });
   });
 
+  /**
+   * The canvas tools. Select is the viewer as it has always behaved; State makes a click on
+   * empty canvas draw one. The hook is told the consequence rather than the tool, so what
+   * these check is that the button, the mode and that flag agree.
+   */
+  it('opens with Select active, and switches to State when asked', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    const select = screen.getByRole('button', { name: 'Select' });
+    const state = screen.getByRole('button', { name: 'State' });
+    expect(select).toHaveAttribute('aria-pressed', 'true');
+    expect(state).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(state);
+
+    expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves the State tool on Escape, so placement mode is never a trap', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    fireEvent.click(screen.getByRole('button', { name: 'State' }));
+
+    // On the window, because placing a state leaves focus on nothing in particular.
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
+  it('keeps the tools to the side being worked in', async () => {
+    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    expect(screen.getByTestId('viewer-tool-palette')).toBeInTheDocument();
+
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" showInspector={false} />);
+
+    expect(screen.queryByTestId('viewer-tool-palette')).toBeNull();
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.

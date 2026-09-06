@@ -33,6 +33,7 @@ import {
   viewStateFits,
   historyFits,
   VIEWER_HISTORY_LIMIT,
+  type ViewerAddedState,
   type ViewerHistoryStep,
   type ViewerSelection,
   type ViewerViewport,
@@ -46,6 +47,7 @@ import {
   machineDescriptionText,
   parseJflap,
   toElements,
+  POSITION_SCALE,
   type MachineType,
   type Parsed,
 } from '@/lib/jflap-parse';
@@ -237,6 +239,14 @@ export type UseJffCytoscapeOptions = {
   darkMode?: boolean;
   honorPositionsDefault?: boolean;
   /**
+   * Whether a click on empty canvas draws a new state instead of clearing the selection.
+   *
+   * A boolean rather than the viewer's tool union, so this hook stays about the machine and
+   * knows nothing about a palette: what it is being told is what a click means, not which
+   * button is pressed. See `addState`.
+   */
+  placeStateOnClick?: boolean;
+  /**
    * Remember the zoom, the pan and where the states were put, under this key.
    *
    * Set only by the standalone window, which passes the tab's own key. A viewer in a dialog
@@ -297,6 +307,8 @@ type ViewerSnapshot = Arrangement & {
   initialOverride: string | null | undefined;
   finalOverrides: Record<string, boolean>;
   transitionEdits: Record<number, Partial<Parsed['transitions'][number]>>;
+  /** States the reader drew, which the file does not have. See `addState`. */
+  addedStates: ViewerAddedState[];
 };
 
 /**
@@ -315,6 +327,7 @@ function toStoredStep(snapshot: ViewerSnapshot): ViewerHistoryStep {
     initialState: snapshot.initialOverride,
     finals: snapshot.finalOverrides,
     transitions: snapshot.transitionEdits,
+    addedStates: snapshot.addedStates,
   };
 }
 
@@ -326,17 +339,62 @@ function fromStoredStep(step: ViewerHistoryStep): ViewerSnapshot {
     initialOverride: step.initialState,
     finalOverrides: step.finals ?? {},
     transitionEdits: step.transitions ?? {},
+    addedStates: step.addedStates ?? [],
   };
+}
+
+/**
+ * An id and a name for a state that is about to be drawn.
+ *
+ * The id is prefixed and then checked, the way `toElements` picks note ids: cytoscape drops a
+ * duplicate id without a word, so a state whose id collided with one from the file would simply
+ * not appear. The name is the first `q<n>` nobody is using, and "nobody" has to include the
+ * names the reader has TYPED as well as the ones the file came with, or drawing a state right
+ * after renaming one to q2 gives you two q2s.
+ */
+function freeStateIdentity(parsed: Parsed): { id: string; name: string } {
+  const ids = new Set(parsed.states.map((state) => state.id));
+  let id = 'drawn-0';
+  for (let n = 0; ids.has(id); n++) id = `drawn-${n + 1}`;
+
+  const names = new Set(parsed.states.map((state) => state.name));
+  let index = names.size;
+  while (names.has(`q${index}`)) index += 1;
+  return { id, name: `q${index}` };
 }
 
 /** The reader's changes laid over the file as parsed, which is how every load draws them. */
 function deriveParsed(
   pristine: Parsed,
-  edits: Pick<ViewerSnapshot, 'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits'>,
+  edits: Pick<
+    ViewerSnapshot,
+    'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits' | 'addedStates'
+  >,
 ): Parsed {
+  // Added states go in FIRST, so everything after this treats them as ordinary states: a name
+  // typed into one is a rename like any other, ticking Final goes through the same map, and
+  // undo puts all of it back through the same path. The alternative, a second kind of state
+  // with its own handling everywhere, is how this gets expensive.
+  const withAdded =
+    edits.addedStates.length === 0
+      ? pristine
+      : {
+          ...pristine,
+          states: [
+            ...pristine.states,
+            ...edits.addedStates.map((st) => ({
+              id: st.id,
+              name: st.name,
+              xPos: st.xPos,
+              yPos: st.yPos,
+              initial: false,
+              final: false,
+            })),
+          ],
+        };
   return applyTransitionEdits(
     applyFinalStates(
-      applyInitialState(applyRenames(pristine, edits.renames), edits.initialOverride),
+      applyInitialState(applyRenames(withAdded, edits.renames), edits.initialOverride),
       edits.finalOverrides,
     ),
     edits.transitionEdits,
@@ -540,6 +598,36 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     const byId = new Map(parsed.states.map((state) => [state.id, state]));
     let initialId: string | null = null;
 
+    // Which states exist at all, before anything about them is put right. Undo and redo can
+    // add a state back or take one away, and the loop below only knows how to change one that
+    // is already drawn. Notes and start markers are not states and are left to their own code.
+    const drawn = cy
+      .nodes()
+      .filter((node: any) => !node.hasClass?.('start') && !node.hasClass?.('note'));
+    drawn.forEach((node: any) => {
+      if (!byId.has(node.id())) node.remove?.();
+    });
+    const present = new Set(
+      cy
+        .nodes()
+        .filter((node: any) => !node.hasClass?.('start') && !node.hasClass?.('note'))
+        .map((node: any) => node.id()),
+    );
+    parsed.states.forEach((state) => {
+      if (present.has(state.id)) return;
+      cy.add({
+        group: 'nodes',
+        data: {
+          id: state.id,
+          label: state.name,
+          final: state.final ? 1 : 0,
+          initial: state.initial ? 1 : 0,
+        },
+        position: { x: state.xPos * POSITION_SCALE, y: state.yPos * POSITION_SCALE },
+        classes: state.final ? 'final' : '',
+      });
+    });
+
     cy.nodes().forEach((node: any) => {
       if (node.hasClass?.('start') || node.hasClass?.('note')) return;
       const state = byId.get(node.id());
@@ -605,6 +693,7 @@ export function useJffCytoscape({
   initialZoom = 'fit',
   darkMode = false,
   honorPositionsDefault = false,
+  placeStateOnClick = false,
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
@@ -739,6 +828,20 @@ export function useJffCytoscape({
   );
   const finalOverridesRef = useRef(finalOverrides);
   finalOverridesRef.current = finalOverrides;
+  /**
+   * States the reader has drawn, which the file does not have.
+   *
+   * The fifth thing held beside the parsed machine rather than in it, for the same reason as
+   * the four above: every load re-reads the file, so a state kept in `parsed` alone would
+   * vanish the moment the theme changed. `deriveParsed` folds these back in on the way out of
+   * every parse, which is what makes one survive a rebuild and a refresh.
+   *
+   * Nothing here writes to the submitted file. A drawn state is a mark-up of it, the same as a
+   * renamed one, and "Download this arrangement" is how it leaves.
+   */
+  const [addedStates, setAddedStates] = useState<ViewerAddedState[]>(savedView?.addedStates ?? []);
+  const addedStatesRef = useRef(addedStates);
+  addedStatesRef.current = addedStates;
   const viewRestored = useRef(false);
   /**
    * Which load owns the graph.
@@ -765,6 +868,10 @@ export function useJffCytoscape({
   showNotesRef.current = showNotes;
   const snapToGridRef = useRef(snapToGrid);
   snapToGridRef.current = snapToGrid;
+  // A ref because the tap handler is built once per load and would otherwise answer to the
+  // tool that was active when the machine was drawn.
+  const placeStateOnClickRef = useRef(placeStateOnClick);
+  placeStateOnClickRef.current = placeStateOnClick;
   const initialZoomRef = useRef(initialZoom);
   initialZoomRef.current = initialZoom;
   const honorPositionsRef = useRef(honorPositions);
@@ -893,7 +1000,8 @@ export function useJffCytoscape({
     Object.keys(renames).length > 0 ||
     initialOverride !== undefined ||
     Object.keys(finalOverrides).length > 0 ||
-    Object.keys(transitionEdits).length > 0;
+    Object.keys(transitionEdits).length > 0 ||
+    addedStates.length > 0;
 
   /* ── following another pane's camera ────────────────────────────────── */
 
@@ -980,6 +1088,7 @@ export function useJffCytoscape({
         initialState: initialOverrideRef.current,
         finals: finalOverridesRef.current,
         transitions: transitionEditsRef.current,
+        addedStates: addedStatesRef.current,
         // The most recent steps a side. Trimmed from the front, so what is dropped is the
         // oldest history, which is the part a reader is least likely to walk back to.
         history: {
@@ -1076,6 +1185,7 @@ export function useJffCytoscape({
       initialOverride: initialOverrideRef.current,
       finalOverrides: { ...finalOverridesRef.current },
       transitionEdits: { ...transitionEditsRef.current },
+      addedStates: [...addedStatesRef.current],
     };
   }, []);
 
@@ -1097,6 +1207,73 @@ export function useJffCytoscape({
     pendingSnapshot.current = null;
     pushUndoStep(before);
   }, [pushUndoStep]);
+
+  /**
+   * Draw a new state where the reader clicked.
+   *
+   * On screen only, like everything else here: the state joins the parsed machine, the panels,
+   * the text representation and "Download this arrangement", and the submitted file is not
+   * touched. It is why the toolbar says the drawing has changed.
+   *
+   * `at` is in the graph's own coordinates, which is what cytoscape hands the tap that asked
+   * for this, so zoom and pan are already accounted for. They are divided back into the file's
+   * units on the way in, the inverse of what `toElements` does, so a downloaded arrangement
+   * puts the state where it is on screen.
+   *
+   * The node is added straight to the graph rather than through a rebuild, the same as every
+   * other change here: a rebuild would refit the camera and throw the reader's view away for
+   * one new circle. It is selected afterwards, so its properties open and it can be named at
+   * once; the caller keeps whatever tool it had, so a second click draws a second state.
+   */
+  const addState = useCallback(
+    (at: { x: number; y: number }) => {
+      if (!isFinitePoint(at)) return;
+      const pristine = pristineParsed.current;
+      if (!pristine) return;
+      recordStep();
+
+      const current = deriveParsed(pristine, {
+        renames: renamesRef.current,
+        initialOverride: initialOverrideRef.current,
+        finalOverrides: finalOverridesRef.current,
+        transitionEdits: transitionEditsRef.current,
+        addedStates: addedStatesRef.current,
+      });
+      const { id, name } = freeStateIdentity(current);
+      const drawn: ViewerAddedState = {
+        id,
+        name,
+        xPos: at.x / POSITION_SCALE,
+        yPos: at.y / POSITION_SCALE,
+      };
+
+      const nextAdded = [...addedStatesRef.current, drawn];
+      addedStatesRef.current = nextAdded;
+      setAddedStates(nextAdded);
+      const next = deriveParsed(pristine, {
+        renames: renamesRef.current,
+        initialOverride: initialOverrideRef.current,
+        finalOverrides: finalOverridesRef.current,
+        transitionEdits: transitionEditsRef.current,
+        addedStates: nextAdded,
+      });
+      setParsed(next);
+
+      const cy = cyRef.current;
+      if (!cy) return;
+      try {
+        cy.add({
+          group: 'nodes',
+          data: { id, label: name, final: 0, initial: 0 },
+          position: { x: at.x, y: at.y },
+        });
+        restoreSelection(cy, { kind: 'state', id });
+      } catch {
+        // A graph mid-teardown. The state is kept, and the next load draws it.
+      }
+    },
+    [recordStep, restoreSelection],
+  );
 
   const restoreSavedView = useCallback(
     (cy: any): boolean => {
@@ -1200,6 +1377,7 @@ export function useJffCytoscape({
           initialOverride: initialOverrideRef.current,
           finalOverrides: finalOverridesRef.current,
           transitionEdits: transitionEditsRef.current,
+          addedStates: addedStatesRef.current,
         });
         setPhase('drawing');
         setType(parsed.type);
@@ -1730,6 +1908,14 @@ export function useJffCytoscape({
         // highlight on click
         cy.on('tap', (evt: any) => {
           if (evt.target === cy) {
+            // With the State tool up, empty canvas is where a new state goes. `evt.position`
+            // is in the graph's own coordinates, so the zoom and the pan are already in it.
+            // Only here: a tap on a state or a line lands in the branch below and can never
+            // reach this, so clicking an existing state cannot leave a second one under it.
+            if (placeStateOnClickRef.current) {
+              addState(evt.position);
+              return;
+            }
             cy.elements().removeClass('faded highlighted');
             // A click on empty canvas means "never mind", so the properties panel goes too.
             setSelectedStateId(null);
@@ -1852,6 +2038,7 @@ export function useJffCytoscape({
       restoreSavedView,
       commitPendingMove,
       readSnapshot,
+      addState,
     ],
   );
 
@@ -1921,15 +2108,26 @@ export function useJffCytoscape({
     setInitialOverride(snapshot.initialOverride);
     setFinalOverrides(snapshot.finalOverrides);
     setTransitionEdits(snapshot.transitionEdits);
+    setAddedStates(snapshot.addedStates);
     renamesRef.current = snapshot.renames;
     initialOverrideRef.current = snapshot.initialOverride;
     finalOverridesRef.current = snapshot.finalOverrides;
     transitionEditsRef.current = snapshot.transitionEdits;
+    addedStatesRef.current = snapshot.addedStates;
 
     const pristine = pristineParsed.current;
     if (!pristine) return;
     const next = deriveParsed(pristine, snapshot);
     setParsed(next);
+    // Undo can take a drawn state off the machine, and the panel must not go on describing one
+    // that is no longer there.
+    if (
+      selectedStateIdRef.current &&
+      !next.states.some((state) => state.id === selectedStateIdRef.current)
+    ) {
+      setSelectedStateId(null);
+      setSelectedPosition(null);
+    }
     const cy = cyRef.current;
     if (cy) syncGraph(cy, next, epsSymbol);
   };
@@ -2170,6 +2368,7 @@ export function useJffCytoscape({
       setInitialOverride(undefined);
       setFinalOverrides({});
       setTransitionEdits({});
+      setAddedStates([]);
       setHonorPositions(honorPositionsDefault);
       // The rebuild puts every state back where its author had it.
       setReloadNonce((n) => n + 1);
@@ -2323,6 +2522,7 @@ export function useJffCytoscape({
         // A graph mid-teardown. The change is kept, and the next load draws it.
       }
     },
+    addState,
     /**
      * Make a state final, or stop it being one.
      *

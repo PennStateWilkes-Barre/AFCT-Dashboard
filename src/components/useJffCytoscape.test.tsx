@@ -2175,8 +2175,10 @@ describe('carrying the undo history through a refresh', () => {
 
     const { api } = renderViewer({ viewStateKey: KEY });
 
-    await waitFor(() => expect(lastCy().byId('0')?.data('label')).toBe('start'));
-    expect(api().canUndo).toBe(true);
+    // The renames are seeded at mount, but the history comes back with the restore at the very
+    // end of the load, so this has to wait for the load rather than for the label.
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    expect(lastCy().byId('0')?.data('label')).toBe('start');
 
     act(() => api().undo());
 
@@ -2208,6 +2210,140 @@ describe('carrying the undo history through a refresh', () => {
     const { api } = renderViewer({ viewStateKey: KEY });
 
     await waitFor(() => expect(api().phase).toBe('ready'));
+    // `ready` is set before the restore runs, so give the restore a chance to be wrong.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(api().canUndo).toBe(false);
+  });
+});
+
+/**
+ * Drawing a state.
+ *
+ * The viewer had no way to add anything to a machine before this: it could rename, re-mark and
+ * re-word what the file already had, and nothing else. A drawn state is the fifth thing held
+ * beside the parsed file rather than in it, so it survives a rebuild and a refresh the same way
+ * a rename does, and it is undoable through the same history.
+ */
+describe('drawing a state on the canvas', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  /** A click on empty canvas, at a point in the graph's own coordinates. */
+  const tapCanvas = (cy: FakeCy, at: { x: number; y: number }) =>
+    act(() => cy.handlers.tap({ target: cy, position: at }));
+
+  it('does nothing with the Select tool: empty canvas still just clears the panel', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const before = lastCy().nodeList.length;
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    expect(lastCy().nodeList).toHaveLength(before);
+    expect(api().selectedState).toBeNull();
+  });
+
+  it('draws one where the click landed, and opens its properties', async () => {
+    const { api } = renderViewer({ placeStateOnClick: true });
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    // The point cytoscape reported, which already has the zoom and the pan in it.
+    await waitFor(() => expect(api().selectedState?.name).toBe('q2'));
+    const drawn = lastCy().nodeList.find((n) => n.data('label') === 'q2');
+    expect(drawn?.position()).toEqual({ x: 300, y: 400 });
+    expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(true);
+    // And the toolbar says the drawing is no longer the file.
+    expect(api().viewModified).toBe(true);
+  });
+
+  it('draws a second one without the tool being chosen again', async () => {
+    const { api } = renderViewer({ placeStateOnClick: true });
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(api().selectedState?.name).toBe('q2'));
+    tapCanvas(lastCy(), { x: 500, y: 400 });
+
+    await waitFor(() => expect(api().selectedState?.name).toBe('q3'));
+    expect(api().parsed?.states).toHaveLength(4);
+  });
+
+  /** A tap on a state is a different branch entirely, so it can never leave one underneath. */
+  it('does not draw one under an existing state', async () => {
+    const { api } = renderViewer({ placeStateOnClick: true });
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const cy = lastCy();
+
+    act(() => cy.handlers.tap({ target: cy.byId('0') }));
+
+    expect(cy.nodeList.filter((n) => !n.hasClass('start') && !n.hasClass('note'))).toHaveLength(2);
+    expect(api().selectedState?.name).toBe('q0');
+  });
+
+  it('is one undo step, and redo puts it back', async () => {
+    const { api } = renderViewer({ placeStateOnClick: true });
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const drawn = () => lastCy().nodeList.find((n) => n.data('label') === 'q2');
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(drawn()).toBeDefined());
+
+    act(() => api().undo());
+
+    expect(drawn()).toBeUndefined();
+    expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(false);
+    // The panel cannot go on describing a state that is no longer on the machine.
+    expect(api().selectedState).toBeNull();
+
+    act(() => api().redo());
+
+    expect(drawn()).toBeDefined();
+  });
+
+  it('takes a name nobody is using, including one the reader typed', async () => {
+    const { api } = renderViewer({ placeStateOnClick: true });
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // q2 is the next free name, so claim it by hand first.
+    act(() => api().renameState('1', 'q2'));
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    await waitFor(() => expect(api().selectedState?.name).toBe('q3'));
+  });
+
+  it('comes back after a refresh, like a rename does', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).addedStates,
+      ).toHaveLength(1),
+    );
+
+    // A second visit reads it back and draws it.
+    const second = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    await waitFor(() =>
+      expect(second.api().parsed?.states.some((st) => st.name === 'q2')).toBe(true),
+    );
+  });
+
+  it('goes when the machine is put back the way it opened', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(true));
+
+    act(() => api().resetMachine());
+
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(false));
+    expect(api().viewModified).toBe(false);
   });
 });

@@ -35,7 +35,7 @@ export function ForcedPasswordChangeForm() {
   const confirmPassword = watch('confirmNewPassword');
   const helperId = 'forced-password-helper';
   const passwordRuleStatuses = passwordRules.map((rule) => ({
-    label: rule.label,
+    label: rule.short,
     passed: rule.test(newPassword),
   }));
 

@@ -119,7 +119,7 @@ function ResetPasswordForm() {
         <PasswordRulesHelper
           id={HELPER_ID}
           rules={passwordRules.map((rule) => ({
-            label: rule.label,
+            label: rule.short,
             passed: rule.test(newPassword),
           }))}
         />

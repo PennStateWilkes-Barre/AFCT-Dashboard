@@ -404,7 +404,7 @@ export default function LoginForm({
 
   const passwordHelperId = 'signup-password-helper';
   const passwordRuleStatuses = passwordRules.map((rule) => ({
-    label: rule.label,
+    label: rule.short,
     passed: rule.test(signupPassword),
   }));
 

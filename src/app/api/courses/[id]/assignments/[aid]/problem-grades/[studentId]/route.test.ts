@@ -556,3 +556,45 @@ describe('GET problem grades, feedback visibility', () => {
     });
   });
 });
+
+/**
+ * Whose grade this can write.
+ *
+ * `withCourseAuth` proves the caller manages the course in the URL, but the student comes from
+ * the path, and this roster lookup is the only thing tying them to that course. Without the
+ * `courseId` any user enrolled anywhere passes the enrollment check, and grade rows get written
+ * for somebody who is not in the course at all. The prisma mock answers the same either way, so
+ * nothing else in this file notices.
+ */
+describe('who a problem grade can be written for', () => {
+  it('looks the student up on this course roster', async () => {
+    vi.clearAllMocks();
+    canManageCourseMock.mockResolvedValue(true);
+    canAccessCourseMock.mockResolvedValue(true);
+    authMock.mockResolvedValue({ user: { id: 'staff-1', role: 'FACULTY' } });
+    prismaMock.course.findUnique.mockResolvedValue({ isArchived: false });
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'assignment-1', isPublished: true });
+    prismaMock.roster.findFirst.mockResolvedValue({ id: 'roster-1' });
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([{ problemId: 'prob-1', maxPoints: 10 }]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (ops: unknown[]) => {
+      await Promise.all(ops as Promise<unknown>[]);
+      return [];
+    });
+    prismaMock.assignmentProblemGrade.upsert.mockResolvedValue({});
+    activityLogMock.mockResolvedValue(undefined);
+
+    const res = await POST(
+      new NextRequest('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ grades: { 'prob-1': 5 } }),
+      }),
+      { params: Promise.resolve({ id: 'course-1', aid: 'assignment-1', studentId: 'student-1' }) },
+    );
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.roster.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'course-1', userId: 'student-1' },
+    });
+  });
+});

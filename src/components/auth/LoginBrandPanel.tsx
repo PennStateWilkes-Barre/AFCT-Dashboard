@@ -96,7 +96,7 @@ export function LoginBrandPanel({
             </span>
           </p>
 
-          <p className="text-sidebar-muted-foreground mt-5 max-w-lg text-base leading-normal font-normal 2xl:mt-6 2xl:text-lg">
+          <p className="text-sidebar-muted-foreground mt-3 max-w-lg text-base leading-normal font-normal 2xl:mt-4 2xl:text-lg">
             Learn, teach, and assess computing theory with intelligent feedback and streamlined
             tools.
           </p>

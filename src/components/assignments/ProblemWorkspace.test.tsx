@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -518,5 +518,255 @@ describe('the panels that collapse', () => {
       'true',
     );
     expect(screen.getByText('You, Ada Lovelace')).toBeVisible();
+  });
+});
+
+/**
+ * The Late badge, which is the deadline arriving in the one place a student looks for it.
+ *
+ * Two ways to be late and they are not the same: the server can stamp the submission LATE, or
+ * the timestamp can simply fall after the deadline this viewer is held to. The second is what
+ * an extension changes, so both branches matter.
+ */
+describe('marking an attempt late', () => {
+  const at = (iso: string, over: Record<string, unknown> = {}) => ({
+    id: 's1',
+    status: 'COMPLETED',
+    correct: true,
+    fileName: 'a.jff',
+    originalFileName: 'a.jff',
+    submittedAt: iso,
+    feedback: null,
+    problemId: 'p1',
+    ...over,
+  });
+
+  it('marks an attempt sent after the deadline', () => {
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        assignmentDueDate="2026-03-01T00:00:00.000Z"
+        submissions={[at('2026-03-02T10:00:00.000Z')]}
+      />,
+    );
+
+    // Twice over: the badge under the timestamp and the Status column's own chip. Both are
+    // the same fact, which is worth knowing if either is ever reworded.
+    expect(screen.getAllByText('Late').length).toBeGreaterThan(0);
+  });
+
+  it('leaves an attempt sent before it alone', () => {
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        assignmentDueDate="2026-03-01T00:00:00.000Z"
+        submissions={[at('2026-02-27T10:00:00.000Z')]}
+      />,
+    );
+
+    expect(screen.queryByText('Late')).not.toBeInTheDocument();
+  });
+
+  it('trusts a LATE status even with no deadline to compare against', () => {
+    // The server decided this one. Without a due date there is nothing to measure it by, and
+    // dropping the badge here would hide a fact somebody already established.
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        submissions={[at('2026-03-02T10:00:00.000Z', { status: 'LATE' })]}
+      />,
+    );
+
+    expect(screen.getAllByText('Late').length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * The two actions on an attempt: opening it, and (staff only) sending it back through the
+ * autograder.
+ */
+describe('acting on an attempt', () => {
+  const submission = {
+    id: 's1',
+    status: 'COMPLETED',
+    correct: true,
+    fileName: 'stored-abc.jff',
+    originalFileName: 'traffic light.jff',
+    submittedAt: '2026-03-01T10:00:00.000Z',
+    feedback: null,
+    problemId: 'p1',
+  };
+
+  it('opens the attempt the row belongs to', async () => {
+    const onViewSubmission = vi.fn();
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        submissions={[submission]}
+        onViewSubmission={onViewSubmission}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /traffic light\.jff/ }));
+
+    expect(onViewSubmission).toHaveBeenCalledWith(submission);
+  });
+
+  it("names the file by the stored name when the student's own name is missing", async () => {
+    render(
+      <ProblemWorkspace {...baseProps} submissions={[{ ...submission, originalFileName: null }]} />,
+    );
+
+    expect(screen.getByRole('button', { name: /stored-abc\.jff/ })).toBeInTheDocument();
+  });
+
+  it('offers a rerun to staff and sends the right attempt', async () => {
+    const onRerunSubmission = vi.fn();
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        submissions={[submission]}
+        onRerunSubmission={onRerunSubmission}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Attempt actions' }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /rerun/i }));
+
+    expect(onRerunSubmission).toHaveBeenCalledWith(submission);
+  });
+
+  it('offers no rerun to a student', async () => {
+    render(
+      <ProblemWorkspace
+        {...baseProps}
+        isPrivilegedUser={false}
+        submissions={[submission]}
+        onRerunSubmission={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Attempt actions' }));
+
+    expect(screen.queryByRole('menuitem', { name: /rerun/i })).not.toBeInTheDocument();
+  });
+});
+
+/** The two states before there is a table to show. */
+describe('before there are attempts to show', () => {
+  it('asks for a problem when none is selected', () => {
+    render(<ProblemWorkspace {...baseProps} problem={null} />);
+
+    expect(screen.getByText(/select a problem/i)).toBeInTheDocument();
+  });
+
+  it('says it is loading rather than showing an empty table', () => {
+    render(<ProblemWorkspace {...baseProps} submissionsLoading />);
+
+    // Two live regions on this page: the table's loading announcement and the sr-only one
+    // that reports the latest attempt. Only the first says anything here.
+    const announced = screen.getAllByRole('status').map((el) => el.textContent ?? '');
+    expect(announced.some((t) => /loading/i.test(t))).toBe(true);
+  });
+});
+
+/**
+ * The group card's own arithmetic. The heading counts the reader in, and a member with no
+ * name still has to appear: a list that silently dropped them would misstate the size of the
+ * group somebody is being graded with.
+ */
+describe('counting a group', () => {
+  const withGroup = (
+    members: { id: string; firstName: string | null; lastName: string | null }[],
+  ) => (
+    <ProblemWorkspace
+      {...baseProps}
+      isGroupWork
+      group={{ id: 'g1', name: 'Team Turing' }}
+      groupMembers={members}
+      subjectName="You"
+    />
+  );
+
+  it('counts the reader in, and says member rather than members for a group of one', () => {
+    render(withGroup([]));
+
+    expect(screen.getByRole('heading', { name: /Team Turing · 1 member$/ })).toBeInTheDocument();
+  });
+
+  it('pluralises once there is somebody else', () => {
+    render(withGroup([{ id: 'u2', firstName: 'Ada', lastName: 'Lovelace' }]));
+
+    expect(screen.getByRole('heading', { name: /Team Turing · 2 members/ })).toBeInTheDocument();
+  });
+
+  it('still lists a member whose name is missing', async () => {
+    render(withGroup([{ id: 'u2', firstName: null, lastName: null }]));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Expand members' }));
+
+    // "Student" rather than an empty gap, so the list length still matches the count above it.
+    expect(screen.getByText('You, Student')).toBeInTheDocument();
+  });
+});
+
+/**
+ * The grader's own panel: the grade form, the LMS passback row, and the control that decides
+ * whether the autograder may overwrite a mark a person entered.
+ *
+ * Staff-only by construction, and the reason the student's Problem Grade card exists as a
+ * separate readout rather than a disabled version of this.
+ */
+describe('the grade panel a grader sees', () => {
+  const graderProps = {
+    ...baseProps,
+    // The hold control only exists where the autograder could overwrite a mark, so the
+    // problem has to have it switched on for there to be anything to decide.
+    problem: { ...problem, autograderEnabled: true },
+    currentGrade: 8,
+    gradeInput: '8',
+    onGradeInputChange: vi.fn(),
+    onSaveGrade: vi.fn(),
+  };
+
+  it('offers the hold control, which is what stops a rerun overwriting a person', async () => {
+    const onManualHoldChange = vi.fn();
+    render(
+      <ProblemWorkspace
+        {...graderProps}
+        gradeSource="MANUAL"
+        gradedManually
+        onManualHoldChange={onManualHoldChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Release to autograder' }));
+
+    // Releasing is confirmed first: it hands a mark a person entered back to a process that
+    // may overwrite it, and nothing says so until the dialog does.
+    const confirm = screen.getByRole('dialog', { name: /release this grade/i });
+    expect(onManualHoldChange).not.toHaveBeenCalled();
+
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Release to autograder' }));
+
+    expect(onManualHoldChange).toHaveBeenCalledWith(false);
+  });
+
+  it('renders the LMS row once it knows which assignment to sync', () => {
+    render(<ProblemWorkspace {...graderProps} assignmentId="a1" studentId="stu1" />);
+
+    // The card decides for itself whether the course is linked to an LMS, so the assertion is
+    // that the panel got as far as mounting it rather than what it then chose to show.
+    expect(screen.getByRole('heading', { name: 'Problem Grade' })).toBeInTheDocument();
+  });
+
+  it('shows a student the readout instead, with no controls to press', () => {
+    render(<ProblemWorkspace {...baseProps} isPrivilegedUser={false} currentGrade={8} />);
+
+    expect(screen.getByRole('heading', { name: 'Problem Grade' })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /release to autograder/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /lock this grade/i })).not.toBeInTheDocument();
   });
 });

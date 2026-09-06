@@ -251,7 +251,14 @@ export function LoginBrandPanel({
             column creeping toward the login card as it gets taller. The icons align to the
             first line of each row rather than centring on the block, so the three glyphs sit
             on one vertical rhythm whether a description wraps to one line or two. */}
-        <ul className="max-w-[30rem] space-y-7">
+        {/* Spacing that grows with the room there actually is. Keyed to viewport height, not
+            to a width breakpoint, because height is what is scarce in this panel: the copy
+            above and the footer below are fixed, and this list is what has to fit between
+            them. A wide but short window (a 1920x720 one, say) is precisely where more air
+            would push the list into the footer, and a width breakpoint would have given it
+            more there. 28px on a short screen, 36px once there is real height, 40px on a tall
+            display. The only height query in this file; everything else here is width. */}
+        <ul className="max-w-[30rem] space-y-7 [@media(min-height:1000px)]:space-y-10 [@media(min-height:850px)]:space-y-9">
           {FEATURES.map(({ icon: Icon, title, body }) => (
             <li key={title} className="flex items-start gap-3.5">
               {/* A tinted disc rather than a bare glyph: an unframed icon reads as debris

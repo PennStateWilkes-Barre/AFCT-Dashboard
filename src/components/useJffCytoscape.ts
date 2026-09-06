@@ -362,16 +362,22 @@ function isFinitePoint(value: any): value is { x: number; y: number } {
 }
 
 /**
- * Dim the machine around one element and light up what it touches.
+ * Dim the machine around one element and light up that element alone.
+ *
+ * The neighbourhood used to come up with it: clicking a state lit the transitions running out of
+ * it too. That answers a different question from the one a click asks. What the panel then opens
+ * on is the state, what undo and the properties boxes act on is the state, and lighting four
+ * lines beside it left the reader picking their selection out of a group rather than seeing it.
+ * One click, one thing.
  *
  * Shared by the click that selects something and the restore that puts a selection back after a
  * refresh, so the drawing looks the same either way round rather than coming back with an open
  * properties panel and nothing marked on the canvas.
  */
 function highlightElement(cy: any, ele: any): void {
-  const neighborhood = ele.closedNeighborhood ? ele.closedNeighborhood() : ele.neighborhood();
   cy.elements().addClass('faded');
-  neighborhood.addClass('highlighted').removeClass('faded');
+  ele.addClass?.('highlighted');
+  ele.removeClass?.('faded');
 }
 
 /**

@@ -75,13 +75,6 @@ class FakeEl {
   isNode() {
     return this.data_.source === undefined;
   }
-  /** The element plus whatever touches it, which is what tap highlights. */
-  closedNeighborhood() {
-    const touching = this.isNode()
-      ? this.connectedEdges()
-      : [this.source(), this.target()].filter(Boolean);
-    return collection([this as FakeEl, ...(touching as FakeEl[])]);
-  }
   empty() {
     return false;
   }
@@ -683,7 +676,7 @@ describe('the export actions', () => {
 });
 
 describe('interacting with the graph', () => {
-  it('dims everything except the tapped state and what it touches', async () => {
+  it('dims everything except the one thing that was tapped', async () => {
     renderViewer();
     await waitFor(() => expect(lastCy().handlers.tap).toBeDefined());
     const cy = lastCy();
@@ -693,7 +686,25 @@ describe('interacting with the graph', () => {
 
     expect(q0.hasClass('highlighted')).toBe(true);
     expect(q0.hasClass('faded')).toBe(false);
-    // The state it has no transition with stays dimmed.
+    // Everything else stays dimmed, including the transitions running out of the state that
+    // was clicked. They used to come up with it, which lit four things for one click.
+    expect((cy.byId('1') as FakeEl).hasClass('faded')).toBe(true);
+    const outgoing = cy.edgeList.filter((e) => e.data('source') === '0');
+    expect(outgoing.length).toBeGreaterThan(0);
+    expect(outgoing.every((e) => e.hasClass('faded'))).toBe(true);
+  });
+
+  it('lights the transition alone when a line is tapped', async () => {
+    renderViewer();
+    await waitFor(() => expect(lastCy().handlers.tap).toBeDefined());
+    const cy = lastCy();
+    const edge = cy.edgeList.find((e) => e.data('source') === '0' && e.data('target') === '1')!;
+
+    cy.handlers.tap({ target: edge });
+
+    expect(edge.hasClass('highlighted')).toBe(true);
+    // Not the states at either end of it.
+    expect((cy.byId('0') as FakeEl).hasClass('faded')).toBe(true);
     expect((cy.byId('1') as FakeEl).hasClass('faded')).toBe(true);
   });
 

@@ -1479,3 +1479,138 @@ input[type='week'] {
   color: var(--color-destructive);
   font-family: var(--font-mono, monospace);
 }
+
+/* ============================================================================
+   Sign-in transition
+
+   Signing in ends with a full page load, so the two halves of this are in two places and
+   have to agree. The login page (LoginForm) wipes a cobalt-to-navy circle out of the Sign
+   In button and then navigates; the dashboard (DashboardEntryTransition) lays the same navy
+   back down, fades it, and brings its three regions in behind it. The end colour is
+   `--sidebar` on both sides, which is what makes the two pages look like one movement
+   rather than two.
+
+   All of it is CSS rather than framer-motion, for two reasons. The login overlay has to be
+   `position: fixed` while its nearest sensible parent carries a `translate` at xl and above,
+   and a transformed ancestor would make "fixed" mean "fixed to the card"; and the dashboard
+   half has to run before React exists on the page at all.
+
+   Reduced motion: the login page never starts the transition and the dashboard's script
+   returns early, so neither overlay is ever shown. The rules below are inside a
+   no-preference query as well, so a stale flag cannot animate anything either.
+   ============================================================================ */
+
+/* --- Leaving the login page --------------------------------------------------------- */
+
+.auth-exit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Sized and positioned inline: the circle is centred on the Sign In button and made wide
+   enough to reach the furthest corner of the viewport from there, which only the component
+   can know. --primary is the button's own cobalt on this surface, --sidebar the navy the
+   dashboard comes back on. */
+.auth-exit-overlay > span {
+  position: absolute;
+  border-radius: 9999px;
+  background: radial-gradient(circle, var(--primary) 0%, var(--sidebar) 72%);
+  transform: translate(-50%, -50%) scale(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .auth-exit-overlay > span {
+    animation: afct-login-wipe 260ms 60ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+}
+
+@keyframes afct-login-wipe {
+  from {
+    transform: translate(-50%, -50%) scale(0);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* --- Arriving at the dashboard ------------------------------------------------------- */
+
+#afct-entry-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: var(--sidebar);
+  /* Invisible by default so that if the animation below never applies, unhiding this element
+     cannot leave a navy sheet over the dashboard. */
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  #afct-entry-overlay {
+    animation: afct-entry-fade 220ms ease-out forwards;
+  }
+
+  /* The rail, the header, then the page. Offsets of about 70ms, which is enough to read as
+     an order rather than as three things arriving late.
+
+     The sidebar's own container, not the wrapper around it. The wrapper holds a
+     `position: fixed` rail, and a transform on it would make that rail position itself
+     against the wrapper's empty box instead of the viewport. */
+  [data-afct-entering] [data-slot='sidebar-container'] {
+    animation: afct-entry-rail 200ms 40ms ease-out both;
+  }
+
+  [data-afct-entering] [data-entry='navbar'] {
+    animation: afct-entry-header 200ms 110ms ease-out both;
+  }
+
+  [data-afct-entering] [data-entry='main'] {
+    animation: afct-entry-page 220ms 180ms ease-out both;
+  }
+}
+
+@keyframes afct-entry-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes afct-entry-rail {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-header {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-page {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

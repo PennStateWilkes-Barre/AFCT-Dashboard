@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { showToast } from '@/lib/toast';
 import { LazyMotion, m, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Building2, LockKeyhole, Mail } from 'lucide-react';
+import { Building2, Check, LockKeyhole, Mail } from 'lucide-react';
 import { AuthBrandMark } from '@/components/auth/AuthBrandMark';
 import { AuthPageBackground } from '@/components/auth/AuthPageBackground';
 import { LoginBrandPanel } from '@/components/auth/LoginBrandPanel';
@@ -18,6 +18,7 @@ import HCaptcha from '@hcaptcha/react-hcaptcha';
 import { PasswordRulesHelper } from '@/components/auth/PasswordRulesHelper';
 import { passwordRules } from '@/lib/password-policy';
 import { safeCallbackUrl } from '@/lib/safe-callback';
+import { markLoginTransition } from '@/lib/login-transition';
 import { oidcRefusalMessage } from '@/lib/oidc-refusal-message';
 import { isValidEmail } from '@/lib/email';
 import { SignupFormSchema } from '@/schemas/auth';
@@ -38,6 +39,17 @@ type SignupErrors = Partial<Record<SignupField, string>>;
  * animation itself is unchanged.
  */
 const loadMotionFeatures = () => import('framer-motion').then((mod) => mod.domAnimation);
+
+/**
+ * How long the page stays up after a successful sign-in before handing over to the dashboard.
+ *
+ * Long enough for the wipe in globals.css to cover the screen (60ms delay plus a 260ms
+ * expansion), short enough that it never feels like a wait. A timer rather than the
+ * animation's own end event: the navigation is the real behaviour and the animation is
+ * decoration, so it must not be possible for a missed callback to strand somebody on a blue
+ * screen. The dashboard's entrance takes it from here, and the two together land around 700ms.
+ */
+const LOGIN_EXIT_MS = 340;
 
 type LoginFormProps = {
   /** Read on the server, so the signup link and captcha are correct on the first paint. */
@@ -95,6 +107,17 @@ export default function LoginForm({
   const [signupErrors, setSignupErrors] = useState<SignupErrors>({});
   const [captchaVisible, setCaptchaVisible] = useState(false);
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  // Set once the credentials are accepted and the page is on its way out. Everything it drives
+  // is one-way: the form never comes back from it, so it also serves as the resubmit guard.
+  const [loginComplete, setLoginComplete] = useState(false);
+  // Where the wipe starts from, in viewport pixels, plus how wide the circle has to be to
+  // cover the screen from there. Null until the sign-in succeeds.
+  const [exitOrigin, setExitOrigin] = useState<{ x: number; y: number; size: number } | null>(null);
+  // One ref per form rather than one shared between them: while AnimatePresence crosses the
+  // two forms over, React attaches the incoming ref before detaching the outgoing one, and a
+  // single ref would be left null by the detach.
+  const loginSubmitRef = useRef<HTMLButtonElement | null>(null);
+  const signupSubmitRef = useRef<HTMLButtonElement | null>(null);
   const interactionStartRef = useRef(
     typeof performance !== 'undefined' ? performance.now() : Date.now(),
   );
@@ -214,9 +237,47 @@ export default function LoginForm({
     }
   };
 
+  /**
+   * The one way out of this page, shared by sign-in and by signup's auto sign-in.
+   *
+   * Both end identically: hand the browser to `callbackUrl`. The only difference is what the
+   * reader sees on the way. With motion allowed, the button confirms, the card settles back a
+   * fraction, a cobalt circle grows out of the button until it fills the screen, and a flag is
+   * left for the dashboard to pick the movement up on the other side of the load. With reduced
+   * motion the page simply navigates, and the flag is never set, so the dashboard has nothing
+   * to play either. That is a skip, not a shortened version of the same thing.
+   *
+   * Only ever called after a successful sign-in. A refused credential, a captcha challenge, a
+   * rate-limit block or a failed field validation all return before reaching it.
+   */
+  const finishSignIn = useCallback(() => {
+    if (reduceMotion) {
+      window.location.href = callbackUrl;
+      return;
+    }
+
+    const button = (mode === 'login' ? loginSubmitRef : signupSubmitRef).current;
+    const rect = button?.getBoundingClientRect();
+    const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+    const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+    // Diameter, so the circle reaches the corner furthest from the button.
+    const size =
+      2 * Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+
+    setExitOrigin({ x, y, size });
+    setLoginComplete(true);
+    markLoginTransition();
+    window.setTimeout(() => {
+      window.location.href = callbackUrl;
+    }, LOGIN_EXIT_MS);
+  }, [callbackUrl, mode, reduceMotion]);
+
   // Basic credential flow with minimal client-side validation before delegating to NextAuth.
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Already signed in and on the way out. A second Enter between success and the navigation
+    // would otherwise fire another signIn().
+    if (loginComplete) return;
     const trimmedEmail = loginEmail.trim();
     const trimmedPassword = loginPassword.trim();
 
@@ -273,13 +334,14 @@ export default function LoginForm({
       setLoginErrors({});
       setCaptchaVisible(false);
       setCaptchaToken(null);
-      window.location.href = callbackUrl;
+      finishSignIn();
     }
   };
 
   // Calls the signup route, then signs the new user in with the same credentials.
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loginComplete) return;
 
     if (allowSignup !== true) {
       showToast.error('Signups are currently disabled.');
@@ -399,7 +461,7 @@ export default function LoginForm({
     }
 
     setSignupErrors({});
-    window.location.href = callbackUrl;
+    finishSignIn();
   };
 
   const passwordHelperId = 'signup-password-helper';
@@ -484,6 +546,24 @@ export default function LoginForm({
           across 1440 to 2560. The 2xl step also makes the 1536 dip shallower rather than
           deeper: 79px instead of 63. */}
       <div className="auth-form-surface 3xl:pr-40 relative z-10 flex min-h-dvh w-full flex-col items-center px-4 py-6 sm:px-6 lg:pt-10 lg:pb-6 2xl:pr-16">
+        {/* The wipe out of the page. Decorative and inert: it announces nothing, takes no
+            focus and cannot be clicked. It lives here rather than around the card because it
+            is `position: fixed` and the card's wrapper is translated at xl and above, which
+            would make "fixed" mean "fixed to that block". Sized and centred inline because
+            only this component knows where the button ended up; the rest is in globals.css
+            under "Sign-in transition". */}
+        {exitOrigin ? (
+          <div className="auth-exit-overlay" aria-hidden="true">
+            <span
+              style={{
+                left: exitOrigin.x,
+                top: exitOrigin.y,
+                width: exitOrigin.size,
+                height: exitOrigin.size,
+              }}
+            />
+          </div>
+        ) : null}
         {/* Out of flow on purpose. In flow this block sat above the card, so `flex-1` on the
             card's wrapper measured only the height left underneath it and the card centred in
             that remainder, which put it visibly low on a phone. Absolute inside the container
@@ -552,7 +632,14 @@ export default function LoginForm({
               Auth0 400); 520 less 64 of padding was 456, wider than any of them. This lands
               at 376, and it is now the same measure at every desktop size rather than being
               squeezed to 457 at the narrow end. */}
-          <div className="relative mx-auto w-full max-w-[440px]">
+          {/* The settle. On a successful sign-in the whole card eases back a fraction as the
+              wipe comes over it, so it reads as stepping away rather than being covered. */}
+          <div
+            className={cn(
+              'relative mx-auto w-full max-w-[440px] transition-transform duration-200 ease-out',
+              loginComplete && 'scale-[0.975]',
+            )}
+          >
             {/* Two shadows rather than one. The first is an ordinary dark drop, which is what
                 lifts the card off the page. The second is a wide, very faint cobalt ambient at
                 0.08, which is not a glow to be seen in its own right: it stops the white
@@ -660,12 +747,22 @@ export default function LoginForm({
                       {renderCaptchaGate()}
 
                       <Button
+                        ref={loginSubmitRef}
                         type="submit"
-                        disabled={loading}
-                        aria-disabled={loading}
+                        disabled={loading || loginComplete}
+                        aria-disabled={loading || loginComplete}
                         className="h-11 w-full font-semibold"
                       >
-                        {loading ? 'Logging in...' : 'Sign In'}
+                        {loginComplete ? (
+                          <>
+                            <Check className="size-4" aria-hidden="true" />
+                            Signed in
+                          </>
+                        ) : loading ? (
+                          'Logging in...'
+                        ) : (
+                          'Sign In'
+                        )}
                       </Button>
 
                       {/* Shown only when a provider is configured, so the button never leads
@@ -795,12 +892,22 @@ export default function LoginForm({
                       {renderCaptchaGate()}
 
                       <Button
+                        ref={signupSubmitRef}
                         type="submit"
-                        disabled={loading}
-                        aria-disabled={loading}
+                        disabled={loading || loginComplete}
+                        aria-disabled={loading || loginComplete}
                         className="h-11 w-full font-semibold"
                       >
-                        {loading ? 'Signing up...' : 'Create Account'}
+                        {loginComplete ? (
+                          <>
+                            <Check className="size-4" aria-hidden="true" />
+                            Account created
+                          </>
+                        ) : loading ? (
+                          'Signing up...'
+                        ) : (
+                          'Create Account'
+                        )}
                       </Button>
 
                       <p className="text-muted-foreground text-center text-sm">

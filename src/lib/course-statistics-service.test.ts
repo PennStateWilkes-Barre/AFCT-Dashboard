@@ -578,3 +578,51 @@ describe('a student whose only group is in another set', () => {
     });
   });
 });
+
+/**
+ * What the course statistics reads are scoped to.
+ *
+ * Given a course id, every read here has to stay inside it: the cohort, the assignments, the
+ * overrides and grades those assignments produced, and the submissions. The prisma mocks
+ * answer from their fixtures whatever the `where` says, so nothing above notices a missing
+ * key: without the `courseId` the roster read is every student in the installation, and the
+ * submission read is every attempt ever made. This service already shipped one bug of exactly
+ * that shape (an unscoped membership read), so the queries are asserted whole.
+ */
+describe('what the course statistics reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('keeps the cohort, the work, and the attempts inside this course', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([rosterRow('s1')]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'A1',
+        dueDate: DUE,
+        unlockAt: null,
+        lateCutoff: null,
+        allowLateSubmissions: false,
+        isPublished: true,
+        assignedToEveryone: true,
+        missingWorkIsZero: false,
+        groupSetId: null,
+        assignees: [],
+        problems: [problem('p1')],
+      },
+    ]);
+
+    await getCourseStatistics('c1');
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({ courseId: 'c1' });
+    // The rows hanging off those assignments, bounded by the ids this course produced.
+    expect(whereOf(prismaMock.assignmentOverride.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+  });
+});

@@ -101,3 +101,28 @@ describe('PUT /api/courses/[id]/assignments/[aid]/type', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * What a type change is allowed to reach.
+ *
+ * Both lookups take an id from outside the handler: the assignment from the path and the
+ * group set from the request body. Each has to be confirmed against the course in the URL.
+ * The prisma mock answers with its fixture either way, so without the `courseId` a faculty
+ * member could turn another course's assignment into group work, or point this one at a group
+ * set belonging to somebody else's course.
+ */
+describe('what a type change is allowed to reach', () => {
+  it('resolves the assignment and the target group set inside this course only', async () => {
+    prismaMock.groupSet.findFirst.mockResolvedValue({ id: 'gs1' });
+
+    const res = await put({ groupSetId: 'gs1' });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.assignment.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', courseId: 'c1' },
+    });
+    expect(prismaMock.groupSet.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'gs1', courseId: 'c1' },
+    });
+  });
+});

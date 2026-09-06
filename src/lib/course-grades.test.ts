@@ -11,7 +11,13 @@ const prismaMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 
-import { getCourseGradeMatrix, getCourseGradeColumns, getCourseGradePage } from './course-grades';
+import {
+  getCourseGradeMatrix,
+  getCourseGradeColumns,
+  getCourseGradePage,
+  getCourseGradeStructure,
+  getCourseGradeValues,
+} from './course-grades';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -700,5 +706,137 @@ describe('the Average denominator', () => {
     const { rows } = await getCourseGradePage({ courseId: 'c1', skip: 0, take: 10 });
 
     expect(rows.find((r) => r.id === 's1')?.missing).toEqual([]);
+  });
+});
+
+/**
+ * What every gradebook query is scoped to.
+ *
+ * These helpers take a course id and are trusted to stay inside it. The prisma mock answers
+ * with its fixture whatever the `where` says, so a dropped scoping key changes nothing any
+ * other test in this file can see: `{ courseId, role: 'STUDENT' }` without the `courseId`
+ * still returns two students here, and in production would return every student in the
+ * installation. Each assertion below is on the whole `where`, not a subset, so any key going
+ * missing fails rather than only the ones somebody thought to name.
+ */
+describe('what the gradebook queries are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }, i = 0) =>
+    (fn.mock.calls[i]?.[0] as { where?: unknown } | undefined)?.where;
+
+  const oneAssignment = () =>
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'A1',
+        dueDate: null,
+        isPublished: true,
+        assignedToEveryone: true,
+        problems: [{ maxPoints: 10 }],
+        assignees: [],
+      },
+    ]);
+
+  it('getCourseGradeStructure reads only this course', async () => {
+    oneAssignment();
+
+    await getCourseGradeStructure('c1');
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+  });
+
+  it('getCourseGradeValues reads only this course, and only these students and assignments', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([{ id: 'a1' }]);
+
+    await getCourseGradeValues('c1');
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: { in: ['s1', 's2'] },
+    });
+  });
+
+  it('getCourseGradeMatrix keeps its roster, grade and submission reads inside the course', async () => {
+    oneAssignment();
+
+    await getCourseGradeMatrix('c1');
+
+    // Both halves run: the structure's roster read and the accountability roster read.
+    const rosterWheres = prismaMock.roster.findMany.mock.calls.map(
+      (c) => (c[0] as { where: unknown }).where,
+    );
+    expect(rosterWheres).toContainEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(rosterWheres).toContainEqual({ courseId: 'c1', userId: { in: ['s1', 's2'] } });
+
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: { in: ['s1', 's2'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: { in: ['s1', 's2'] },
+    });
+    // No groups in this fixture, so the submission read is by student alone.
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      OR: [{ studentId: { in: ['s1', 's2'] } }],
+    });
+  });
+
+  it('getCourseGradeColumns counts only this course', async () => {
+    oneAssignment();
+    prismaMock.roster.count.mockResolvedValue(2);
+
+    await getCourseGradeColumns('c1');
+
+    expect(whereOf(prismaMock.roster.count)).toEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+  });
+
+  it('getCourseGradePage reads the page students from this course only', async () => {
+    oneAssignment();
+    prismaMock.roster.count.mockResolvedValue(2);
+    prismaMock.roster.findMany.mockResolvedValue([
+      { userId: 's1', status: 'ENROLLED', user: { inactive: false } },
+      { userId: 's2', status: 'ENROLLED', user: { inactive: false } },
+    ]);
+
+    await getCourseGradePage({ courseId: 'c1', skip: 0, take: 10 });
+
+    const rosterWheres = prismaMock.roster.findMany.mock.calls.map(
+      (c) => (c[0] as { where: unknown }).where,
+    );
+    // The page itself, then the accountability read for the ids on it.
+    expect(rosterWheres[0]).toMatchObject({ courseId: 'c1', role: 'STUDENT' });
+    expect(rosterWheres[1]).toEqual({ courseId: 'c1', userId: { in: ['s1', 's2'] } });
+  });
+
+  /**
+   * Sorting by the total takes a different path: it reads every candidate, not just the page,
+   * and builds the sort key from its own roster and grade reads. Those are separate queries
+   * from the ones above and need their own scope.
+   */
+  it('sorting by total keeps the candidate reads inside the course', async () => {
+    oneAssignment();
+    prismaMock.roster.count.mockResolvedValue(2);
+    prismaMock.roster.findMany.mockResolvedValue([
+      { userId: 's1', status: 'ENROLLED', user: { inactive: false } },
+      { userId: 's2', status: 'ENROLLED', user: { inactive: false } },
+    ]);
+
+    await getCourseGradePage({ courseId: 'c1', skip: 0, take: 10, sortBy: 'totalGrade' });
+
+    const rosterWheres = prismaMock.roster.findMany.mock.calls.map(
+      (c) => (c[0] as { where: unknown }).where,
+    );
+    expect(rosterWheres[0]).toMatchObject({ courseId: 'c1', role: 'STUDENT' });
+    expect(rosterWheres[1]).toEqual({ courseId: 'c1', userId: { in: ['s1', 's2'] } });
+    // The sort key's own grade read, which is a different call site from the page's.
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: { in: ['s1', 's2'] },
+    });
   });
 });

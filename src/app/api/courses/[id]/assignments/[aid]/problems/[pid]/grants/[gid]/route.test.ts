@@ -64,3 +64,27 @@ describe('DELETE grant', () => {
     expect(prismaMock.submissionGrant.delete).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Which grant this can revoke.
+ *
+ * The grant id comes from the path, and the delete that follows goes by id alone, so this
+ * lookup is the only thing confirming the grant belongs to this problem, this assignment and
+ * this course. The prisma mock returns `GRANT` whatever the `where` says, so the test above
+ * passes just as happily with the course check gone.
+ */
+describe('which grant this can revoke', () => {
+  it('resolves the grant through this problem, assignment and course', async () => {
+    const res = await del();
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.submissionGrant.findFirst.mock.calls[0][0]).toMatchObject({
+      where: {
+        id: 'g1',
+        assignmentId: 'a1',
+        problemId: 'p1',
+        assignmentProblem: { assignment: { courseId: 'c1' } },
+      },
+    });
+  });
+});

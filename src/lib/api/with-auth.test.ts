@@ -201,6 +201,25 @@ describe('withCourseAuth', () => {
     });
   });
 
+  /**
+   * The standing recorded on a denial is the caller's standing in the course they were
+   * refused. The prisma mock answers with its fixture whatever the `where` says, so without
+   * both keys the log would report somebody else's role, or this person's role in a different
+   * course, as the reason for the refusal. That log is the FERPA disclosure record, so it
+   * saying the wrong thing is the failure, not a cosmetic one.
+   */
+  it('reads the standing it logs from this course and this caller', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1' } });
+    canManageMock.mockResolvedValue(false);
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', status: 'ENROLLED' });
+
+    await withCourseAuth(vi.fn(), manage)(new Request('http://localhost/x'), ctx());
+
+    expect(prismaMock.roster.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1', userId: 'u1' },
+    });
+  });
+
   it('says so when the caller is not on the roster at all', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1' } });
     canManageMock.mockResolvedValue(false);

@@ -374,3 +374,95 @@ describe('what the assignment query is scoped to', () => {
     expect(where).toMatchObject(assignedToStudentWhere('stu-1'));
   });
 });
+
+/**
+ * What the follow-up reads are scoped to.
+ *
+ * Once the assignment list is known, six more queries run off it: problems, grades, attempt
+ * counts, latest statuses, grants and memberships. Each is scoped to those assignment ids and,
+ * where it is the student's own record, to the student (their own rows plus their group's on
+ * group work, the same rule submit enforcement uses). The prisma mock returns its fixture
+ * whatever the `where` says, so a dropped key here would hand a student another student's
+ * attempt counts and grades with nothing in this file noticing.
+ */
+describe('what the follow-up student reads are scoped to', () => {
+  const groupScoped = {
+    OR: [{ studentId: 'stu-1' }, { studentGroup: { memberships: { some: { userId: 'stu-1' } } } }],
+  };
+
+  beforeEach(() => {
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'A1',
+        description: null,
+        unlockAt: null,
+        dueDate: null,
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        overrides: [],
+      },
+    ]);
+  });
+
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('reads problems for these assignments only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+  });
+
+  it('reads grades for these assignments and this student only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: 'stu-1',
+    });
+  });
+
+  it('counts attempts, and reads the latest status, for this student or their group only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.submission.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+      ...groupScoped,
+    });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      ...groupScoped,
+    });
+  });
+
+  it('reads grants for this student or their group, on these assignments only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      OR: [
+        { userId: 'stu-1' },
+        { studentGroup: { memberships: { some: { userId: 'stu-1' } } } },
+      ],
+    });
+  });
+
+  it('reads this student’s own group memberships', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.groupMembership.findMany)).toEqual({ userId: 'stu-1' });
+  });
+
+  it('asks only for the overrides that apply to this student', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    const select = (
+      prismaMock.assignment.findMany.mock.calls[0][0] as {
+        select: { overrides: { where: unknown } };
+      }
+    ).select;
+    expect(select.overrides.where).toEqual({
+      OR: [
+        { userId: 'stu-1' },
+        { studentGroup: { memberships: { some: { userId: 'stu-1' } } } },
+      ],
+    });
+  });
+});

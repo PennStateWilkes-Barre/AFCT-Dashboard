@@ -142,3 +142,27 @@ describe('DELETE override', () => {
     expect(prismaMock.assignment.update).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Which override this can change.
+ *
+ * The override id comes from the path, so this lookup is the only thing tying it to the
+ * assignment and the course. The prisma mock returns its fixture either way, so without the
+ * nested `assignment: { courseId }` a deadline exception in another course could be edited or
+ * deleted from a URL scoped to your own.
+ */
+describe('which override this can reach', () => {
+  it('resolves the override through this assignment and this course', async () => {
+    prismaMock.assignmentOverride.update.mockResolvedValue({
+      ...EXISTING,
+      dueDate: new Date('2026-01-25T23:59:00.000Z'),
+    });
+
+    const res = await patch({ dueDate: '2026-01-25' });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.assignmentOverride.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'o1', assignmentId: 'a1', assignment: { courseId: 'c1' } },
+    });
+  });
+});

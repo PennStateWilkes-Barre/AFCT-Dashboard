@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { AUTOMATIC } from '@/lib/linked-identity';
 import { NextRequest } from 'next/server';
 
 const prismaMock = vi.hoisted(() => ({
@@ -220,6 +221,41 @@ describe('PATCH /api/users/[id]', () => {
     expect(prismaMock.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ isAdmin: true }) }),
     );
+  });
+
+  /**
+   * Promotion clears the sign-ins that were attached automatically, because an administrator
+   * must not be reachable through a link somebody else's LMS could have created. That delete
+   * is scoped to the account being promoted. The prisma mock reports a count either way, so
+   * without the `userId` it would strip automatic sign-ins from every account in the
+   * installation, and nothing else here would notice.
+   */
+  it('clears automatic sign-ins for the promoted account only', async () => {
+    authMock.mockResolvedValue({ user: { id: 'admin', role: 'ADMIN', isAdmin: true } });
+    prismaMock.user.findUnique.mockResolvedValue({ avatar: null, isAdmin: false });
+    prismaMock.user.update.mockResolvedValue({
+      id: 'u1',
+      email: 'u1@example.com',
+      firstName: 'A',
+      lastName: 'B',
+      role: 'FACULTY',
+      isAdmin: true,
+      inactive: false,
+      avatar: null,
+      timezone: null,
+    });
+
+    const req = new NextRequest('http://localhost/api/users/u1', {
+      method: 'PATCH',
+      body: JSON.stringify({ isAdmin: true }),
+    });
+
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'u1' }) });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.linkedIdentity.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', linkedVia: { in: AUTOMATIC } },
+    });
   });
 
   it('ignores isAdmin from a non-admin editing their own account', async () => {

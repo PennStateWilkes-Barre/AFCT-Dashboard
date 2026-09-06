@@ -100,3 +100,43 @@ describe('GET /api/courses/[id]/[aid]/problem-grades/summary', () => {
     consoleSpy.mockRestore();
   });
 });
+
+/**
+ * What this summary counts.
+ *
+ * The assignment comes from the path, so it has to be looked up inside the course the caller
+ * was proven staff of, and the two counts have to be bounded by that assignment. The prisma
+ * mock answers from its fixture whatever the `where` says: without the `courseId` an
+ * assignment id from another course resolves, and without the `assignmentId` the grade
+ * grouping is every grade in the installation, so the picker would show every student as
+ * graded.
+ */
+describe('what the grade summary is scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('counts problems and grades for this assignment, in this course', async () => {
+    vi.clearAllMocks();
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+    authMock.mockResolvedValue({ user: { id: 'staff-1', role: 'FACULTY' } });
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'assignment-1' });
+    prismaMock.assignmentProblem.count.mockResolvedValue(2);
+    prismaMock.assignmentProblemGrade.groupBy.mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost'), {
+      params: Promise.resolve(defaultParams),
+    });
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({
+      id: 'assignment-1',
+      courseId: 'course-1',
+    });
+    expect(whereOf(prismaMock.assignmentProblem.count)).toEqual({
+      assignmentId: 'assignment-1',
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: 'assignment-1',
+    });
+  });
+});

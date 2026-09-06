@@ -189,3 +189,27 @@ describe('membership audit', () => {
     expect(summary.metadata.assigned).toBeUndefined();
   });
 });
+
+/**
+ * Whose previous groups are read before an edit.
+ *
+ * A membership edit records where each student came from, and that "before" picture is this
+ * one read. The prisma mock answers with its fixture whatever the `where` says, so without
+ * the `userId` it reads everybody in the set and the per-student audit entries would name the
+ * wrong from-group, which is exactly the half a group grade turns on.
+ */
+describe('whose previous groups the audit reads', () => {
+  it('asks only about the students this edit touches, in this set', async () => {
+    const res = await post({
+      operations: [
+        { userId: 'u1', groupId: 'g1' },
+        { userId: 'u3', groupId: null },
+      ],
+    });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { groupSetId: 'gs1', userId: { in: ['u3', 'u1'] } },
+    });
+  });
+});

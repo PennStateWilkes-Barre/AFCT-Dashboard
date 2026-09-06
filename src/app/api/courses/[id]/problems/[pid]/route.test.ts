@@ -97,6 +97,11 @@ describe('DELETE /api/courses/[id]/problems/[pid]', () => {
     expect(res.status).toBe(400);
     expect(prismaMock.problem.delete).not.toHaveBeenCalled();
     expect(prismaMock.submission.deleteMany).not.toHaveBeenCalled();
+    // The check is about THIS problem. The prisma mock answers with its fixture whatever the
+    // `where` says, so without the `problemId` any link anywhere would block every delete.
+    expect(prismaMock.assignmentProblem.findFirst).toHaveBeenCalledWith({
+      where: { problemId: 'p1' },
+    });
   });
 
   it('deletes an unlinked problem and logs activity', async () => {

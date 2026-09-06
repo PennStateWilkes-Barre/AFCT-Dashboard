@@ -302,7 +302,12 @@ describe('DELETE /api/courses/[id]/roster/[userId]', () => {
     const res = await DELETE(req, { params: Promise.resolve({ id: 'c1', userId: 'u2' }) });
 
     expect(res.status).toBe(200);
-    expect(prismaMock.roster.deleteMany).toHaveBeenCalled();
+    // The one person, not the roster. `toHaveBeenCalled` alone passed with the `userId`
+    // deleted from the where, which is the difference between removing a student and
+    // emptying the course.
+    expect(prismaMock.roster.deleteMany).toHaveBeenCalledWith({
+      where: { courseId: 'c1', userId: 'u2' },
+    });
     // The user's audience rows and due-date overrides in this course are cleared alongside
     // the roster row.
     expect(prismaMock.assignmentAssignee.deleteMany).toHaveBeenCalledWith({

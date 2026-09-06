@@ -442,6 +442,27 @@ describe('GET /api/courses/[id]/[aid]/review-data/[studentId]', () => {
     consoleSpy.mockRestore();
   });
 
+  /**
+   * The individual case, which the group test above does not reach.
+   *
+   * Staff may read the whole course, so an unscoped query here is not a disclosure; it is
+   * worse in a quieter way. The page is titled with one student's name, and it would fill with
+   * everybody's attempts, which is a grade entered against the wrong person's work.
+   */
+  it('scopes the submissions query to the one student when there is no group', async () => {
+    resolveGroupMock.mockResolvedValue(null);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost'), { params: Promise.resolve(params) });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.submission.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assignmentId: params.aid, studentId: params.studentId },
+      }),
+    );
+  });
+
   it('widens the submissions query to the group set when the student is group-assigned', async () => {
     resolveGroupMock.mockResolvedValue('group-1');
     prismaMock.submission.findMany.mockResolvedValue([

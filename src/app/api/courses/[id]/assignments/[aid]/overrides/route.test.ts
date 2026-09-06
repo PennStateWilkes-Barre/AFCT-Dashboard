@@ -249,3 +249,40 @@ describe('GET /api/courses/[id]/assignments/[aid]/overrides', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * The two "does this belong here" checks, which the prisma mocks cannot see.
+ *
+ * `withCourseAuth` proves the caller may manage the course in the URL and nothing about the
+ * assignment id in the path or the group id in the body, so the queries carry those checks.
+ * Both can lose them with every test in this file still passing, and an override is a
+ * deadline: without them a deadline in another course could be moved from a URL scoped to
+ * your own.
+ */
+describe('what an override is allowed to reach', () => {
+  beforeEach(() => {
+    authMock.mockResolvedValue({ user: { id: 'fac', isAdmin: true } });
+    prismaMock.assignment.findFirst.mockResolvedValue(GROUP_ASSIGNMENT);
+    prismaMock.studentGroup.findFirst.mockResolvedValue({ id: 'g1' });
+    prismaMock.assignmentAssignee.findFirst.mockResolvedValue({ id: 'as1' });
+    prismaMock.assignmentOverride.findMany.mockResolvedValue([]);
+    prismaMock.assignmentOverride.create.mockResolvedValue({ id: 'ov1' });
+    resolveTzMock.mockResolvedValue('UTC');
+  });
+
+  it('looks the assignment up only within the course named in the URL', async () => {
+    await post({ targetType: 'GROUP', groupId: 'g1', dueDate: '2026-02-01T00:00:00.000Z' });
+
+    expect(prismaMock.assignment.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', courseId: 'c1' },
+    });
+  });
+
+  it("looks the group up only within the assignment's own set", async () => {
+    await post({ targetType: 'GROUP', groupId: 'g1', dueDate: '2026-02-01T00:00:00.000Z' });
+
+    expect(prismaMock.studentGroup.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'g1', groupSetId: 'gs1' },
+    });
+  });
+});

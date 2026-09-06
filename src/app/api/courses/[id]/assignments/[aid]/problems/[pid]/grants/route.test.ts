@@ -165,3 +165,38 @@ describe('POST /api/courses/[id]/assignments/[aid]/problems/[pid]/grants', () =>
     expect(res.status).toBe(400);
   });
 });
+
+/**
+ * The two "does this belong here" checks, which the prisma mocks cannot see.
+ *
+ * `withCourseAuth` proves the caller may manage the course in the URL. It says nothing about
+ * the assignment id or the group id, which arrive in the path and the body, so those are
+ * checked by the queries themselves. Both can lose their check with every test in this file
+ * still passing, and each one is a way to reach into another course from a URL scoped to your
+ * own: extra attempts granted on somebody else's assignment, or to somebody else's group.
+ */
+describe('what a grant is allowed to reach', () => {
+  beforeEach(() => {
+    authMock.mockResolvedValue({ user: { id: 'fac', isAdmin: true } });
+    prismaMock.assignmentProblem.findFirst.mockResolvedValue(GROUP_LINK);
+    prismaMock.studentGroup.findFirst.mockResolvedValue({ id: 'g1' });
+    prismaMock.assignmentAssignee.findFirst.mockResolvedValue({ id: 'as1' });
+    prismaMock.submissionGrant.upsert.mockResolvedValue({ id: 'sg1', extraSubmissions: 2 });
+  });
+
+  it('looks the problem up only within the course named in the URL', async () => {
+    await post({ targetType: 'GROUP', groupId: 'g1', extraSubmissions: 2 });
+
+    expect(prismaMock.assignmentProblem.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { assignmentId: 'a1', problemId: 'p1', assignment: { courseId: 'c1' } },
+    });
+  });
+
+  it("looks the group up only within the assignment's own set", async () => {
+    await post({ targetType: 'GROUP', groupId: 'g1', extraSubmissions: 2 });
+
+    expect(prismaMock.studentGroup.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'g1', groupSetId: 'gs1' },
+    });
+  });
+});

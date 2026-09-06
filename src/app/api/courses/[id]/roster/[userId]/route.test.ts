@@ -620,7 +620,14 @@ describe('the course scoping of every roster lookup', () => {
     const res = await DELETE(req, params);
 
     expect(res.status).toBe(400);
-    expect(whereOfCall(prismaMock.submission.findFirst)).toMatchObject({ studentId: 'u2' });
+    // Their submissions on THIS course's assignments. The assignment list is read first and
+    // is itself course-scoped; without either key the guard would refuse to remove somebody
+    // over work they did in a course they are not being removed from.
+    expect(whereOfCall(prismaMock.submission.findFirst)).toEqual({
+      studentId: 'u2',
+      assignmentId: { in: ['a1'] },
+    });
+    expect(whereOfCall(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
   });
 });
 

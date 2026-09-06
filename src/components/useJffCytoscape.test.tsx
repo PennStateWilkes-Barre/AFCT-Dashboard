@@ -2240,6 +2240,27 @@ describe('drawing a state on the canvas', () => {
   const tapCanvas = (cy: FakeCy, at: { x: number; y: number }) =>
     act(() => cy.handlers.tap({ target: cy, position: at }));
 
+  /**
+   * A viewer with the State tool up.
+   *
+   * The hook knows only what a click on empty canvas should do, so the tool is a callback that
+   * calls back into `addState`. That is a circle (the callback needs what the hook returns), and
+   * the viewer breaks it with a ref written during render; here the api handle is enough,
+   * because nothing taps the canvas until after the first render.
+   */
+  const withStateTool = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) => {
+    const handle: { api?: () => ReturnType<typeof useJffCytoscape> } = {};
+    const view = renderViewer({
+      ...props,
+      onBackgroundClick: (at) => {
+        handle.api?.().addState(at);
+        return true;
+      },
+    });
+    handle.api = view.api;
+    return view;
+  };
+
   it('does nothing with the Select tool: empty canvas still just clears the panel', async () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));
@@ -2252,7 +2273,7 @@ describe('drawing a state on the canvas', () => {
   });
 
   it('draws one where the click landed, and opens its properties', async () => {
-    const { api } = renderViewer({ placeStateOnClick: true });
+    const { api } = withStateTool();
     await waitFor(() => expect(instances).toHaveLength(1));
 
     tapCanvas(lastCy(), { x: 300, y: 400 });
@@ -2267,7 +2288,7 @@ describe('drawing a state on the canvas', () => {
   });
 
   it('draws a second one without the tool being chosen again', async () => {
-    const { api } = renderViewer({ placeStateOnClick: true });
+    const { api } = withStateTool();
     await waitFor(() => expect(instances).toHaveLength(1));
 
     tapCanvas(lastCy(), { x: 300, y: 400 });
@@ -2280,7 +2301,7 @@ describe('drawing a state on the canvas', () => {
 
   /** A tap on a state is a different branch entirely, so it can never leave one underneath. */
   it('does not draw one under an existing state', async () => {
-    const { api } = renderViewer({ placeStateOnClick: true });
+    const { api } = withStateTool();
     await waitFor(() => expect(instances).toHaveLength(1));
     const cy = lastCy();
 
@@ -2291,7 +2312,7 @@ describe('drawing a state on the canvas', () => {
   });
 
   it('is one undo step, and redo puts it back', async () => {
-    const { api } = renderViewer({ placeStateOnClick: true });
+    const { api } = withStateTool();
     await waitFor(() => expect(instances).toHaveLength(1));
     const drawn = () => lastCy().nodeList.find((n) => n.data('label') === 'q2');
 
@@ -2311,7 +2332,7 @@ describe('drawing a state on the canvas', () => {
   });
 
   it('takes a name nobody is using, including one the reader typed', async () => {
-    const { api } = renderViewer({ placeStateOnClick: true });
+    const { api } = withStateTool();
     await waitFor(() => expect(instances).toHaveLength(1));
 
     // q2 is the next free name, so claim it by hand first.
@@ -2322,7 +2343,7 @@ describe('drawing a state on the canvas', () => {
   });
 
   it('comes back after a refresh, like a rename does', async () => {
-    const { api } = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    const { api } = withStateTool({ viewStateKey: KEY });
     await waitFor(() => expect(api().phase).toBe('ready'));
 
     tapCanvas(lastCy(), { x: 300, y: 400 });
@@ -2334,14 +2355,14 @@ describe('drawing a state on the canvas', () => {
     );
 
     // A second visit reads it back and draws it.
-    const second = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    const second = withStateTool({ viewStateKey: KEY });
     await waitFor(() =>
       expect(second.api().parsed?.states.some((st) => st.name === 'q2')).toBe(true),
     );
   });
 
   it('goes when the machine is put back the way it opened', async () => {
-    const { api } = renderViewer({ viewStateKey: KEY, placeStateOnClick: true });
+    const { api } = withStateTool({ viewStateKey: KEY });
     await waitFor(() => expect(api().phase).toBe('ready'));
     tapCanvas(lastCy(), { x: 300, y: 400 });
     await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(true));

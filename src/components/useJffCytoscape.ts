@@ -240,13 +240,22 @@ export type UseJffCytoscapeOptions = {
   darkMode?: boolean;
   honorPositionsDefault?: boolean;
   /**
-   * Whether a click on empty canvas draws a new state instead of clearing the selection.
+   * What a click on empty canvas means, when it means anything but "never mind".
    *
-   * A boolean rather than the viewer's tool union, so this hook stays about the machine and
-   * knows nothing about a palette: what it is being told is what a click means, not which
-   * button is pressed. See `addState`.
+   * Return true to say the click was used, and the selection is left alone; return false and
+   * the panel closes as it always has. A callback rather than a flag per tool, so this hook
+   * stays about the machine and knows nothing about a palette: the viewer decides what the
+   * canvas is for at that moment, and the next tool needs nothing here.
    */
-  placeStateOnClick?: boolean;
+  onBackgroundClick?: ((at: { x: number; y: number }) => boolean) | null;
+  /**
+   * An element to keep in step with the graph's own transform.
+   *
+   * For anything drawn over the canvas in HTML rather than by cytoscape, which has to move and
+   * scale with the machine or it is not on the drawing at all. Written from the same viewport
+   * handler that keeps the grid in step, so it costs no render.
+   */
+  graphOverlayRef?: React.RefObject<HTMLElement | null> | null;
   /**
    * Remember the zoom, the pan and where the states were put, under this key.
    *
@@ -760,7 +769,8 @@ export function useJffCytoscape({
   initialZoom = 'fit',
   darkMode = false,
   honorPositionsDefault = false,
-  placeStateOnClick = false,
+  onBackgroundClick = null,
+  graphOverlayRef = null,
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
@@ -949,8 +959,10 @@ export function useJffCytoscape({
   snapToGridRef.current = snapToGrid;
   // A ref because the tap handler is built once per load and would otherwise answer to the
   // tool that was active when the machine was drawn.
-  const placeStateOnClickRef = useRef(placeStateOnClick);
-  placeStateOnClickRef.current = placeStateOnClick;
+  const onBackgroundClickRef = useRef(onBackgroundClick);
+  onBackgroundClickRef.current = onBackgroundClick;
+  const graphOverlayRefRef = useRef(graphOverlayRef);
+  graphOverlayRefRef.current = graphOverlayRef;
   const initialZoomRef = useRef(initialZoom);
   initialZoomRef.current = initialZoom;
   const honorPositionsRef = useRef(honorPositions);
@@ -2075,14 +2087,12 @@ export function useJffCytoscape({
         // highlight on click
         cy.on('tap', (evt: any) => {
           if (evt.target === cy) {
-            // With the State tool up, empty canvas is where a new state goes. `evt.position`
-            // is in the graph's own coordinates, so the zoom and the pan are already in it.
-            // Only here: a tap on a state or a line lands in the branch below and can never
-            // reach this, so clicking an existing state cannot leave a second one under it.
-            if (placeStateOnClickRef.current) {
-              addState(evt.position);
-              return;
-            }
+            // Whatever the viewer has made empty canvas mean: drawing a state, placing a text
+            // box, or nothing. `evt.position` is in the graph's own coordinates, so the zoom
+            // and the pan are already in it. Only here: a tap on a state or a line lands in
+            // the branch below and can never reach this, so clicking an existing state cannot
+            // leave something else underneath it.
+            if (onBackgroundClickRef.current?.(evt.position)) return;
             cy.elements().removeClass('faded highlighted');
             // A click on empty canvas means "never mind", so the properties panel goes too.
             setSelectedStateId(null);
@@ -2128,6 +2138,13 @@ export function useJffCytoscape({
             if (!Number.isFinite(scale) || !Number.isFinite(offset?.x)) return;
             el.style.backgroundSize = `${GRID_STEP * scale}px ${GRID_STEP * scale}px`;
             el.style.backgroundPosition = `${offset.x}px ${offset.y}px`;
+            // Anything drawn over the canvas in HTML rides the same transform, so it sits on
+            // the machine rather than beside it. Written here rather than through React because
+            // this runs on every frame of a pan.
+            const overlay = graphOverlayRefRef.current?.current;
+            if (overlay) {
+              overlay.style.transform = `translate(${offset.x}px, ${offset.y}px) scale(${scale})`;
+            }
           } catch {
             // The grid is decoration. It is drawn during the same load that draws the machine,
             // and a viewer that refused to show a machine because it could not place a
@@ -2205,7 +2222,6 @@ export function useJffCytoscape({
       restoreSavedView,
       commitPendingMove,
       readSnapshot,
-      addState,
     ],
   );
 
@@ -2499,6 +2515,20 @@ export function useJffCytoscape({
     settled,
     failure,
     phase,
+    /**
+     * Where the camera is right now, straight from the graph.
+     *
+     * Not the `zoom` this hook returns: that is React state, so during a wheel or a drag it can
+     * be a frame behind, and a frame-old zoom turns pointer pixels into the wrong number of
+     * model units. Anything doing its own pointer arithmetic over the canvas should read from
+     * here at the start of the gesture.
+     */
+    viewportNow: (): { zoom: number; pan: { x: number; y: number } } | null => {
+      const cy = cyRef.current;
+      if (!cy) return null;
+      const pan = cy.pan();
+      return { zoom: cy.zoom(), pan: { x: pan.x, y: pan.y } };
+    },
     /** Ask for the file again. Only worth offering when the failure says it is. */
     retry: () => setReloadNonce((n) => n + 1),
     type,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
   Dialog,
@@ -988,11 +988,23 @@ export function JffCytoscapeViewer({
   /**
    * What clicking the canvas means, and the only place that answer lives.
    *
-   * The hook is told the consequence rather than the tool (`placeStateOnClick`), so it stays
-   * about the machine and the palette stays about the palette. Adding a tool later is a case
-   * in the palette's own list plus whatever it makes a click mean.
+   * The hook is told the consequence rather than the tool (it takes a callback for a click on
+   * empty canvas), so it stays about the machine and the palette stays about the palette.
+   * Adding a tool later is a case in the palette's own list plus whatever it makes a click do.
    */
   const [activeTool, setActiveTool] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
+  /**
+   * The click handler itself, filled in below once the hook has handed back what it needs.
+   *
+   * A ref because the answer depends on the hook and the hook depends on the answer. Assigned
+   * during render rather than in an effect, so the very first click after a tool changes
+   * already means the new thing.
+   */
+  const backgroundClickRef = useRef<((at: { x: number; y: number }) => boolean) | null>(null);
+  const onBackgroundClick = useCallback(
+    (at: { x: number; y: number }) => backgroundClickRef.current?.(at) ?? false,
+    [],
+  );
   /**
    * What the reader has asked to delete, held until they say yes.
    *
@@ -1054,6 +1066,7 @@ export function JffCytoscapeViewer({
     setFinalState,
     setTransitionField,
     selectTransition,
+    addState,
     removeState,
     removeTransitions,
     selectedStatePosition,
@@ -1079,12 +1092,22 @@ export function JffCytoscapeViewer({
     epsSymbol,
     darkMode: isDark,
     honorPositionsDefault,
-    placeStateOnClick: activeTool === 'state',
+    onBackgroundClick,
     initialZoom,
     viewStateKey,
     onViewportChange,
     linkedViewport,
   });
+
+  // What empty canvas is for, at this moment. Returning false leaves the click alone, which is
+  // how the Select tool goes on clearing the selection.
+  backgroundClickRef.current = (at) => {
+    if (activeTool === 'state') {
+      addState(at);
+      return true;
+    }
+    return false;
+  };
 
   /**
    * What the panel is about, and whether it is still wanted.

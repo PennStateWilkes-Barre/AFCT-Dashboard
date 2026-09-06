@@ -597,4 +597,89 @@ describe('who a problem grade can be written for', () => {
       where: { courseId: 'course-1', userId: 'student-1' },
     });
   });
+
+  /**
+   * And which assignment and student the reads around it cover. Every one of these is bounded
+   * by the assignment from the URL, and the grade reads by the student too. Dropping the
+   * `courseId` lets an assignment id from another course resolve; dropping the `assignmentId`
+   * or `studentId` reads and rewrites grade rows belonging to other work or other people.
+   * Whole-object assertions, so a missing key fails rather than passing quietly.
+   */
+  const whereOf = (fn: { mock: { calls: unknown[][] } }, i = 0) =>
+    (fn.mock.calls[i][0] as { where: unknown }).where;
+
+  it('reads grades for this assignment, in this course, for this student', async () => {
+    // These assertions read `calls[0]`, so the recorder has to start empty: this describe has
+    // no beforeEach of its own and would otherwise see an earlier test's call.
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ user: { id: 'staff-1', role: 'FACULTY' } });
+    canManageCourseMock.mockResolvedValue(true);
+    canAccessCourseMock.mockResolvedValue(true);
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'assignment-1', isPublished: true });
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([
+      { problemId: 'p1', showFeedback: true },
+    ]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([
+      { problemId: 'p1', grade: 5, feedback: null, updatedAt: new Date(), gradeSource: 'MANUAL' },
+    ]);
+
+    const res = await GET(new Request('http://localhost'), {
+      params: Promise.resolve(defaultParams),
+    });
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({
+      id: 'assignment-1',
+      courseId: 'course-1',
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      studentId: 'student-1',
+    });
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+    });
+  });
+
+  it('writes grades against this assignment, in this course, for this student', async () => {
+    vi.clearAllMocks();
+    canManageCourseMock.mockResolvedValue(true);
+    canAccessCourseMock.mockResolvedValue(true);
+    authMock.mockResolvedValue({ user: { id: 'staff-1', role: 'FACULTY' } });
+    prismaMock.course.findUnique.mockResolvedValue({ isArchived: false });
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'assignment-1', isPublished: true });
+    prismaMock.roster.findFirst.mockResolvedValue({ id: 'roster-1' });
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([
+      { problemId: 'prob-1', maxPoints: 10 },
+    ]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+    prismaMock.$transaction.mockImplementation(async (ops: unknown[]) => {
+      await Promise.all(ops as Promise<unknown>[]);
+      return [];
+    });
+    prismaMock.assignmentProblemGrade.upsert.mockResolvedValue({});
+    activityLogMock.mockResolvedValue(undefined);
+
+    const res = await POST(
+      new NextRequest('http://localhost', {
+        method: 'POST',
+        body: JSON.stringify({ grades: { 'prob-1': 5 } }),
+      }),
+      { params: Promise.resolve(defaultParams) },
+    );
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({
+      id: 'assignment-1',
+      courseId: 'course-1',
+    });
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+    });
+    // The read of what is already there, which decides what gets written and audited.
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      studentId: 'student-1',
+    });
+  });
 });

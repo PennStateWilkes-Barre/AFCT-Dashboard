@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
   Dialog,
@@ -175,6 +175,68 @@ function MachineDescriptionList({ description }: { description: MachineDescripti
  * who has tabbed into it, and everything it shows is also in the text representation, which is
  * the keyboard and screen-reader route to the same facts.
  */
+/**
+ * How long the properties panel takes to slide away.
+ *
+ * The classes on the panel animate for this long and the panel is taken down after it, so the
+ * two have to agree: unmount it sooner and it disappears mid-slide.
+ */
+const PANEL_EXIT_MS = 200;
+
+/**
+ * Where the properties panel sits, and how it comes and goes.
+ *
+ * Separate from the panel's contents, and rendered by the viewer rather than by either kind of
+ * panel, so that clicking from one state to another swaps what is inside without this element
+ * being replaced. A remount would restart the animation below, which looks like the panel
+ * leaping off the screen and sliding back for every click.
+ */
+function PanelFrame({
+  open,
+  children,
+}: {
+  /** False while it is sliding away; see PANEL_EXIT_MS. */
+  open: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      data-state={open ? 'open' : 'closed'}
+      data-testid="viewer-properties-panel"
+      // Nothing inside is reachable while it is leaving: not by tab, not by a click, and not by
+      // a screen reader. Without this the reader could land in a panel on its way off screen.
+      inert={!open}
+      className={cn(
+        // Over the drawing, never beside it. It used to take its width out of the flow at the
+        // wider size, which meant opening it narrowed the canvas and the machine shifted under
+        // the reader's eye: they clicked a state and the thing they clicked moved. Floating it
+        // costs a strip of the drawing, which they can pan out from and which closing gives
+        // back, and that is the cheaper of the two.
+        'bg-card absolute z-10 flex flex-col shadow-lg',
+        // The drawer: across the foot of the drawing, and never more than a little over half of
+        // it, so a hub state with twenty transitions scrolls rather than swallowing the machine.
+        'inset-x-0 bottom-0 max-h-[min(60%,20rem)] rounded-t-lg border-t',
+        // The sidebar: down the right-hand edge, full height. 20rem leaves a usable canvas at
+        // the width this switches on and matches the app's other side panels.
+        '@[48rem]/viewer:inset-y-0 @[48rem]/viewer:right-0 @[48rem]/viewer:left-auto @[48rem]/viewer:max-h-none @[48rem]/viewer:w-80 @[48rem]/viewer:rounded-none @[48rem]/viewer:border-t-0 @[48rem]/viewer:border-l',
+        // It arrives and leaves as a drawer, from whichever edge it is attached to: up from the
+        // foot of the drawing when it is one, in from the right when it is the sidebar. The
+        // sidebar case cancels the vertical slide rather than adding to it, or it would arrive
+        // diagonally. `fill-mode-forwards` on the way out holds it off screen until it is taken
+        // down; without it the panel snaps back into view for the last moment of its own exit.
+        // The page-wide reduced-motion rule already flattens all of this to nothing.
+        'duration-200 ease-out',
+        'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-bottom',
+        'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-bottom data-[state=closed]:fill-mode-forwards',
+        '@[48rem]/viewer:data-[state=open]:slide-in-from-bottom-0 @[48rem]/viewer:data-[state=open]:slide-in-from-right',
+        '@[48rem]/viewer:data-[state=closed]:slide-out-to-bottom-0 @[48rem]/viewer:data-[state=closed]:slide-out-to-right',
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 function PropertiesPanel({
   label,
   heading,
@@ -189,18 +251,8 @@ function PropertiesPanel({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      className={cn(
-        // The drawer: over the bottom of the drawing, and never more than a little over half of
-        // it, so a hub state with twenty transitions scrolls rather than swallowing the machine.
-        'bg-card absolute inset-x-0 bottom-0 z-10 flex max-h-[min(60%,20rem)] flex-col rounded-t-lg border-t shadow-lg',
-        // The sidebar: back in the flow beside the machine, full height, no shadow. 20rem leaves
-        // a usable canvas at the width this switches on and matches the app's other side panels.
-        '@[48rem]/viewer:static @[48rem]/viewer:z-auto @[48rem]/viewer:max-h-none @[48rem]/viewer:w-80 @[48rem]/viewer:shrink-0 @[48rem]/viewer:rounded-none @[48rem]/viewer:border-t-0 @[48rem]/viewer:border-l @[48rem]/viewer:shadow-none',
-      )}
-      role="group"
-      aria-label={label}
-    >
+    // Fills the frame above, which is what carries the position and the animation.
+    <div className="flex min-h-0 w-full flex-1 flex-col" role="group" aria-label={label}>
       <div className="flex items-start justify-between gap-2 border-b px-3 py-2">
         <div className="min-w-0 text-sm font-semibold">{heading}</div>
         <Button
@@ -660,6 +712,33 @@ export function JffCytoscapeViewer({
     linkedViewport,
   });
 
+  /**
+   * What the panel is about, and whether it is still wanted.
+   *
+   * One at a time: a click selects a state or a transition, never both. The panel has to
+   * outlive its selection for as long as it takes to slide away, so the last subject is kept
+   * and drawn while `open` is false. While it IS open the live one is used instead, or a state
+   * renamed with the panel in front of you would go on showing the old name.
+   */
+  const panelSubject = selectedState
+    ? ({ kind: 'state', state: selectedState } as const)
+    : selectedTransition
+      ? ({ kind: 'transition', edge: selectedTransition } as const)
+      : null;
+  const panelOpen = panelSubject !== null;
+  const lastPanelSubject = useRef(panelSubject);
+  if (panelSubject) lastPanelSubject.current = panelSubject;
+  const [panelMounted, setPanelMounted] = useState(panelOpen);
+  useEffect(() => {
+    if (panelOpen) {
+      setPanelMounted(true);
+      return;
+    }
+    const timer = window.setTimeout(() => setPanelMounted(false), PANEL_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [panelOpen]);
+  const panel = panelMounted ? (panelSubject ?? lastPanelSubject.current) : null;
+
   // Non-visual alternative. The canvas is unreadable to a screen reader, and reading
   // automata is the point of this viewer, so the same machine is also published as text:
   // a one-line summary attached to the graph, plus the full state/transition listing.
@@ -1052,30 +1131,33 @@ export function JffCytoscapeViewer({
           ) : null}
         </div>
 
-        {/* One at a time: a click selects a state or a transition, never both. */}
-        {selectedState ? (
-          <StateProperties
-            // By id, so the name box is re-seeded when the reader clicks a different state.
-            key={selectedState.id}
-            state={selectedState}
-            onRename={renameState}
-            onSetInitial={setInitialState}
-            onSetFinal={setFinalState}
-            onOpenTransition={selectTransition}
-            position={selectedStatePosition}
-            onBeginEdit={beginEdit}
-            onMove={moveState}
-            onClose={clearSelectedState}
-          />
-        ) : selectedTransition ? (
-          <TransitionProperties
-            edge={selectedTransition}
-            fields={transitionFields(type)}
-            onBeginEdit={beginEdit}
-            onEdit={setTransitionField}
-            onClose={clearSelectedState}
-          />
-        ) : null}
+        {panel === null ? null : (
+          <PanelFrame open={panelOpen}>
+            {panel.kind === 'state' ? (
+              <StateProperties
+                // By id, so the name box is re-seeded when the reader clicks a different state.
+                key={panel.state.id}
+                state={panel.state}
+                onRename={renameState}
+                onSetInitial={setInitialState}
+                onSetFinal={setFinalState}
+                onOpenTransition={selectTransition}
+                position={selectedStatePosition}
+                onBeginEdit={beginEdit}
+                onMove={moveState}
+                onClose={clearSelectedState}
+              />
+            ) : (
+              <TransitionProperties
+                edge={panel.edge}
+                fields={transitionFields(type)}
+                onBeginEdit={beginEdit}
+                onEdit={setTransitionField}
+                onClose={clearSelectedState}
+              />
+            )}
+          </PanelFrame>
+        )}
       </div>
 
       {description ? (

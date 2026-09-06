@@ -439,9 +439,9 @@ describe('the zoom slider', () => {
     expect(centerButton).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Zoom' })).not.toContainElement(centerButton);
     // Immediately after Fit, so the pair reads as one choice rather than two scattered ones.
-    expect(
-      screen.getByRole('button', { name: 'Fit automaton to view' }).nextElementSibling,
-    ).toBe(centerButton);
+    expect(screen.getByRole('button', { name: 'Fit automaton to view' }).nextElementSibling).toBe(
+      centerButton,
+    );
   });
 
   it('announces its value as a spoken percentage, not a track position', () => {
@@ -700,7 +700,12 @@ describe('clicking a state', () => {
     tapNode('0');
     expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
     tapBackground();
-    expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+    // It slides away rather than vanishing, so it is marked closed at once and taken down when
+    // the animation is over.
+    expect(screen.getByTestId('viewer-properties-panel')).toHaveAttribute('data-state', 'closed');
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
   });
 
   it('closes from its own button too', async () => {
@@ -708,7 +713,9 @@ describe('clicking a state', () => {
     await waitForEngine();
     tapNode('0');
     fireEvent.click(await screen.findByRole('button', { name: /close state properties/i }));
-    expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
   });
 
   it('says what was clicked in the header, not just its name', async () => {
@@ -728,20 +735,65 @@ describe('clicking a state', () => {
 
     fireEvent.keyDown(close, { key: 'Escape' });
 
-    expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
   });
 
-  it('sits beside the drawing rather than inside it, which is what lets it dock', async () => {
-    // The canvas is a `role="img"`, so anything inside it is unreachable to a screen reader,
-    // and the docked layout needs the panel to be a flex sibling of the drawing's column.
+  it('floats over the drawing rather than being inside it or taking its width', async () => {
+    // Two things at once. The canvas is a `role="img"`, so anything inside it is unreachable to
+    // a screen reader; and the panel is positioned rather than laid out, so opening it does not
+    // narrow the drawing and shift the machine under the reader.
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const panel = await screen.findByRole('group', { name: /properties of state/i });
+    const frame = screen.getByTestId('viewer-properties-panel');
     const canvas = screen.getByRole('img');
 
     expect(canvas).not.toContainElement(panel);
-    expect(panel.parentElement).toBe(canvas.parentElement?.parentElement);
+    expect(frame.parentElement).toBe(canvas.parentElement?.parentElement);
+    expect(frame.className).toContain('absolute');
+    expect(frame.className).not.toContain('@[48rem]/viewer:static');
+  });
+
+  /**
+   * The panel arrives and leaves as a drawer. jsdom draws nothing, so what these check is the
+   * wiring the animation hangs off: the state the CSS reads, that the panel outlives the
+   * selection long enough to slide away, and that it is not replaced when the reader clicks
+   * from one state to another, which would restart the entrance for every click.
+   */
+  it('opens as a drawer, and stays put while it slides away', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+    expect(screen.getByTestId('viewer-properties-panel')).toHaveAttribute('data-state', 'open');
+
+    tapBackground();
+
+    // Still there, marked closed, and out of reach while it is leaving.
+    const leaving = screen.getByTestId('viewer-properties-panel');
+    expect(leaving).toHaveAttribute('data-state', 'closed');
+    expect(leaving).toHaveAttribute('inert');
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+  });
+
+  it('swaps its contents rather than arriving again when another state is clicked', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+    const frame = screen.getByTestId('viewer-properties-panel');
+
+    tapNode('1');
+
+    await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('q1'));
+    // The same element, so the entrance animation is not restarted under the reader.
+    expect(screen.getByTestId('viewer-properties-panel')).toBe(frame);
+    expect(frame).toHaveAttribute('data-state', 'open');
   });
 
   it('renames the state as it is typed', async () => {
@@ -902,7 +954,9 @@ describe('clicking a transition', () => {
     expect(panel).toHaveTextContent(/Transition\s+q0\s*→\s*q1/);
 
     fireEvent.click(screen.getByRole('button', { name: 'Close transition properties' }));
-    expect(screen.queryByRole('group', { name: /transition from/i })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /transition from/i })).toBeNull(),
+    );
   });
 
   it('offers what it reads as a box that can be typed in', async () => {
@@ -940,7 +994,9 @@ describe('clicking a transition', () => {
     const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
       ((evt: { target: unknown }) => void) | undefined;
     act(() => tap?.({ target: h.cy }));
-    expect(screen.queryByRole('group', { name: /transition from/i })).toBeNull();
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /transition from/i })).toBeNull(),
+    );
   });
 
   it('shows nothing for an edge the machine does not have', async () => {

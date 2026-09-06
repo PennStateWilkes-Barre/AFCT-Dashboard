@@ -85,6 +85,19 @@ class FakeEl {
   empty() {
     return false;
   }
+  /**
+   * Take this element off the graph.
+   *
+   * Modelled because the code removes the initial-state marker this way when the reader takes
+   * the marker off every state, and without it that removal silently did nothing here: the
+   * marker stayed on the fake graph and any test of it would have passed for the wrong reason.
+   */
+  remove() {
+    const list = this.isNode() ? this.cy.nodeList : this.cy.edgeList;
+    const at = list.indexOf(this as FakeEl);
+    if (at >= 0) list.splice(at, 1);
+    return this;
+  }
   source() {
     return this.cy.byId(String(this.data_.source)) as FakeEl;
   }
@@ -1065,7 +1078,7 @@ describe('moving a state by typing its coordinates', () => {
     act(() => cy.handlers.tap({ target: cy.byId('0') }));
 
     // Focus first, which is where the snapshot is taken, exactly as picking a state up is.
-    act(() => api().beginStateMove());
+    act(() => api().beginEdit());
     act(() => api().moveState('0', { x: 250, y: 250 }));
 
     expect(cy.byId('0')?.position()).toEqual({ x: 250, y: 250 });
@@ -1079,7 +1092,7 @@ describe('moving a state by typing its coordinates', () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));
 
-    act(() => api().beginStateMove());
+    act(() => api().beginEdit());
 
     expect(api().canUndo).toBe(false);
   });
@@ -1160,9 +1173,9 @@ describe('renaming a state', () => {
     act(() => api().renameState('0', 'start'));
 
     await waitFor(() =>
-      expect(
-        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).renames,
-      ).toEqual({ '0': 'start' }),
+      expect(JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).renames).toEqual(
+        { '0': 'start' },
+      ),
     );
   });
 
@@ -1190,12 +1203,20 @@ describe('choosing which state is initial', () => {
   it('moves the marker rather than giving the machine two initial states', async () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(api().parsed?.states.filter((st) => st.initial).map((st) => st.id)).toEqual(['0']);
+    expect(
+      api()
+        .parsed?.states.filter((st) => st.initial)
+        .map((st) => st.id),
+    ).toEqual(['0']);
 
     act(() => api().setInitialState('1'));
 
     await waitFor(() =>
-      expect(api().parsed?.states.filter((st) => st.initial).map((st) => st.id)).toEqual(['1']),
+      expect(
+        api()
+          .parsed?.states.filter((st) => st.initial)
+          .map((st) => st.id),
+      ).toEqual(['1']),
     );
     expect(lastCy().byId('1')?.data('initial')).toBe(1);
     expect(lastCy().byId('0')?.data('initial')).toBe(0);
@@ -1257,7 +1278,11 @@ describe('choosing which states are final', () => {
     act(() => api().setFinalState('0', true));
 
     await waitFor(() =>
-      expect(api().parsed?.states.filter((st) => st.final).map((st) => st.id)).toEqual(['0', '1']),
+      expect(
+        api()
+          .parsed?.states.filter((st) => st.final)
+          .map((st) => st.id),
+      ).toEqual(['0', '1']),
     );
     expect(lastCy().byId('0')?.hasClass('final')).toBe(true);
     expect(api().viewModified).toBe(true);
@@ -1528,7 +1553,9 @@ describe('keeping the canvas in step with its container', () => {
     cy.pan({ x: -200, y: -80 });
     act(() => cy.handlers['viewport position']?.({}));
     await waitFor(() =>
-      expect(JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre).toBeDefined(),
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre,
+      ).toBeDefined(),
     );
     const before = JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre;
 
@@ -1899,6 +1926,184 @@ describe('saying that the drawing has been rearranged', () => {
     await waitFor(() => expect(api().viewModified).toBe(true));
 
     act(() => api().resetMachine());
+    await waitFor(() => expect(api().viewModified).toBe(false));
+  });
+});
+
+/**
+ * Undo and redo across the machine itself, not just where the states sit.
+ *
+ * The history used to be the arrangement's alone, so a reader who renamed a state or ticked
+ * the wrong box had no way back short of Reset, which throws away everything else with it.
+ * These check the harder half of that: putting a name back means writing the FILE's name, and
+ * by then the drawing no longer remembers it.
+ */
+describe('undoing a change to the machine', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('puts back the name the file gave a state, not just the reader’s last one', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    await waitFor(() => expect(lastCy().byId('0')?.data('label')).toBe('start'));
+    expect(api().canUndo).toBe(true);
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().parsed?.states.find((st) => st.id === '0')?.name).toBe('q0');
+    expect(api().canRedo).toBe(true);
+
+    act(() => api().redo());
+    expect(lastCy().byId('0')?.data('label')).toBe('start');
+  });
+
+  it('is one step for a whole name, not one per keystroke', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // What typing "start" into the box actually sends.
+    act(() => api().beginEdit());
+    for (const value of ['s', 'st', 'sta', 'star', 'start']) {
+      act(() => api().renameState('0', value));
+    }
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('takes back making a state final, and the double circle with it', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setFinalState('0', true));
+    await waitFor(() => expect(lastCy().byId('0')?.hasClass('final')).toBe(true));
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.hasClass('final')).toBe(false);
+    expect(api().parsed?.states.find((st) => st.id === '0')?.final).toBe(false);
+  });
+
+  it('takes back moving the initial marker', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setInitialState('1'));
+    await waitFor(() => expect(lastCy().byId('1')?.data('initial')).toBe(1));
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('initial')).toBe(1);
+    expect(lastCy().byId('1')?.data('initial')).toBe(0);
+  });
+
+  /**
+   * The marker is one node per initial state, so taking it away removes it entirely. Undoing
+   * back has to make a new one rather than move one that is no longer there.
+   */
+  it('brings the initial marker back after it was taken away', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const markers = () => lastCy().nodeList.filter((n) => n.hasClass('start'));
+    expect(markers()).toHaveLength(1);
+
+    act(() => api().setInitialState(null));
+    await waitFor(() => expect(markers()).toHaveLength(0));
+
+    act(() => api().undo());
+
+    expect(markers()).toHaveLength(1);
+    expect(lastCy().byId('0')?.data('initial')).toBe(1);
+  });
+
+  it('takes back what a transition reads, and redraws the line', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const edge = () =>
+      lastCy().edgeList.find((e) => e.data('source') === '0' && e.data('target') === '1');
+    const before = edge()?.data('label');
+
+    act(() => api().beginEdit());
+    act(() => api().setTransitionField(0, 'read', 'x'));
+    await waitFor(() => expect(edge()?.data('label')).not.toBe(before));
+
+    act(() => api().undo());
+
+    expect(edge()?.data('label')).toBe(before);
+    expect(api().parsed?.transitions[0]?.read).not.toBe('x');
+  });
+
+  it('unwinds a drag and a rename in the order they were made', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const cy = lastCy();
+    const home = { ...cy.byId('0')!.position() };
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    act(() => api().beginEdit());
+    act(() => api().moveState('0', { x: 250, y: 250 }));
+    await waitFor(() => expect(cy.byId('0')?.position()).toEqual({ x: 250, y: 250 }));
+
+    // The move first, because it was last.
+    act(() => api().undo());
+    expect(cy.byId('0')?.position()).toEqual(home);
+    expect(cy.byId('0')?.data('label')).toBe('start');
+
+    act(() => api().undo());
+    expect(cy.byId('0')?.data('label')).toBe('q0');
+  });
+
+  it('makes the redo branch unreachable once something else is changed', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setFinalState('0', true));
+    act(() => api().undo());
+    expect(api().canRedo).toBe(true);
+
+    act(() => api().setInitialState('1'));
+
+    expect(api().canRedo).toBe(false);
+  });
+
+  /**
+   * The remembered view is what a refresh reads back, so an undo that did not reach it would
+   * be given back the moment the reader reloaded the page.
+   */
+  it('is written down, so a refresh does not hand the change back', async () => {
+    const KEY = 'submissions:machine.jff';
+    const stored = () =>
+      JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`) ?? '{}');
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    await waitFor(() => expect(stored().renames).toEqual({ '0': 'start' }));
+
+    act(() => api().undo());
+
+    await waitFor(() => expect(stored().renames).toEqual({}));
+  });
+
+  it('says the drawing matches the file again once the change is undone', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    expect(api().viewModified).toBe(false);
+
+    act(() => api().setFinalState('0', true));
+    await waitFor(() => expect(api().viewModified).toBe(true));
+
+    act(() => api().undo());
+
     await waitFor(() => expect(api().viewModified).toBe(false));
   });
 });

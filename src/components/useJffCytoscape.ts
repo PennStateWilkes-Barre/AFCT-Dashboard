@@ -271,10 +271,44 @@ function nextFrame(): Promise<void> {
 }
 
 /** Where every state sits, and which layout produced it. */
-type ArrangementSnapshot = {
+type Arrangement = {
   positions: Record<string, { x: number; y: number }>;
   honorPositions: boolean;
 };
+
+/**
+ * Everything one undo step has to put back.
+ *
+ * The arrangement, plus the four things a reader can change about the machine itself. They
+ * travel together because they are one history: a reader who renames a state, drags it, then
+ * presses undo twice expects the drag back and then the name, in that order, and two stacks
+ * could not give them that.
+ *
+ * The maps are copied on the way in, not referenced. Every handler replaces the entries it
+ * changes rather than mutating them, so a shallow copy is enough to freeze what a snapshot
+ * saw. `initialOverride` is deliberately three-valued: `undefined` means the reader has not
+ * touched it and the file's own answer stands, `null` means they took the marker away.
+ */
+type ViewerSnapshot = Arrangement & {
+  renames: Record<string, string>;
+  initialOverride: string | null | undefined;
+  finalOverrides: Record<string, boolean>;
+  transitionEdits: Record<number, Partial<Parsed['transitions'][number]>>;
+};
+
+/** The reader's changes laid over the file as parsed, which is how every load draws them. */
+function deriveParsed(
+  pristine: Parsed,
+  edits: Pick<ViewerSnapshot, 'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits'>,
+): Parsed {
+  return applyTransitionEdits(
+    applyFinalStates(
+      applyInitialState(applyRenames(pristine, edits.renames), edits.initialOverride),
+      edits.finalOverrides,
+    ),
+    edits.transitionEdits,
+  );
+}
 
 /**
  * The pan that keeps whatever was in the middle of the viewport in the middle of it.
@@ -422,7 +456,7 @@ function applyTransitionEdits(
 }
 
 /** Read the current arrangement out of the graph. */
-function readArrangement(cy: any, honorPositions: boolean): ArrangementSnapshot | null {
+function readArrangement(cy: any, honorPositions: boolean): Arrangement | null {
   try {
     const positions: Record<string, { x: number; y: number }> = {};
     cy.nodes().forEach((node: any) => {
@@ -440,7 +474,7 @@ function readArrangement(cy: any, honorPositions: boolean): ArrangementSnapshot 
 }
 
 /** Put a remembered arrangement back. */
-function applyArrangement(cy: any, snapshot: ArrangementSnapshot): void {
+function applyArrangement(cy: any, snapshot: Arrangement): void {
   try {
     for (const [id, position] of Object.entries(snapshot.positions)) {
       const node = cy.getElementById(id);
@@ -448,6 +482,63 @@ function applyArrangement(cy: any, snapshot: ArrangementSnapshot): void {
     }
   } catch {
     // A graph mid-teardown. Nothing to restore onto.
+  }
+}
+
+/**
+ * Redraw what the reader can change, from the machine as it now stands.
+ *
+ * The handlers below each patch the one thing they touched, which is right when a reader ticks
+ * a box: rebuilding the graph for it would throw away the arrangement, the zoom and this very
+ * history. Undo cannot work that way, because one step can move several things at once, so it
+ * puts the whole lot back instead. Same idea, wider net.
+ *
+ * Positions are not here. They are the arrangement's business, and `applyArrangement` has
+ * already dealt with them by the time this runs.
+ */
+function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
+  try {
+    const byId = new Map(parsed.states.map((state) => [state.id, state]));
+    let initialId: string | null = null;
+
+    cy.nodes().forEach((node: any) => {
+      if (node.hasClass?.('start') || node.hasClass?.('note')) return;
+      const state = byId.get(node.id());
+      if (!state) return;
+      if (state.initial) initialId = state.id;
+      node.data('label', state.name);
+      node.data('initial', state.initial ? 1 : 0);
+      node.data('final', state.final ? 1 : 0);
+      if (state.final) node.addClass('final');
+      else node.removeClass('final');
+    });
+
+    // Transitions between the same two states share one line, so a line's label is worked out
+    // again from all of them rather than patched from the one that changed.
+    cy.edges().forEach((edge: any) => {
+      const from = edge.data('source');
+      const to = edge.data('target');
+      const bundled = bundleEdges(
+        parsed.transitions.filter((t) => t.from === from && t.to === to),
+        parsed.type,
+        epsSymbol,
+      )[0];
+      if (bundled !== undefined) edge.data('label', bundled.label);
+    });
+
+    if (initialId === null) {
+      // The markers are made one per initial state, so with none left there is nothing to move
+      // the old one to: it has to go. Undoing back to an initial state makes a new one, which
+      // is what repositionStartNodes does when it finds none.
+      cy.nodes()
+        .filter((node: any) => node.hasClass?.('start'))
+        .forEach((node: any) => node.remove?.());
+    } else {
+      repositionStartNodes(cy);
+    }
+  } catch {
+    // A graph mid-teardown. The reader's answers are kept either way, and the next load draws
+    // them: every load derives the machine from the file plus exactly these.
   }
 }
 
@@ -641,16 +732,18 @@ export function useJffCytoscape({
   honorPositionsRef.current = honorPositions;
 
   /**
-   * Undo history for the arrangement.
+   * Undo history.
    *
    * The viewer is read only about the file: nothing here changes what the student submitted.
-   * What a reader CAN change is how it is laid out, by dragging a state or switching between
-   * the drawn and the auto-arranged layout, and that is what these remember. Zoom and pan are
-   * not in it: they move the camera, not the machine, and an undo that rewound the viewport
-   * would fight the scroll wheel.
+   * What a reader CAN change is the drawing in front of them, and all of it is undoable: the
+   * arrangement (dragging a state, or switching between the drawn and the auto-arranged
+   * layout) and the machine's own labels (a state's name, which state is initial, which are
+   * final, what a transition reads). Zoom and pan are not in it: they move the camera, not the
+   * machine, and an undo that rewound the viewport would fight the scroll wheel.
    *
    * Each entry is a whole snapshot rather than a diff. A machine has tens of states, not
-   * thousands, so copying every position is cheaper than the bookkeeping a diff would need.
+   * thousands, so copying every position and every override is cheaper than the bookkeeping a
+   * diff would need, and it means one step can put back several things at once.
    */
   /**
    * Whether anything about the drawing has been changed since it was opened.
@@ -667,18 +760,22 @@ export function useJffCytoscape({
   const [restoredModified, setRestoredModified] = useState(false);
   const [undoDepth, setUndoDepth] = useState(0);
   const [redoDepth, setRedoDepth] = useState(0);
-  const undoStack = useRef<ArrangementSnapshot[]>([]);
-  const redoStack = useRef<ArrangementSnapshot[]>([]);
+  const undoStack = useRef<ViewerSnapshot[]>([]);
+  const redoStack = useRef<ViewerSnapshot[]>([]);
   /**
-   * The arrangement as it was when a state was picked up, held until the reader lets go.
+   * How things stood when an edit began, held until the reader actually changes something.
    *
    * Clicking a state selects it and opens its properties, and picking one up is how a click
    * starts, so recording the snapshot straight onto the undo stack made every click look like
    * a rearrangement: the window said the drawing had been moved when nothing had. The snapshot
    * still has to be taken at that moment, while the old positions are readable, so it waits
-   * here and is only committed if the state was actually dragged.
+   * here and is only committed if something moved.
+   *
+   * The panel's text boxes use the same bargain, and it is what makes typing a name one undo
+   * step rather than one per keystroke: the snapshot is taken when the box takes focus and
+   * committed by the first keystroke, and every keystroke after that finds nothing waiting.
    */
-  const grabbedArrangement = useRef<ArrangementSnapshot | null>(null);
+  const pendingSnapshot = useRef<ViewerSnapshot | null>(null);
   /**
    * An arrangement waiting for the graph to be rebuilt before it can be applied.
    *
@@ -690,8 +787,16 @@ export function useJffCytoscape({
    */
   /** The file the graph currently holds, so a rebuild of the same one is recognised. */
   const loadedSrc = useRef<string | null>(null);
+  /**
+   * The machine as the file has it, before any of the reader's changes.
+   *
+   * Undo needs this and cannot get it from `parsed`, which already carries every change made
+   * so far: putting a renamed state back means writing the AUTHOR's name, and by then nothing
+   * else remembers it. Every load fills this in on its way past the parse.
+   */
+  const pristineParsed = useRef<Parsed | null>(null);
   const pendingArrangement = useRef<{
-    snapshot: ArrangementSnapshot;
+    snapshot: Arrangement;
     zoom: number;
     pan: { x: number; y: number };
   } | null>(null);
@@ -914,9 +1019,23 @@ export function useJffCytoscape({
    * picked up, and typing its coordinates, where it is taken as the box takes focus. Both hold
    * the snapshot until something actually moves, so a click or a stray focus records nothing.
    */
-  const commitPendingMove = useCallback(() => {
-    const before = grabbedArrangement.current;
-    grabbedArrangement.current = null;
+  /** Everything one undo step has to put back, as things stand right now. */
+  const readSnapshot = useCallback((): ViewerSnapshot | null => {
+    const cy = cyRef.current;
+    if (!cy) return null;
+    const arrangement = readArrangement(cy, honorPositionsRef.current);
+    if (!arrangement) return null;
+    return {
+      ...arrangement,
+      renames: { ...renamesRef.current },
+      initialOverride: initialOverrideRef.current,
+      finalOverrides: { ...finalOverridesRef.current },
+      transitionEdits: { ...transitionEditsRef.current },
+    };
+  }, []);
+
+  /** Make a snapshot the step that undo will return to. */
+  const pushUndoStep = useCallback((before: ViewerSnapshot | null) => {
     if (!before) return;
     undoStack.current.push(before);
     // A new action makes the redo branch unreachable, as in any editor.
@@ -924,6 +1043,15 @@ export function useJffCytoscape({
     setUndoDepth(undoStack.current.length);
     setRedoDepth(0);
   }, []);
+
+  /** Record where a change began, for the handlers that know before they act. */
+  const recordStep = useCallback(() => pushUndoStep(readSnapshot()), [pushUndoStep, readSnapshot]);
+
+  const commitPendingMove = useCallback(() => {
+    const before = pendingSnapshot.current;
+    pendingSnapshot.current = null;
+    pushUndoStep(before);
+  }, [pushUndoStep]);
 
   const restoreSavedView = useCallback(
     (cy: any): boolean => {
@@ -1009,15 +1137,17 @@ export function useJffCytoscape({
           setFailure(failureForContent());
           return;
         }
+        // The file's own answers, kept aside before the reader's go over them: undo has to be
+        // able to put an author's name back, and after the next line nothing else remembers it.
+        pristineParsed.current = parsed;
         // Whatever the reader has renamed, put back over the file's own names. Every load
         // re-reads the file, so this is where a rename survives a rebuild.
-        parsed = applyTransitionEdits(
-          applyFinalStates(
-            applyInitialState(applyRenames(parsed, renamesRef.current), initialOverrideRef.current),
-            finalOverridesRef.current,
-          ),
-          transitionEditsRef.current,
-        );
+        parsed = deriveParsed(parsed, {
+          renames: renamesRef.current,
+          initialOverride: initialOverrideRef.current,
+          finalOverrides: finalOverridesRef.current,
+          transitionEdits: transitionEditsRef.current,
+        });
         setPhase('drawing');
         setType(parsed.type);
         setParsed(parsed);
@@ -1036,7 +1166,7 @@ export function useJffCytoscape({
           undoStack.current = [];
           redoStack.current = [];
           // A snapshot held from a state picked up in the old machine belongs to that machine.
-          grabbedArrangement.current = null;
+          pendingSnapshot.current = null;
           setUndoDepth(0);
           setRedoDepth(0);
         }
@@ -1605,7 +1735,7 @@ export function useJffCytoscape({
         // rather than on every pixel of movement. `grab` fires once, at the start, and on a
         // plain click as well, which is why the snapshot is only held here.
         cy.on('grab', 'node', () => {
-          grabbedArrangement.current = readArrangement(cy, honorPositionsRef.current);
+          pendingSnapshot.current = readSnapshot();
         });
 
         // Release. Two things happen here, both only when the state really moved: cytoscape
@@ -1616,7 +1746,7 @@ export function useJffCytoscape({
         // exactly while it is held, then settles onto the lattice, which reads as landing
         // rather than as the drag fighting back.
         cy.on('dragfree', 'node', (evt: any) => {
-          const moved = grabbedArrangement.current !== null;
+          const moved = pendingSnapshot.current !== null;
           commitPendingMove();
           if (moved) {
             // Write the view down again now that this counts as a rearrangement. Dragging a
@@ -1659,8 +1789,17 @@ export function useJffCytoscape({
         setFailure(failureForContent());
       }
     },
-    // The last two never change identity, so they cost nothing here.
-    [src, epsSymbol, darkMode, honorPositions, rememberView, restoreSavedView, commitPendingMove],
+    // The last four never change identity, so they cost nothing here.
+    [
+      src,
+      epsSymbol,
+      darkMode,
+      honorPositions,
+      rememberView,
+      restoreSavedView,
+      commitPendingMove,
+      readSnapshot,
+    ],
   );
 
   /**
@@ -1717,14 +1856,41 @@ export function useJffCytoscape({
 
   /* ── undo and redo ──────────────────────────────────────────────────── */
 
+  /**
+   * Put the reader's answers about the machine back to what a snapshot saw.
+   *
+   * The refs are written as well as the state, because what follows reads them within this same
+   * event: React has not re-rendered yet, and a load already in flight derives the machine from
+   * the refs on its way past the parse.
+   */
+  const applySnapshotEdits = (snapshot: ViewerSnapshot) => {
+    setRenames(snapshot.renames);
+    setInitialOverride(snapshot.initialOverride);
+    setFinalOverrides(snapshot.finalOverrides);
+    setTransitionEdits(snapshot.transitionEdits);
+    renamesRef.current = snapshot.renames;
+    initialOverrideRef.current = snapshot.initialOverride;
+    finalOverridesRef.current = snapshot.finalOverrides;
+    transitionEditsRef.current = snapshot.transitionEdits;
+
+    const pristine = pristineParsed.current;
+    if (!pristine) return;
+    const next = deriveParsed(pristine, snapshot);
+    setParsed(next);
+    const cy = cyRef.current;
+    if (cy) syncGraph(cy, next, epsSymbol);
+  };
+
   /** Move one step between the two stacks, applying whatever is on the other side. */
   const step = (from: typeof undoStack, to: typeof redoStack) => {
     const cy = cyRef.current;
     const snapshot = from.current.pop();
     if (!cy || !snapshot) return;
 
-    const current = readArrangement(cy, honorPositions);
+    const current = readSnapshot();
     if (current) to.current.push(current);
+
+    applySnapshotEdits(snapshot);
 
     if (snapshot.honorPositions !== honorPositions) {
       // Switching the layout rebuilds the graph, so the positions cannot be put back on this
@@ -1919,13 +2085,7 @@ export function useJffCytoscape({
     toggleHonorPositions: () => {
       // Recorded before the switch, so undo returns both the layout and the positions the
       // reader had arranged under it.
-      const before = cyRef.current ? readArrangement(cyRef.current, honorPositions) : null;
-      if (before) {
-        undoStack.current.push(before);
-        redoStack.current = [];
-        setUndoDepth(undoStack.current.length);
-        setRedoDepth(0);
-      }
+      pushUndoStep(readSnapshot());
       setHonorPositions((p) => !p);
     },
     /**
@@ -1948,7 +2108,7 @@ export function useJffCytoscape({
       // place that means to throw it away.
       undoStack.current = [];
       redoStack.current = [];
-      grabbedArrangement.current = null;
+      pendingSnapshot.current = null;
       setUndoDepth(0);
       setRedoDepth(0);
       // Including the names and which state is initial: "the way the file opened" means the
@@ -1985,16 +2145,14 @@ export function useJffCytoscape({
     /** Where the selected state sits on the canvas now, which a drag keeps in step. */
     selectedStatePosition: selectedPosition,
     /**
-     * Take a snapshot before the coordinates are typed into.
+     * Take a snapshot before one of the panel's boxes is typed into.
      *
-     * The same bargain a drag makes: the arrangement is remembered as the box takes focus and
-     * only becomes an undo step if something actually moves, so tabbing through the panel
-     * records nothing.
+     * The same bargain a drag makes: how things stand is remembered as the box takes focus and
+     * only becomes an undo step if something actually changes, so tabbing through the panel
+     * records nothing. It is also what makes a name one step instead of one per letter.
      */
-    beginStateMove: () => {
-      const cy = cyRef.current;
-      if (!cy) return;
-      grabbedArrangement.current = readArrangement(cy, honorPositionsRef.current);
+    beginEdit: () => {
+      pendingSnapshot.current = readSnapshot();
     },
     /**
      * Put a state at a given point, which is the panel's coordinate boxes.
@@ -2039,6 +2197,9 @@ export function useJffCytoscape({
      * drawing, everything that describes the machine, and the arrangement a reader downloads.
      */
     setInitialState: (id: string | null) => {
+      // A tick, not a typed word: the whole change happens at once, so the step is recorded
+      // here rather than waiting on a first keystroke the way the text boxes do.
+      recordStep();
       setInitialOverride(id);
       setParsed((current) => (current ? applyInitialState(current, id) : current));
       const cy = cyRef.current;
@@ -2077,6 +2238,9 @@ export function useJffCytoscape({
       field: 'read' | 'write' | 'move' | 'pop' | 'push',
       value: string,
     ) => {
+      // Typed, so the step was taken when the box took focus: this commits it on the first
+      // character and does nothing on the rest. One undo per box visited, not per keystroke.
+      commitPendingMove();
       setTransitionEdits((current) => ({
         ...current,
         [index]: { ...current[index], [field]: value },
@@ -2114,6 +2278,7 @@ export function useJffCytoscape({
      * whichever border the state ends up with, so the marker is placed again afterwards.
      */
     setFinalState: (id: string, final: boolean) => {
+      recordStep();
       setFinalOverrides((current) => ({ ...current, [id]: final }));
       setParsed((current) => (current ? applyFinalStates(current, { [id]: final }) : current));
       const cy = cyRef.current;
@@ -2137,10 +2302,13 @@ export function useJffCytoscape({
      * not: nothing in this viewer writes to it, and this is why the reader is told the file has
      * changed on screen.
      *
-     * Not undoable. The undo history is the arrangement's, and mixing a rename into it would
-     * make one step mean two different kinds of thing.
+     * Undoable, along with everything else a reader can change here. One step per visit to the
+     * box rather than one per keystroke: see `pendingSnapshot`.
      */
     renameState: (id: string, name: string) => {
+      // As with a transition's fields: the snapshot was taken when the box took focus, and the
+      // first character typed is what turns it into a step.
+      commitPendingMove();
       setRenames((current) => ({ ...current, [id]: name }));
       setParsed((current) => (current ? applyRenames(current, { [id]: name }) : current));
       // The drawing, straight away rather than through a rebuild: the reader is typing.

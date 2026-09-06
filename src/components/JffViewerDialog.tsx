@@ -249,7 +249,7 @@ function StateProperties({
   onSetFinal,
   onOpenTransition,
   position,
-  onMoveStart,
+  onBeginEdit,
   onMove,
   onClose,
 }: {
@@ -260,7 +260,7 @@ function StateProperties({
   onOpenTransition: (from: string, to: string) => void;
   /** Where the state is on the canvas now, which is not where the file has it once dragged. */
   position: { x: number; y: number } | null;
-  onMoveStart: () => void;
+  onBeginEdit: () => void;
   onMove: (id: string, at: { x: number; y: number }) => void;
   onClose: () => void;
 }) {
@@ -294,6 +294,8 @@ function StateProperties({
         <Input
           id={nameFieldId}
           value={name}
+          // Focus, not the first keystroke, is where an undo step for this box begins.
+          onFocus={onBeginEdit}
           onChange={(event) => {
             setName(event.target.value);
             onRename(state.id, event.target.value);
@@ -348,7 +350,7 @@ function StateProperties({
               id={xFieldId}
               type="number"
               value={Math.round(position.x)}
-              onFocus={onMoveStart}
+              onFocus={onBeginEdit}
               onChange={(event) => {
                 const x = Number(event.target.value);
                 if (Number.isFinite(x)) onMove(state.id, { x, y: position.y });
@@ -364,7 +366,7 @@ function StateProperties({
               id={yFieldId}
               type="number"
               value={Math.round(position.y)}
-              onFocus={onMoveStart}
+              onFocus={onBeginEdit}
               onChange={(event) => {
                 const y = Number(event.target.value);
                 if (Number.isFinite(y)) onMove(state.id, { x: position.x, y });
@@ -439,12 +441,14 @@ const TRANSITION_FIELD_LABEL: Record<string, string> = {
 function TransitionProperties({
   edge,
   fields,
+  onBeginEdit,
   onEdit,
   onClose,
 }: {
   edge: EdgeDescription;
   /** The parts a transition of this machine has: a PDA pops and pushes, a TM writes and moves. */
   fields: Array<'read' | 'pop' | 'push' | 'write' | 'move'>;
+  onBeginEdit: () => void;
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
   onClose: () => void;
 }) {
@@ -498,6 +502,8 @@ function TransitionProperties({
                 <Input
                   id={fieldId}
                   value={transition[field] ?? ''}
+                  // Where this box's undo step begins; see the state panel's name field.
+                  onFocus={onBeginEdit}
                   onChange={(event) => onEdit(transition.index, field, event.target.value)}
                   className="h-8 font-mono text-sm"
                   autoComplete="off"
@@ -626,7 +632,7 @@ export function JffCytoscapeViewer({
     setTransitionField,
     selectTransition,
     selectedStatePosition,
-    beginStateMove,
+    beginEdit,
     moveState,
     zoomIn,
     zoomOut,
@@ -1057,7 +1063,7 @@ export function JffCytoscapeViewer({
             onSetFinal={setFinalState}
             onOpenTransition={selectTransition}
             position={selectedStatePosition}
-            onMoveStart={beginStateMove}
+            onBeginEdit={beginEdit}
             onMove={moveState}
             onClose={clearSelectedState}
           />
@@ -1065,6 +1071,7 @@ export function JffCytoscapeViewer({
           <TransitionProperties
             edge={selectedTransition}
             fields={transitionFields(type)}
+            onBeginEdit={beginEdit}
             onEdit={setTransitionField}
             onClose={clearSelectedState}
           />

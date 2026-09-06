@@ -47,7 +47,7 @@ export function ResetPasswordDialog({
   const [isTemporary, setIsTemporary] = useState(false);
   const passwordHelperId = 'admin-reset-password-helper';
   const passwordRuleStatuses = passwordRules.map((rule) => ({
-    label: rule.label,
+    label: rule.short,
     passed: rule.test(newPassword),
   }));
 

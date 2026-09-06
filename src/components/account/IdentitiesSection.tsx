@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { signIn } from 'next-auth/react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link2, Unlink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog';
@@ -9,6 +10,7 @@ import { showToast } from '@/lib/toast';
 import { formatDateTimeInTimeZone } from '@/lib/date-format';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { SettingsSection, SETTINGS_STANDARD } from '@/components/settings/settings-layout';
+import { queryKeys } from '@/lib/query-keys';
 
 const IDENTITIES_DESCRIPTION =
   'Sign in to AFCT with your institution instead of an AFCT password. You can connect one and still keep your password.';
@@ -51,27 +53,42 @@ export function IdentitiesSection({
   canConnect?: boolean;
 }) {
   const { timezone, hour12 } = useEffectiveTimezone();
-  const [identities, setIdentities] = useState<LinkedIdentity[] | null>(null);
-  const [hasPassword, setHasPassword] = useState(true);
   const [unlinking, setUnlinking] = useState<LinkedIdentity | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
+  /**
+   * Cached, so returning to the Account page does not re-ask, and so an unlink here updates
+   * anything else reading the same key. It also picks up the retry-once default: a single
+   * flaky response used to leave the section empty with a toast and no second attempt.
+   */
+  const queryClient = useQueryClient();
+  const identitiesQuery = useQuery({
+    queryKey: queryKeys.me.identities(),
+    queryFn: async () => {
       const res = await fetch('/api/me/identities');
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { identities: LinkedIdentity[]; hasPassword: boolean };
-      setIdentities(data.identities);
-      setHasPassword(data.hasPassword);
-    } catch {
-      setIdentities([]);
-      showToast.error('Could not load your connected accounts. Refresh the page to try again.');
-    }
-  }, []);
+      if (!res.ok) throw new Error('Failed to load identities');
+      return (await res.json()) as { identities: LinkedIdentity[]; hasPassword: boolean };
+    },
+  });
+  // `null` is the loading state below. A failed read resolves to an empty list rather than a
+  // permanent spinner, which is what the old catch did.
+  const identities: LinkedIdentity[] | null = identitiesQuery.isPending
+    ? null
+    : (identitiesQuery.data?.identities ?? []);
+  // Assume they have one until told otherwise: this only ever gates removing the last way in,
+  // so the safe default while loading or after a failure is "do not offer to remove it".
+  const hasPassword = identitiesQuery.data?.hasPassword ?? true;
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (identitiesQuery.isError)
+      showToast.error('Could not load your connected accounts. Refresh the page to try again.');
+  }, [identitiesQuery.isError]);
+
+  /** Re-read through the cache after an unlink, so other readers of the key follow. */
+  const load = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.me.identities() }),
+    [queryClient],
+  );
 
   /**
    * The result of a connection attempt comes back as a query parameter, because the round trip

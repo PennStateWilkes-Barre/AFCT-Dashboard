@@ -29,7 +29,7 @@ import { LOGIN_TRANSITION_KEY } from '@/lib/login-transition';
  * longer than the visible motion so removing the attribute can never snap an element out of
  * its final animation frame on a busy browser.
  */
-const ENTRY_TOTAL_MS = 850;
+const ENTRY_TOTAL_MS = 920;
 
 export const DASHBOARD_ENTRY_SCRIPT = `(function(){try{
 if(sessionStorage.getItem(${JSON.stringify(LOGIN_TRANSITION_KEY)})!=='true')return;

@@ -556,3 +556,87 @@ describe('POST /api/courses/[id]/assignments', () => {
     );
   });
 });
+
+/**
+ * What the audience checks are scoped to.
+ *
+ * Creating an assignment validates the group set, the groups and the students it is aimed at.
+ * All three come from the request body, so each check has to bound itself to the course in the
+ * URL (and, for groups, to the set the assignment uses). The prisma mock answers from its
+ * fixture whatever the `where` says, so without those keys another course's group set passes
+ * validation, a group from a different set becomes a valid target, and a student who is not
+ * enrolled here can be assigned work.
+ */
+describe('what the assignment audience checks are scoped to', () => {
+  const post = (body: unknown, id = 'c1') =>
+    POST(
+      new NextRequest(`http://localhost/api/courses/${id}/assignments`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+      { params: Promise.resolve({ id }) },
+    );
+
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  const created = (over: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    title: 'New',
+    description: null,
+    isPublished: false,
+    groupSetId: null,
+    assignedToEveryone: false,
+    dueDate: new Date('2026-01-10T23:59:00.000Z'),
+    allowLateSubmissions: false,
+    lateCutoff: null,
+    courseId: 'c1',
+    ...over,
+  });
+
+  beforeEach(() => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'FACULTY' } });
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+    prismaMock.assignmentAssignee.createMany.mockResolvedValue({ count: 1 });
+    activityLogMock.mockResolvedValue(undefined);
+  });
+
+  it('accepts a group set only from this course, and groups only from that set', async () => {
+    prismaMock.groupSet.findFirst.mockResolvedValue({ id: 'gs1' });
+    prismaMock.studentGroup.findMany.mockResolvedValue([{ id: 'g1' }]);
+    prismaMock.assignment.create.mockResolvedValue(created({ groupSetId: 'gs1' }));
+
+    const res = await post({
+      title: 'New',
+      dueDate: '2026-01-10',
+      groupSetId: 'gs1',
+      assignedToEveryone: false,
+      assignees: [{ groupId: 'g1' }],
+    });
+    expect(res.status).toBe(201);
+
+    expect(whereOf(prismaMock.groupSet.findFirst)).toEqual({ id: 'gs1', courseId: 'c1' });
+    expect(whereOf(prismaMock.studentGroup.findMany)).toEqual({
+      id: { in: ['g1'] },
+      groupSetId: 'gs1',
+    });
+  });
+
+  it('accepts student targets only from this course’s active roster', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([{ userId: 'stu-1' }]);
+    prismaMock.assignment.create.mockResolvedValue(created());
+
+    const res = await post({
+      title: 'New',
+      dueDate: '2026-01-10',
+      assignedToEveryone: false,
+      assignees: [{ userId: 'stu-1' }],
+    });
+    expect(res.status).toBe(201);
+
+    expect(whereOf(prismaMock.roster.findMany)).toMatchObject({
+      courseId: 'c1',
+      userId: { in: ['stu-1'] },
+    });
+  });
+});

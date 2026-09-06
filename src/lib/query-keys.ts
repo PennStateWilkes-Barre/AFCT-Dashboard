@@ -59,6 +59,8 @@ export const queryKeys = {
     groupSet: (courseId: string, setId: string) =>
       ['course', courseId, 'group-set', setId] as const,
     /** Prefix for the gradebook; use to invalidate both entries below. */
+    /** Which LMS courses open this one (the course-level placements). */
+    lmsLink: (courseId: string) => ['course', courseId, 'lms-link'] as const,
     grades: (courseId: string) => ['course', courseId, 'grades'] as const,
     /** The gradebook's assignment columns and student total (cached per course). */
     gradeColumns: (courseId: string) => ['course', courseId, 'grades', 'columns'] as const,
@@ -154,6 +156,11 @@ export const queryKeys = {
     statusRateLimits: () => ['admin', 'status', 'rate-limits'] as const,
     statusWorkers: () => ['admin', 'status', 'workers'] as const,
     settings: () => ['admin', 'settings'] as const,
+    /**
+     * Registered LTI platforms. Deliberately NOT under `settings`: it is a different resource
+     * with its own endpoint, and saving a system setting should not refetch the platform list.
+     */
+    ltiPlatforms: () => ['admin', 'lti-platforms'] as const,
     settingsBackups: () => ['admin', 'settings', 'backups'] as const,
     settingsTls: () => ['admin', 'settings', 'tls'] as const,
     logs: <T>(params: T) => ['admin', 'logs', params] as const,
@@ -175,5 +182,15 @@ export const queryKeys = {
 
   // --- Public / self -------------------------------------------------------
   systemSettingsPublic: () => ['system-settings', 'public'] as const,
+  /** The signed-in account's own record. Predates the `me` group below; left where it is
+   *  because many components already read it and the key is not worth churning. */
   profile: () => ['profile'] as const,
+
+  /** The signed-in account's own things, on the Account page. */
+  me: {
+    /** Prefix for everything below. */
+    all: () => ['me'] as const,
+    clientTokens: () => ['me', 'client-tokens'] as const,
+    identities: () => ['me', 'identities'] as const,
+  },
 } as const;

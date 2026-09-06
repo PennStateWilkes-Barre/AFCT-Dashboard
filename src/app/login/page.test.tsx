@@ -865,7 +865,7 @@ describe('the sign-in screen', () => {
     render(<LoginPage />);
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Sign in to your account');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Welcome to AFCT');
 
     await switchMode(user, /Create account/i);
 

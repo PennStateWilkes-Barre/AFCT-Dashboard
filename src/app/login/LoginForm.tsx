@@ -538,11 +538,11 @@ export default function LoginForm({
                 be the product's own mark, which states an identity rather than a guarantee. */}
               <div className="mb-6 flex flex-col items-center text-center">
                 <h1 id="auth-heading" className="text-2xl font-semibold tracking-tight">
-                  {mode === 'login' ? 'Sign in to your account' : 'Create your account'}
+                  {mode === 'login' ? 'Welcome to AFCT' : 'Create your account'}
                 </h1>
                 <p className="text-muted-foreground mt-1 text-sm">
                   {mode === 'login'
-                    ? 'Access your AFCT Dashboard'
+                    ? 'Sign in to access the dashboard.'
                     : 'Set up your AFCT Dashboard account'}
                 </p>
               </div>

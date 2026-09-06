@@ -67,6 +67,11 @@ export function LoginBrandPanel({
         'text-sidebar-foreground relative',
         'grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto]',
         'p-8 xl:p-12 2xl:p-14',
+        // A shallower foot than the other three sides. The footer row is pinned to this
+        // padding, so trimming it is the only thing that moves that row down, and the row is
+        // four small links rather than a block of copy: it does not need the same margin the
+        // headline does. Tailwind emits the side utility after the shorthand, so this wins.
+        'pb-6 xl:pb-9 2xl:pb-10',
         className,
       )}
     >

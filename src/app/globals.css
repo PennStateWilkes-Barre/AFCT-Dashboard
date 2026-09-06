@@ -1484,11 +1484,15 @@ input[type='week'] {
    Sign-in transition
 
    Signing in ends with a full page load, so the two halves of this are in two places and
-   have to agree. The login page (LoginForm) wipes a cobalt-to-navy circle out of the Sign
-   In button and then navigates; the dashboard (DashboardEntryTransition) lays the same navy
-   back down, fades it, and brings its three regions in behind it. The end colour is
-   `--sidebar` on both sides, which is what makes the two pages look like one movement
-   rather than two.
+   have to agree. The login page (LoginForm) covers itself in navy and then navigates; the
+   dashboard (DashboardEntryTransition) lays the same navy back down and fades it away. The
+   colour is `--sidebar` on both sides, which is what hides the navigation between them.
+
+   **Read login-transition-tuning.css with this block.** That file is imported after this one
+   and it owns what the transition actually looks like now: a plain fade both ways. What is
+   below is the plumbing plus a first treatment (a circular wipe out of the Sign In button and
+   a staggered arrival for the dashboard's three regions) that was tried and judged too busy.
+   Its keyframes are still here because the tuning file overrides rather than replaces them.
 
    All of it is CSS rather than framer-motion, for two reasons. The login overlay has to be
    `position: fixed` while its nearest sensible parent carries a `translate` at xl and above,

@@ -43,11 +43,11 @@ const loadMotionFeatures = () => import('framer-motion').then((mod) => mod.domAn
 /**
  * How long the page stays up after a successful sign-in before handing over to the dashboard.
  *
- * Long enough for the wipe in globals.css to cover the screen (60ms delay plus a 260ms
- * expansion), short enough that it never feels like a wait. A timer rather than the
- * animation's own end event: the navigation is the real behaviour and the animation is
- * decoration, so it must not be possible for a missed callback to strand somebody on a blue
- * screen. The dashboard's entrance takes it from here, and the two together land around 700ms.
+ * Long enough for the fade in login-transition-tuning.css to reach the navy, short enough that
+ * it never feels like a wait. A timer rather than the animation's own end event: the navigation
+ * is the real behaviour and the animation is decoration, so it must not be possible for a
+ * missed callback to strand somebody on a blue screen. The dashboard fades the same navy away
+ * on the other side of the load, which is what hides the navigation itself.
  */
 const LOGIN_EXIT_MS = 340;
 
@@ -546,12 +546,16 @@ export default function LoginForm({
           across 1440 to 2560. The 2xl step also makes the 1536 dip shallower rather than
           deeper: 79px instead of 63. */}
       <div className="auth-form-surface 3xl:pr-40 relative z-10 flex min-h-dvh w-full flex-col items-center px-4 py-6 sm:px-6 lg:pt-10 lg:pb-6 2xl:pr-16">
-        {/* The wipe out of the page. Decorative and inert: it announces nothing, takes no
+        {/* The fade out of the page. Decorative and inert: it announces nothing, takes no
             focus and cannot be clicked. It lives here rather than around the card because it
             is `position: fixed` and the card's wrapper is translated at xl and above, which
-            would make "fixed" mean "fixed to that block". Sized and centred inline because
-            only this component knows where the button ended up; the rest is in globals.css
-            under "Sign-in transition". */}
+            would make "fixed" mean "fixed to that block".
+
+            The inline geometry below places a circle centred on the Sign In button, which is
+            what the first version of this animated. The current treatment is a plain fade and
+            ignores it; see login-transition-tuning.css, which is where the whole handoff is
+            tuned. Left in place because the geometry is what the styling would need back if
+            the fade is ever traded for something with a shape. */}
         {exitOrigin ? (
           <div className="auth-exit-overlay" aria-hidden="true">
             <span

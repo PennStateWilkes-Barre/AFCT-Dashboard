@@ -251,26 +251,25 @@ export function LoginBrandPanel({
             column creeping toward the login card as it gets taller. The icons align to the
             first line of each row rather than centring on the block, so the three glyphs sit
             on one vertical rhythm whether a description wraps to one line or two. */}
-        <ul className="max-w-[30rem] space-y-5">
+        <ul className="max-w-[30rem] space-y-6">
           {FEATURES.map(({ icon: Icon, title, body }) => (
-            <li key={title} className="flex items-start gap-3">
-              {/* A tinted disc rather than a bare glyph: at this size an unframed icon reads
-                  as debris beside text, and the ring gives it an edge without a border that
-                  would compete with the login card's. Both values are alpha on the same
-                  cobalt the footer icons use, so the set stays one family. */}
+            <li key={title} className="flex items-start gap-3.5">
+              {/* A tinted disc rather than a bare glyph: an unframed icon reads as debris
+                  beside text, and the ring gives it an edge without a border that would
+                  compete with the login card's. Both values are alpha on the same cobalt the
+                  footer icons use, so the set stays one family. The glyph is half the disc,
+                  which is the proportion that keeps it centred rather than crowded. */}
               <span
                 aria-hidden="true"
-                className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-blue-400/10 ring-1 ring-blue-400/20"
+                className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-full bg-blue-400/10 ring-1 ring-blue-400/20"
               >
-                <Icon className="size-4 text-blue-300" />
+                <Icon className="size-5 text-blue-300" />
               </span>
               <div className="min-w-0">
-                <p className="text-sidebar-foreground text-sm leading-snug font-semibold">
+                <p className="text-sidebar-foreground text-[0.9375rem] leading-snug font-semibold">
                   {title}
                 </p>
-                <p className="text-sidebar-muted-foreground mt-1 text-[0.8125rem] leading-snug">
-                  {body}
-                </p>
+                <p className="text-sidebar-muted-foreground mt-1 text-sm leading-snug">{body}</p>
               </div>
             </li>
           ))}

@@ -24,6 +24,7 @@ import {
 import type { AssignmentWizardFormSchema } from '@/schemas/assignment';
 import { formatDateTimeLocal } from '@/lib/date-convert';
 import { memberCountLabel } from '@/components/assignments/labels';
+import { queryKeys } from '@/lib/query-keys';
 
 type FormValues = z.input<typeof AssignmentWizardFormSchema>;
 type FormOverride = NonNullable<FormValues['dateOverrides']>[number];
@@ -77,7 +78,7 @@ export function DateOverridesEditor({
 
   const students = useRosterStudentOptions(courseId, active);
   const groupSetDetailQuery = useQuery({
-    queryKey: ['course', courseId, 'group-set', groupSetId],
+    queryKey: queryKeys.course.groupSet(courseId, groupSetId),
     queryFn: () => apiClient.get<GroupSetDetailDTO>(apiPaths.courseGroupSet(courseId, groupSetId)),
     enabled: active && !!groupSetId,
     staleTime: 30_000,

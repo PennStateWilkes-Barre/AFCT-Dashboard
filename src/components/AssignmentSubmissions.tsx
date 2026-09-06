@@ -146,7 +146,7 @@ export default function AssignmentSubmissions({
   const assignmentShell = assignmentShellQuery.isError ? null : (assignmentShellQuery.data ?? null);
 
   const studentsQuery = useQuery({
-    queryKey: ['course', courseId, 'students', 'all'],
+    queryKey: queryKeys.course.studentsAll(courseId),
     queryFn: async () => {
       const res = await fetch(apiPaths.courseStudents(courseId, { includeDropped: true }));
       if (!res.ok)

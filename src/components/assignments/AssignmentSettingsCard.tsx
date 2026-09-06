@@ -16,6 +16,7 @@ import { apiPaths } from '@/lib/api-paths';
 import { apiClient, ApiError } from '@/lib/api/fetch-client';
 import { AssignmentWizardFormSchema } from '@/schemas/assignment';
 import { toDateTimeLocalInTimeZone } from '@/lib/date-convert';
+import { queryKeys } from '@/lib/query-keys';
 
 type AssigneeApi = {
   id: string;
@@ -101,7 +102,7 @@ export function AssignmentSettingsCard({
   const [saving, setSaving] = useState(false);
 
   const assigneesQuery = useQuery({
-    queryKey: ['course', courseId, 'assignment', assignment.id, 'assignees'],
+    queryKey: queryKeys.assignment.assignees(courseId, assignment.id),
     queryFn: () =>
       apiClient.get<AssigneeApi[]>(apiPaths.assignmentAssignees(courseId, assignment.id)),
     staleTime: 30_000,
@@ -109,7 +110,7 @@ export function AssignmentSettingsCard({
   const loadedAssignees = useMemo(() => assigneesQuery.data ?? [], [assigneesQuery.data]);
 
   const overridesQuery = useQuery({
-    queryKey: ['course', courseId, 'assignment', assignment.id, 'overrides'],
+    queryKey: queryKeys.assignment.overrides(courseId, assignment.id),
     queryFn: () =>
       apiClient.get<OverrideApi[]>(apiPaths.assignmentOverrides(courseId, assignment.id)),
     staleTime: 30_000,

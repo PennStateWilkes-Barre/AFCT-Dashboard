@@ -26,6 +26,7 @@ import { json2csv } from 'json-2-csv';
 import { neutralizeCsvFormulasDeep } from '@/lib/csv';
 import { showToast } from '@/lib/toast';
 import { apiPaths } from '@/lib/api-paths';
+import { queryKeys } from '@/lib/query-keys';
 
 // RHF form state = Zod INPUT (strings for datetime-local)
 type FormValues = z.infer<typeof DownloadLogsSchema>;
@@ -65,7 +66,7 @@ export function DownloadLogsDialog({ open, onOpenChange }: DownloadLogsDialogPro
   // dialog is open (enabled: open preserves the original lazy-on-open behavior).
   // Field lists rarely change, so a 5-minute staleTime avoids refetching each open.
   const { data: fields, isError: fieldsError } = useQuery({
-    queryKey: ['admin', 'logs', 'fields'],
+    queryKey: queryKeys.admin.logsFields(),
     queryFn: async (): Promise<string[]> => {
       const res = await fetch(apiPaths.admin.logsExportFields(), {
         method: 'GET',

@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { IdentitiesSection } from './IdentitiesSection';
+import { renderWithClient } from '@/test/query';
 
 /**
  * The connected-accounts tab.
@@ -49,7 +50,7 @@ describe('the list', () => {
       vi.fn(() => respond({ identities: [identity], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     expect(await screen.findByText('Penn State')).toBeInTheDocument();
     expect(screen.getByText(/You connected this/)).toBeInTheDocument();
@@ -61,7 +62,7 @@ describe('the list', () => {
       vi.fn(() => respond({ identities: [], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     expect(
       await screen.findByText(/have not connected an institutional account/),
@@ -81,7 +82,7 @@ describe('connecting', () => {
     );
     const user = userEvent.setup();
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
     await user.click(await screen.findByRole('button', { name: /Connect Penn State/ }));
 
     expect(signIn).toHaveBeenCalledWith('oidc', {
@@ -100,7 +101,7 @@ describe('disconnecting', () => {
     vi.stubGlobal('fetch', fetchMock);
     const user = userEvent.setup();
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
     await user.click(await screen.findByRole('button', { name: /Disconnect/ }));
 
     // Asserted before confirming, because both buttons are named "Disconnect": without this the
@@ -125,7 +126,7 @@ describe('disconnecting', () => {
       vi.fn(() => respond({ identities: [identity], hasPassword: false })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     expect(await screen.findByRole('button', { name: /Disconnect/ })).toBeDisabled();
     expect(screen.getByText(/only way to sign in/)).toBeInTheDocument();
@@ -137,7 +138,7 @@ describe('disconnecting', () => {
       vi.fn(() => respond({ identities: [identity], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     expect(await screen.findByRole('button', { name: /Disconnect/ })).toBeEnabled();
   });
@@ -151,7 +152,7 @@ describe('coming back from the provider', () => {
       vi.fn(() => respond({ identities: [identity], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     await waitFor(() => expect(toast.success).toHaveBeenCalled());
     // Stripped, so a reload does not repeat the message.
@@ -165,7 +166,7 @@ describe('coming back from the provider', () => {
       vi.fn(() => respond({ identities: [], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('different AFCT account')),
@@ -192,7 +193,7 @@ describe('what each connection is called', () => {
       ),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
 
     expect(await screen.findByText(/Your LMS \(canvas.school.edu\)/)).toBeInTheDocument();
     expect(screen.queryByText('Penn State')).not.toBeInTheDocument();
@@ -204,7 +205,7 @@ describe('what each connection is called', () => {
       vi.fn(() => respond({ identities: [], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel={null} canConnect={false} />);
+    renderWithClient(<IdentitiesSection providerLabel={null} canConnect={false} />);
 
     expect(await screen.findByText(/switched off for this AFCT/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /connect/i })).not.toBeInTheDocument();
@@ -225,7 +226,7 @@ describe('when institutional sign-in is switched off', () => {
       vi.fn(() => respond({ identities: [identity], hasPassword: true })),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" canConnect={false} />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" canConnect={false} />);
 
     const message = await screen.findByText(/switched off for this AFCT/);
     expect(message).toHaveTextContent(/cannot be used to sign in/);
@@ -243,7 +244,7 @@ describe('the disconnect confirmation', () => {
       'fetch',
       vi.fn(() => respond({ identities: [{ ...identity, ...over }], hasPassword: true })),
     );
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
     await userEvent.click(await screen.findByRole('button', { name: /disconnect/i }));
   };
 
@@ -280,7 +281,7 @@ describe('where focus goes after disconnecting', () => {
       ),
     );
 
-    render(<IdentitiesSection providerLabel="Penn State" />);
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
     await screen.findByRole('button', { name: /disconnect/i });
 
     await user.click(screen.getByRole('button', { name: /disconnect/i }));
@@ -290,5 +291,33 @@ describe('where focus goes after disconnecting', () => {
       expect(document.activeElement).not.toBe(document.body);
       expect(document.activeElement).toHaveTextContent('Connected accounts');
     });
+  });
+});
+
+/**
+ * Same rewrite as TokensSection, same thing worth re-proving: a failed read must land on the
+ * empty state rather than the loading one, and `hasPassword` must stay `true` when we do not
+ * know, since it only ever gates offering to remove somebody's last way in.
+ */
+describe('when the connected accounts cannot be loaded', () => {
+  it('says so once and stops loading rather than spinning', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => respond({}, false)),
+    );
+
+    renderWithClient(<IdentitiesSection providerLabel="Penn State" />);
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'Could not load your connected accounts. Refresh the page to try again.',
+      ),
+    );
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    // Resolved to "nothing connected" rather than sitting on the loading placeholder.
+    expect(
+      await screen.findByText(/You have not connected an institutional account\./i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Loading your connected accounts/i)).not.toBeInTheDocument();
   });
 });

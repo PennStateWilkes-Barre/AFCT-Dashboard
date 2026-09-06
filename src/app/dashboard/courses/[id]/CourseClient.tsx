@@ -21,6 +21,7 @@ import LoadingSpinner from '@/components/ui/loading-spinner';
 import { CourseDialogs } from '@/components/course/CourseDialogs';
 import type { FullCourse } from '@/types/course';
 import type { TabType } from '@/types/course';
+import { queryKeys } from '@/lib/query-keys';
 
 export default function CourseClient({ initialCourse }: { initialCourse?: FullCourse | null }) {
   const { id } = useParams();
@@ -150,7 +151,7 @@ export default function CourseClient({ initialCourse }: { initialCourse?: FullCo
       // render (name, code, dates, timezone, published/archived state), so invalidate
       // the whole ['courses'] prefix. Without this the list keeps its cached row until
       // its 30s staleTime elapses, forcing a manual refresh.
-      void queryClient.invalidateQueries({ queryKey: ['courses'] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.courses.all() });
       showToast.updated('Course');
     },
     [setCourse, queryClient],

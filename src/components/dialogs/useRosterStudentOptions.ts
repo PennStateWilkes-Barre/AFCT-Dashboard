@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { showToast } from '@/lib/toast';
 import { apiPaths } from '@/lib/api-paths';
+import { queryKeys } from '@/lib/query-keys';
 
 export type StudentOption = {
   id: string;
@@ -26,7 +27,7 @@ export function getStudentName(student: StudentOption): string {
  */
 export function useRosterStudentOptions(courseId: string, open: boolean): StudentOption[] {
   const query = useQuery({
-    queryKey: ['course', courseId, 'students'],
+    queryKey: queryKeys.course.students(courseId),
     queryFn: async () => {
       const res = await fetch(apiPaths.courseStudents(courseId));
       if (!res.ok) throw new Error('Failed to load students');

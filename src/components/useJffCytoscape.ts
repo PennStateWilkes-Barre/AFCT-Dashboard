@@ -35,6 +35,7 @@ import {
   VIEWER_HISTORY_LIMIT,
   type ViewerAddedState,
   type ViewerHistoryStep,
+  type ViewerRemoved,
   type ViewerSelection,
   type ViewerViewport,
   type ViewerViewState,
@@ -309,6 +310,8 @@ type ViewerSnapshot = Arrangement & {
   transitionEdits: Record<number, Partial<Parsed['transitions'][number]>>;
   /** States the reader drew, which the file does not have. See `addState`. */
   addedStates: ViewerAddedState[];
+  /** What the reader took off the drawing. See `removeState` and `removeTransitions`. */
+  removed: ViewerRemoved;
 };
 
 /**
@@ -328,6 +331,7 @@ function toStoredStep(snapshot: ViewerSnapshot): ViewerHistoryStep {
     finals: snapshot.finalOverrides,
     transitions: snapshot.transitionEdits,
     addedStates: snapshot.addedStates,
+    removed: snapshot.removed,
   };
 }
 
@@ -340,6 +344,7 @@ function fromStoredStep(step: ViewerHistoryStep): ViewerSnapshot {
     finalOverrides: step.finals ?? {},
     transitionEdits: step.transitions ?? {},
     addedStates: step.addedStates ?? [],
+    removed: step.removed ?? { states: [], transitions: [] },
   };
 }
 
@@ -368,7 +373,7 @@ function deriveParsed(
   pristine: Parsed,
   edits: Pick<
     ViewerSnapshot,
-    'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits' | 'addedStates'
+    'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits' | 'addedStates' | 'removed'
   >,
 ): Parsed {
   // Added states go in FIRST, so everything after this treats them as ordinary states: a name
@@ -392,13 +397,37 @@ function deriveParsed(
             })),
           ],
         };
-  return applyTransitionEdits(
+  const marked = applyTransitionEdits(
     applyFinalStates(
       applyInitialState(applyRenames(withAdded, edits.renames), edits.initialOverride),
       edits.finalOverrides,
     ),
     edits.transitionEdits,
   );
+  return applyRemovals(marked, edits.removed);
+}
+
+/**
+ * Take off what the reader has deleted.
+ *
+ * Last, and after the additions, so one rule covers both: a state the reader drew and then
+ * deleted goes the same way as one the file came with, and neither needs a special case.
+ *
+ * A transition goes when it is named OR when either of its ends has gone. A machine cannot have
+ * a transition into a state that is not there, and leaving one would put an edge on the graph
+ * with nothing at the end of it and write an invalid `.jff` on the way out.
+ */
+function applyRemovals(parsed: Parsed, removed: ViewerRemoved): Parsed {
+  if (removed.states.length === 0 && removed.transitions.length === 0) return parsed;
+  const goneStates = new Set(removed.states);
+  const goneTransitions = new Set(removed.transitions);
+  return {
+    ...parsed,
+    states: parsed.states.filter((state) => !goneStates.has(state.id)),
+    transitions: parsed.transitions.filter(
+      (t) => !goneTransitions.has(t.__idx) && !goneStates.has(t.from) && !goneStates.has(t.to),
+    ),
+  };
 }
 
 /**
@@ -601,12 +630,13 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     // Which states exist at all, before anything about them is put right. Undo and redo can
     // add a state back or take one away, and the loop below only knows how to change one that
     // is already drawn. Notes and start markers are not states and are left to their own code.
-    const drawn = cy
-      .nodes()
-      .filter((node: any) => !node.hasClass?.('start') && !node.hasClass?.('note'));
-    drawn.forEach((node: any) => {
-      if (!byId.has(node.id())) node.remove?.();
+    const goneNodes: any[] = [];
+    cy.nodes().forEach((node: any) => {
+      if (node.hasClass?.('start') || node.hasClass?.('note')) return;
+      if (!byId.has(node.id())) goneNodes.push(node);
     });
+    // Gathered, then removed: same reason as the lines below.
+    goneNodes.forEach((node) => node.remove?.());
     const present = new Set(
       cy
         .nodes()
@@ -641,16 +671,53 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     });
 
     // Transitions between the same two states share one line, so a line's label is worked out
-    // again from all of them rather than patched from the one that changed.
-    cy.edges().forEach((edge: any) => {
-      const from = edge.data('source');
-      const to = edge.data('target');
+    // again from all of them rather than patched from the one that changed, and a line whose
+    // last transition has gone goes with it. The pairs that have transitions and no line are
+    // the other direction of the same rule: undoing a deletion has to draw the line again.
+    const wanted = new Map<string, { from: string; to: string; label: string }>();
+    parsed.transitions.forEach((t) => {
+      const key = `${t.from}\u0000${t.to}`;
+      if (wanted.has(key)) return;
       const bundled = bundleEdges(
-        parsed.transitions.filter((t) => t.from === from && t.to === to),
+        parsed.transitions.filter((other) => other.from === t.from && other.to === t.to),
         parsed.type,
         epsSymbol,
       )[0];
-      if (bundled !== undefined) edge.data('label', bundled.label);
+      if (bundled) wanted.set(key, { from: t.from, to: t.to, label: bundled.label });
+    });
+
+    const drawnPairs = new Set<string>();
+    // Gathered first and removed after, never during. `cy.edges()` hands back the live list, so
+    // removing while walking it shifts the elements under the walk and skips the next one:
+    // deleting one line left the one after it unvisited, unrecorded, and then drawn a second
+    // time by the loop below.
+    const stale: any[] = [];
+    cy.edges().forEach((edge: any) => {
+      const key = `${edge.data('source')}\u0000${edge.data('target')}`;
+      const line = wanted.get(key);
+      if (!line) {
+        stale.push(edge);
+        return;
+      }
+      drawnPairs.add(key);
+      edge.data('label', line.label);
+    });
+    stale.forEach((edge) => edge.remove?.());
+    wanted.forEach((line, key) => {
+      if (drawnPairs.has(key)) return;
+      cy.add({
+        group: 'edges',
+        // One line per pair, so the pair is the id. It differs from the `e0-q0-q1` shape a load
+        // builds, and nothing minds: everything that looks an edge up here matches on its two
+        // ends, which is how a transition is named throughout this viewer.
+        data: {
+          id: `e-${line.from}-${line.to}`,
+          source: line.from,
+          target: line.to,
+          label: line.label,
+          isLoop: line.from === line.to ? 1 : 0,
+        },
+      });
     });
 
     if (initialId === null) {
@@ -842,6 +909,18 @@ export function useJffCytoscape({
   const [addedStates, setAddedStates] = useState<ViewerAddedState[]>(savedView?.addedStates ?? []);
   const addedStatesRef = useRef(addedStates);
   addedStatesRef.current = addedStates;
+  /**
+   * What the reader has taken off the drawing, held beside the file like everything else here.
+   *
+   * Deleting is subtraction from the derived machine rather than surgery on the parse, for the
+   * same reason the additions are: every load re-reads the file, so a state cut out of `parsed`
+   * would be back the moment the theme changed. Undo is the same list one step older.
+   */
+  const [removed, setRemoved] = useState<ViewerRemoved>(
+    savedView?.removed ?? { states: [], transitions: [] },
+  );
+  const removedRef = useRef(removed);
+  removedRef.current = removed;
   const viewRestored = useRef(false);
   /**
    * Which load owns the graph.
@@ -1001,7 +1080,9 @@ export function useJffCytoscape({
     initialOverride !== undefined ||
     Object.keys(finalOverrides).length > 0 ||
     Object.keys(transitionEdits).length > 0 ||
-    addedStates.length > 0;
+    addedStates.length > 0 ||
+    removed.states.length > 0 ||
+    removed.transitions.length > 0;
 
   /* ── following another pane's camera ────────────────────────────────── */
 
@@ -1089,6 +1170,7 @@ export function useJffCytoscape({
         finals: finalOverridesRef.current,
         transitions: transitionEditsRef.current,
         addedStates: addedStatesRef.current,
+        removed: removedRef.current,
         // The most recent steps a side. Trimmed from the front, so what is dropped is the
         // oldest history, which is the part a reader is least likely to walk back to.
         history: {
@@ -1186,6 +1268,10 @@ export function useJffCytoscape({
       finalOverrides: { ...finalOverridesRef.current },
       transitionEdits: { ...transitionEditsRef.current },
       addedStates: [...addedStatesRef.current],
+      removed: {
+        states: [...removedRef.current.states],
+        transitions: [...removedRef.current.transitions],
+      },
     };
   }, []);
 
@@ -1238,6 +1324,7 @@ export function useJffCytoscape({
         finalOverrides: finalOverridesRef.current,
         transitionEdits: transitionEditsRef.current,
         addedStates: addedStatesRef.current,
+        removed: removedRef.current,
       });
       const { id, name } = freeStateIdentity(current);
       const drawn: ViewerAddedState = {
@@ -1256,6 +1343,7 @@ export function useJffCytoscape({
         finalOverrides: finalOverridesRef.current,
         transitionEdits: transitionEditsRef.current,
         addedStates: nextAdded,
+        removed: removedRef.current,
       });
       setParsed(next);
 
@@ -1273,6 +1361,84 @@ export function useJffCytoscape({
       }
     },
     [recordStep, restoreSelection],
+  );
+
+  /**
+   * Rebuild the machine from the file plus the reader's answers, and put the graph in step.
+   *
+   * Shared by the two deletions, which are the only changes here that can take an element off
+   * the drawing rather than change one: `syncGraph` is what adds and removes nodes and lines,
+   * and neither delete would show without it.
+   */
+  const applyDerived = useCallback(
+    (nextRemoved: ViewerRemoved, nextAdded: ViewerAddedState[]) => {
+      const pristine = pristineParsed.current;
+      if (!pristine) return;
+      const next = deriveParsed(pristine, {
+        renames: renamesRef.current,
+        initialOverride: initialOverrideRef.current,
+        finalOverrides: finalOverridesRef.current,
+        transitionEdits: transitionEditsRef.current,
+        addedStates: nextAdded,
+        removed: nextRemoved,
+      });
+      setParsed(next);
+      const cy = cyRef.current;
+      if (cy) syncGraph(cy, next, epsSymbol);
+    },
+    [epsSymbol],
+  );
+
+  /**
+   * Take a state off the drawing, and every transition that touched it.
+   *
+   * On screen only, like everything else here: the submitted file is not changed, which is what
+   * the "File changed" note beside the machine type says. One undo step puts the state, its
+   * transitions and the panel that was open on it all back, because they all come out of the
+   * same derivation.
+   *
+   * The state may be one the file came with or one the reader drew; the same list covers both,
+   * so there is no second path to get wrong.
+   */
+  const removeState = useCallback(
+    (id: string) => {
+      recordStep();
+      const next: ViewerRemoved = {
+        states: [...removedRef.current.states, id],
+        transitions: [...removedRef.current.transitions],
+      };
+      removedRef.current = next;
+      setRemoved(next);
+      applyDerived(next, addedStatesRef.current);
+      // The panel was describing it, and it is not there any more.
+      setSelectedStateId(null);
+      setSelectedPosition(null);
+      setSelectedEdge(null);
+    },
+    [recordStep, applyDerived],
+  );
+
+  /**
+   * Take a line off the drawing: every transition drawn on it.
+   *
+   * Parallel transitions between the same two states are one line on the canvas and one panel,
+   * so this is what deleting from that panel means. The caller passes the indices the panel was
+   * showing rather than the pair, so the rule stays "delete what you are looking at".
+   */
+  const removeTransitions = useCallback(
+    (indices: readonly number[]) => {
+      if (indices.length === 0) return;
+      recordStep();
+      const next: ViewerRemoved = {
+        states: [...removedRef.current.states],
+        transitions: [...removedRef.current.transitions, ...indices],
+      };
+      removedRef.current = next;
+      setRemoved(next);
+      applyDerived(next, addedStatesRef.current);
+      setSelectedEdge(null);
+    },
+    [recordStep, applyDerived],
   );
 
   const restoreSavedView = useCallback(
@@ -1378,6 +1544,7 @@ export function useJffCytoscape({
           finalOverrides: finalOverridesRef.current,
           transitionEdits: transitionEditsRef.current,
           addedStates: addedStatesRef.current,
+          removed: removedRef.current,
         });
         setPhase('drawing');
         setType(parsed.type);
@@ -2064,6 +2231,8 @@ export function useJffCytoscape({
     initialOverride,
     finalOverrides,
     transitionEdits,
+    addedStates,
+    removed,
     rememberView,
   ]);
 
@@ -2109,11 +2278,13 @@ export function useJffCytoscape({
     setFinalOverrides(snapshot.finalOverrides);
     setTransitionEdits(snapshot.transitionEdits);
     setAddedStates(snapshot.addedStates);
+    setRemoved(snapshot.removed);
     renamesRef.current = snapshot.renames;
     initialOverrideRef.current = snapshot.initialOverride;
     finalOverridesRef.current = snapshot.finalOverrides;
     transitionEditsRef.current = snapshot.transitionEdits;
     addedStatesRef.current = snapshot.addedStates;
+    removedRef.current = snapshot.removed;
 
     const pristine = pristineParsed.current;
     if (!pristine) return;
@@ -2369,6 +2540,7 @@ export function useJffCytoscape({
       setFinalOverrides({});
       setTransitionEdits({});
       setAddedStates([]);
+      setRemoved({ states: [], transitions: [] });
       setHonorPositions(honorPositionsDefault);
       // The rebuild puts every state back where its author had it.
       setReloadNonce((n) => n + 1);
@@ -2572,6 +2744,8 @@ export function useJffCytoscape({
         // A graph mid-teardown. The name is kept either way, and the next load applies it.
       }
     },
+    removeState,
+    removeTransitions,
     selectedTransition:
       parsed && selectedEdge
         ? describeEdge(parsed, selectedEdge.from, selectedEdge.to, epsSymbol)

@@ -121,10 +121,22 @@ export type ViewerViewState = {
    * forgets these along with everything else.
    */
   addedStates?: ViewerAddedState[];
+  /**
+   * What the reader has taken off the drawing.
+   *
+   * States by id and transitions by their place in the file, which is how both are named
+   * everywhere else here. One field rather than two because they are one answer: a machine with
+   * a state removed has no transitions into it either, and the two are always written and read
+   * together.
+   */
+  removed?: ViewerRemoved;
 };
 
 /** A state the reader drew, in the file's own coordinate units. */
 export type ViewerAddedState = { id: string; name: string; xPos: number; yPos: number };
+
+/** What the reader has taken off the drawing: state ids, and transition indices. */
+export type ViewerRemoved = { states: string[]; transitions: number[] };
 
 /** One step of the viewer's undo history: the whole drawing as it stood before a change. */
 export type ViewerHistoryStep = {
@@ -136,6 +148,7 @@ export type ViewerHistoryStep = {
   finals?: Record<string, boolean>;
   transitions?: Record<number, ViewerTransitionEdit>;
   addedStates?: ViewerAddedState[];
+  removed?: ViewerRemoved;
 };
 
 export type ViewerHistory = { undo: ViewerHistoryStep[]; redo: ViewerHistoryStep[] };
@@ -217,6 +230,7 @@ function isViewState(value: unknown): value is ViewerViewState {
   }
   if (s.history !== undefined && !isHistory(s.history)) return false;
   if (s.addedStates !== undefined && !isAddedStates(s.addedStates)) return false;
+  if (s.removed !== undefined && !isRemoved(s.removed)) return false;
   if (!s.positions || typeof s.positions !== 'object') return false;
   return Object.values(s.positions as Record<string, unknown>).every(isPoint);
 }
@@ -237,6 +251,17 @@ function isAddedStates(value: unknown): value is ViewerAddedState[] {
         Number.isFinite(st.yPos)
       );
     })
+  );
+}
+
+function isRemoved(value: unknown): value is ViewerRemoved {
+  if (!value || typeof value !== 'object') return false;
+  const r = value as Record<string, unknown>;
+  return (
+    Array.isArray(r.states) &&
+    r.states.every((id) => typeof id === 'string') &&
+    Array.isArray(r.transitions) &&
+    r.transitions.every((index) => typeof index === 'number' && Number.isFinite(index))
   );
 }
 
@@ -271,6 +296,7 @@ function isHistoryStep(value: unknown): value is ViewerHistoryStep {
   if (step.transitions !== undefined && (!step.transitions || typeof step.transitions !== 'object'))
     return false;
   if (step.addedStates !== undefined && !isAddedStates(step.addedStates)) return false;
+  if (step.removed !== undefined && !isRemoved(step.removed)) return false;
   return true;
 }
 

@@ -66,6 +66,7 @@ import {
   Plus,
   ChevronDown,
   ChevronRight,
+  Trash2,
   Circle,
   MoveRight,
   Crosshair,
@@ -410,6 +411,7 @@ function StateProperties({
   position,
   onBeginEdit,
   onMove,
+  onDelete,
   onClose,
 }: {
   state: StateDescription;
@@ -426,6 +428,7 @@ function StateProperties({
   position: { x: number; y: number } | null;
   onBeginEdit: () => void;
   onMove: (id: string, at: { x: number; y: number }) => void;
+  onDelete: (id: string) => void;
   onClose: () => void;
 }) {
   // Seeded once per state: the call site keys this component by id, so moving to another state
@@ -564,6 +567,8 @@ function StateProperties({
           </div>
         </AdvancedSection>
       ) : null}
+
+      <InspectorDeleteRow label="Delete state" onDelete={() => onDelete(state.id)} />
     </PropertiesPanel>
   );
 }
@@ -599,6 +604,31 @@ function AdvancedSection({
       </CollapsibleTrigger>
       <CollapsibleContent className="pt-2">{children}</CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * The one destructive thing an inspector offers, at the foot of the panel.
+ *
+ * Below everything else and separated from it, because it is the only control here that takes
+ * something away: the rest of the panel changes what an element says, and putting this in with
+ * them would make it one more field. Quiet rather than red-filled, since it is not the reason
+ * anybody opened the panel; the dialog it raises is where the warning belongs.
+ */
+function InspectorDeleteRow({ label, onDelete }: { label: string; onDelete: () => void }) {
+  return (
+    <div className="px-3 py-2.5">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="text-destructive hover:bg-destructive/10 hover:text-destructive h-8 w-full justify-start gap-2 px-2 text-xs"
+        onClick={onDelete}
+      >
+        <Trash2 className="size-3.5" aria-hidden="true" />
+        {label}
+      </Button>
+    </div>
   );
 }
 
@@ -758,6 +788,7 @@ function TransitionProperties({
   fields,
   onBeginEdit,
   onEdit,
+  onDelete,
   onClose,
 }: {
   edge: EdgeDescription;
@@ -767,6 +798,7 @@ function TransitionProperties({
   fields: Array<'read' | 'pop' | 'push' | 'write' | 'move'>;
   onBeginEdit: () => void;
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
+  onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {
   const fieldIdPrefix = useId();
@@ -848,6 +880,19 @@ function TransitionProperties({
       </InspectorSection>
       {/* No Advanced here. A transition has no coordinates of its own, and a disclosure over an
           empty box is furniture. */}
+
+      {/* The whole line, which is what the panel is about: parallel transitions between the same
+          two states are drawn as one and edited here together, so they go together too. The
+          label says how many when there is more than one, since "Delete transition" over three
+          of them would be a surprise. */}
+      <InspectorDeleteRow
+        label={
+          edge.transitions.length > 1
+            ? `Delete ${edge.transitions.length} transitions`
+            : 'Delete transition'
+        }
+        onDelete={() => onDelete(edge.transitions.map((transition) => transition.index))}
+      />
     </PropertiesPanel>
   );
 }
@@ -948,6 +993,16 @@ export function JffCytoscapeViewer({
    * in the palette's own list plus whatever it makes a click mean.
    */
   const [activeTool, setActiveTool] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
+  /**
+   * What the reader has asked to delete, held until they say yes.
+   *
+   * The element itself rather than a boolean, so the dialog can name what is about to go: "the
+   * state q3" tells somebody who clicked the wrong row that they clicked the wrong row, and
+   * "Are you sure?" does not.
+   */
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: 'state'; id: string; name: string } | { kind: 'transitions'; indices: number[] } | null
+  >(null);
 
   /**
    * Escape leaves the State tool.
@@ -999,6 +1054,8 @@ export function JffCytoscapeViewer({
     setFinalState,
     setTransitionField,
     selectTransition,
+    removeState,
+    removeTransitions,
     selectedStatePosition,
     beginEdit,
     moveState,
@@ -1358,6 +1415,35 @@ export function JffCytoscapeViewer({
       {/* The same question the standalone window's menu asks, for the same reason: a reader can
           spend a while pulling a crowded machine apart and there is no undo once the history
           has gone with it. */}
+      {/* Deleting is the one thing in this panel that cannot be seen coming: a name typed wrong
+          is typed again, and a tick box is ticked back, but a state and its transitions leaving
+          the drawing at a click is worth a question first. Undo takes it back either way. */}
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        variant="destructive"
+        // The title names what is going, so somebody who clicked the wrong row is told which
+        // row they clicked.
+        title={
+          pendingDelete?.kind === 'state'
+            ? `Delete state ${pendingDelete.name}?`
+            : pendingDelete && pendingDelete.indices.length > 1
+              ? `Delete ${pendingDelete.indices.length} transitions?`
+              : 'Delete this transition?'
+        }
+        description={
+          pendingDelete?.kind === 'state'
+            ? 'Are you sure you want to delete this state?'
+            : 'Are you sure you want to delete this transition?'
+        }
+        confirmText="Delete"
+        onConfirm={() => {
+          if (pendingDelete?.kind === 'state') removeState(pendingDelete.id);
+          else if (pendingDelete) removeTransitions(pendingDelete.indices);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
+
       <ConfirmDialog
         open={resetOpen}
         title="Put the machine back?"
@@ -1486,6 +1572,7 @@ export function JffCytoscapeViewer({
                 position={selectedStatePosition}
                 onBeginEdit={beginEdit}
                 onMove={moveState}
+                onDelete={(id) => setPendingDelete({ kind: 'state', id, name: panel.state.name })}
                 onClose={clearSelectedState}
               />
             ) : (
@@ -1495,6 +1582,7 @@ export function JffCytoscapeViewer({
                 fields={transitionFields(type)}
                 onBeginEdit={beginEdit}
                 onEdit={setTransitionField}
+                onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />
             )}

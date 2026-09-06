@@ -979,6 +979,33 @@ describe('clicking a state', () => {
     expect(screen.queryByTestId('viewer-tool-palette')).toBeNull();
   });
 
+  /**
+   * What this cannot check: that the confirmation is shut to begin with. The shared ui/dialog
+   * mock this file uses renders its children whatever `open` says and gives them no dialog
+   * role, so open and closed look the same here. What it can check is that the question names
+   * the right thing and that nothing goes until it is answered.
+   */
+  it('asks which state before deleting it, and takes it off when told to', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /delete state/i }));
+
+    expect(screen.getByText('Delete state q0?')).toBeInTheDocument();
+    expect(screen.getByText('Are you sure you want to delete this state?')).toBeInTheDocument();
+    // Still there: the click asked a question, it did not delete anything.
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+
+    // "Delete" is this dialog's own word; the other confirmation in this tree says "Put it back".
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.
@@ -1170,6 +1197,19 @@ describe('clicking a transition', () => {
     await waitFor(() =>
       expect(screen.queryByRole('group', { name: /transition from/i })).toBeNull(),
     );
+  });
+
+  it('offers to delete the line a transition panel is about', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    await screen.findByRole('group', { name: /transition from/i });
+
+    fireEvent.click(screen.getByRole('button', { name: /delete transition/i }));
+
+    expect(
+      screen.getByText('Are you sure you want to delete this transition?'),
+    ).toBeInTheDocument();
   });
 
   it('offers what it reads as a box that can be typed in', async () => {

@@ -200,10 +200,15 @@ class FakeCy {
   getElementById(id: string) {
     return this.byId(id) ?? MISSING;
   }
-  add(spec: { data: Record<string, unknown>; position: Pos; classes?: string }) {
-    const made = new FakeEl(spec.data, spec.position, spec.classes ?? '');
+  add(spec: { data: Record<string, unknown>; position?: Pos; classes?: string }) {
+    const made = new FakeEl(spec.data, spec.position ?? { x: 0, y: 0 }, spec.classes ?? '');
     made.cy = this;
-    this.nodeList.push(made);
+    // Sorted the way the constructor sorts the elements a load hands over, and for the same
+    // reason. It used to put everything in `nodeList`, which was fine while the only thing
+    // added after a load was the initial-state marker; a line added back by undo went into the
+    // node list, and every test of one passed for the wrong reason.
+    if (spec.data.source !== undefined) this.edgeList.push(made);
+    else this.nodeList.push(made);
     return made;
   }
   layout(opts: { name: string }) {
@@ -2344,6 +2349,110 @@ describe('drawing a state on the canvas', () => {
     act(() => api().resetMachine());
 
     await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(false));
+    expect(api().viewModified).toBe(false);
+  });
+});
+
+/**
+ * Taking something off the drawing.
+ *
+ * Removals are subtraction from the derived machine rather than surgery on the parse, so they
+ * survive a rebuild and undo through the same history as everything else. What is worth
+ * checking beyond that is the part with a rule of its own: a transition cannot outlive either
+ * of the states it runs between.
+ */
+describe('deleting from the drawing', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  const nodeIds = () =>
+    lastCy()
+      .nodeList.filter((n) => !n.hasClass('start') && !n.hasClass('note'))
+      .map((n) => n.id());
+
+  it('takes a state and every transition that touched it', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    expect(api().parsed?.transitions.some((t) => t.from === '0' || t.to === '0')).toBe(true);
+
+    act(() => api().removeState('0'));
+
+    expect(nodeIds()).not.toContain('0');
+    expect(api().parsed?.states.some((st) => st.id === '0')).toBe(false);
+    // A transition into a state that is not there is not a machine, and would draw a line
+    // with nothing on the end of it.
+    expect(api().parsed?.transitions.some((t) => t.from === '0' || t.to === '0')).toBe(false);
+    expect(lastCy().edgeList.some((e) => e.data('source') === '0')).toBe(false);
+    expect(api().selectedState).toBeNull();
+    expect(api().viewModified).toBe(true);
+  });
+
+  it('puts the state, its lines and all back on undo', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const linesBefore = lastCy().edgeList.length;
+
+    act(() => api().removeState('0'));
+    act(() => api().undo());
+
+    expect(nodeIds()).toContain('0');
+    expect(api().parsed?.states.some((st) => st.id === '0')).toBe(true);
+    expect(lastCy().edgeList).toHaveLength(linesBefore);
+  });
+
+  it('takes the transitions a line carries, leaving the states alone', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const onTheLine = (api().parsed?.transitions ?? [])
+      .filter((t) => t.from === '0' && t.to === '1')
+      .map((t) => t.__idx);
+    expect(onTheLine.length).toBeGreaterThan(0);
+
+    act(() => api().removeTransitions(onTheLine));
+
+    expect(api().parsed?.transitions.some((t) => t.from === '0' && t.to === '1')).toBe(false);
+    expect(nodeIds()).toEqual(expect.arrayContaining(['0', '1']));
+    // The line goes with the last transition drawn on it.
+    expect(
+      lastCy().edgeList.some((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toBe(false);
+
+    act(() => api().undo());
+
+    expect(
+      lastCy().edgeList.some((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toBe(true);
+  });
+
+  it('is written down, so a refresh does not bring the state back', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().removeState('0'));
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).removed.states,
+      ).toEqual(['0']),
+    );
+
+    const second = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(second.api().phase).toBe('ready'));
+    expect(second.api().parsed?.states.some((st) => st.id === '0')).toBe(false);
+  });
+
+  it('comes back when the machine is put back the way it opened', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => api().removeState('0'));
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.id === '0')).toBe(false));
+
+    act(() => api().resetMachine());
+
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.id === '0')).toBe(true));
     expect(api().viewModified).toBe(false);
   });
 });

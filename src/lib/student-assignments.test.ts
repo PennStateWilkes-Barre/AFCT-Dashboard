@@ -12,6 +12,7 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 
 import { getStudentCourseAssignments } from './student-assignments';
+import { assignedToStudentWhere } from '@/lib/assignment-visibility';
 
 const studentOverride = (over: Record<string, unknown>) => ({
   targetType: 'STUDENT',
@@ -330,5 +331,46 @@ describe('extra attempts granted to a group', () => {
     const result = await getStudentCourseAssignments('stu-1', 'c1');
 
     expect(result[0].problems[0].maxSubmissions).toBe(6); // base 1 + 2 + 3
+  });
+});
+
+/**
+ * The query's own gate, asserted rather than assumed.
+ *
+ * The prisma mock answers whatever it is told to regardless of the `where`, so nothing about
+ * these fixtures notices if the gate goes: deleting the audience filter outright left the whole
+ * suite green while a student could read work assigned to other people. This feeds the grades
+ * page and the native client, so that is a disclosure, not a display bug.
+ */
+describe('what the assignment query is scoped to', () => {
+  const whereOf = () =>
+    (prismaMock.assignment.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+
+  it('asks only for published work assigned to this student', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+
+    const where = whereOf();
+    expect(where).toMatchObject({ courseId: 'c1', isPublished: true });
+    // Directly, by an assignee row, or through a group: the shared definition, not a copy.
+    expect(where).toMatchObject(assignedToStudentWhere('stu-1'));
+  });
+
+  it('drops both gates only when a privileged caller asks it to', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1', {
+      includeUnpublished: true,
+      includeUnassigned: true,
+    });
+
+    const where = whereOf();
+    expect(where).toEqual({ courseId: 'c1' });
+  });
+
+  it('keeps the audience gate when only the publish gate is widened', async () => {
+    // Staff previewing drafts still must not be handed somebody else's audience by accident.
+    await getStudentCourseAssignments('stu-1', 'c1', { includeUnpublished: true });
+
+    const where = whereOf();
+    expect(where).not.toHaveProperty('isPublished');
+    expect(where).toMatchObject(assignedToStudentWhere('stu-1'));
   });
 });

@@ -720,3 +720,95 @@ describe('GET student context, comments on group work', () => {
     expect(whereOfCommentQuery().OR).toHaveLength(2);
   });
 });
+
+/**
+ * Whose work this route hands back, asserted on the query rather than on the fixtures.
+ *
+ * The prisma mock returns whatever it is given regardless of the `where`, so no fixture here
+ * notices if a scope goes: deleting the clause that limits submissions to the caller and their
+ * group left every test in this file passing while the route returned the whole class's
+ * attempts. That is other students' work, so it is the query that has to be checked.
+ */
+describe('what this route is scoped to', () => {
+  const setup = (groupSetId: string | null, membership: boolean) => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      id: 'r1',
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      isPublished: true,
+      groupSetId,
+      missingWorkIsZero: false,
+      dueDate: new Date('2026-03-05T00:00:00.000Z'),
+      unlockAt: null,
+      lateCutoff: null,
+      allowLateSubmissions: false,
+      assignedToEveryone: true,
+      course: { isArchived: false },
+      overrides: [],
+      problems: [
+        {
+          problemId: 'p1',
+          maxSubmissions: 3,
+          showFeedback: true,
+          maxPoints: 10,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        },
+      ],
+    });
+    if (membership) {
+      prismaMock.groupMembership.findFirst.mockResolvedValue({ groupId: 'g1' });
+      prismaMock.studentGroup.findUnique.mockResolvedValue({
+        id: 'g1',
+        name: 'Team 1',
+        memberships: [{ roster: { user: { id: 'u1', firstName: 'Ada', lastName: 'L' } } }],
+      });
+    }
+    prismaMock.submission.findMany.mockResolvedValue([]);
+    prismaMock.comment.findMany.mockResolvedValue([]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+  };
+
+  const submissionWhere = () =>
+    (prismaMock.submission.findMany.mock.calls[0][0] as { where: { OR?: unknown[] } }).where;
+
+  const read = () => GET(new Request(url), { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+
+  it("asks only for this student's own attempts on an individual assignment", async () => {
+    setup(null, false);
+
+    await read();
+
+    expect(submissionWhere().OR).toEqual([{ studentId: 'u1' }]);
+  });
+
+  it("adds their group's shared set on a group assignment, and nobody else's", async () => {
+    setup('gs1', true);
+
+    await read();
+
+    expect(submissionWhere().OR).toEqual([{ studentId: 'u1' }, { studentGroupId: 'g1' }]);
+  });
+
+  it('asks for no group set when the student is in no group', async () => {
+    setup('gs1', false);
+
+    await read();
+
+    // Never an unscoped group clause: that would hand them another group's work.
+    expect(submissionWhere().OR).toEqual([{ studentId: 'u1' }]);
+  });
+
+  it('only ever asks for grades belonging to this student', async () => {
+    setup(null, false);
+
+    await read();
+
+    expect(prismaMock.assignmentProblemGrade.findMany.mock.calls[0][0]).toMatchObject({
+      where: { studentId: 'u1' },
+    });
+  });
+});

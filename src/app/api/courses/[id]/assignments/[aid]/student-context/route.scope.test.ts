@@ -126,4 +126,69 @@ describe('what this route is scoped to', () => {
       where: { studentId: 'u1' },
     });
   });
+
+  /**
+   * The assignment and its problems bound every one of these reads as well as the student
+   * does. Without them a student would be handed their own attempts, comments, grades and
+   * grants from every assignment in the installation, which is the same page showing work
+   * from a course they are not even in. Asserted as whole `where` objects so a key going
+   * missing fails here rather than passing quietly.
+   */
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('bounds every read to this assignment and its problems', async () => {
+    setup(null, false);
+
+    await read();
+
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: { in: ['p1'] },
+      OR: [{ studentId: 'u1' }],
+    });
+    expect(whereOf(prismaMock.comment.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: { in: ['p1'] },
+      OR: [{ aboutStudentId: 'u1' }, { authorId: 'u1' }],
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: 'a1',
+      studentId: 'u1',
+      problemId: { in: ['p1'] },
+    });
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: { in: ['p1'] },
+      OR: [{ userId: 'u1' }],
+    });
+  });
+
+  it("adds the caller's own group, and only theirs, to the comment and grant reads", async () => {
+    setup('gs1', true);
+
+    await read();
+
+    expect(whereOf(prismaMock.comment.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: { in: ['p1'] },
+      OR: [{ aboutStudentId: 'u1' }, { authorId: 'u1' }, { aboutGroupId: 'g1' }],
+    });
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: { in: ['p1'] },
+      OR: [{ userId: 'u1' }, { groupId: 'g1' }],
+    });
+  });
+
+  it("looks up the caller's membership in this assignment's group set only", async () => {
+    setup('gs1', true);
+
+    await read();
+
+    expect(whereOf(prismaMock.groupMembership.findFirst)).toEqual({
+      userId: 'u1',
+      groupSetId: 'gs1',
+    });
+  });
 });

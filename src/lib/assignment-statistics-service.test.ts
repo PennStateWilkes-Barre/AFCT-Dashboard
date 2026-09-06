@@ -502,3 +502,70 @@ describe('the membership lookup', () => {
     expect(prismaMock.groupMembership.findMany).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * What the statistics reads are scoped to.
+ *
+ * This loader is handed a course and an assignment and is trusted to stay inside both. The
+ * prisma mocks answer from their fixtures whatever the `where` says, so every assertion in
+ * this file passes just as happily when a scope key is gone: without the `courseId` the
+ * cohort is every student in the installation, and without the `assignmentId` the overrides,
+ * grades and submissions are every one ever recorded. Whole-object assertions, so a key going
+ * missing fails here.
+ */
+describe('what the statistics reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  const rosterWheres = () =>
+    prismaMock.roster.findMany.mock.calls.map((c) => (c[0] as { where: unknown }).where);
+
+  it('reads the assignment from this course, and its rows for this assignment only', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue(baseAssignment());
+    setRoster([rosterRow('s1')]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+    prismaMock.assignmentOverride.findMany.mockResolvedValue([]);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+
+    await getAssignmentStatistics('c1', 'a1');
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({ id: 'a1', courseId: 'c1' });
+    expect(whereOf(prismaMock.assignmentOverride.findMany)).toEqual({ assignmentId: 'a1' });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({ assignmentId: 'a1' });
+    // Individual assignment: group submissions are deliberately excluded, not merely unasked.
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: 'a1',
+      studentGroupId: null,
+    });
+    expect(rosterWheres()[0]).toMatchObject({ courseId: 'c1' });
+  });
+
+  it('reads groups from this assignment’s group set, and their members only', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue(baseAssignment({ groupSetId: 'gs1' }));
+    prismaMock.studentGroup.findMany.mockResolvedValue([
+      { id: 'g1', memberships: [{ userId: 'u1' }] },
+    ]);
+    // u2 is on the roster but in no group, so the loader asks which group they are in. That
+    // read is the only caller of the membership query, and it is the one being checked here.
+    setRoster([rosterRow('u1'), rosterRow('u2')]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+    prismaMock.assignmentOverride.findMany.mockResolvedValue([]);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([]);
+
+    await getAssignmentStatistics('c1', 'a1');
+
+    expect(whereOf(prismaMock.studentGroup.findMany)).toEqual({ groupSetId: 'gs1' });
+    // The "is this group still staffed" read is course-scoped.
+    for (const w of rosterWheres()) expect(w).toMatchObject({ courseId: 'c1' });
+    // Group assignment: only submissions that belong to a group.
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: 'a1',
+      studentGroupId: { not: null },
+    });
+    expect(whereOf(prismaMock.groupMembership.findMany)).toEqual({
+      groupSetId: 'gs1',
+      userId: { in: ['u2'] },
+    });
+  });
+});

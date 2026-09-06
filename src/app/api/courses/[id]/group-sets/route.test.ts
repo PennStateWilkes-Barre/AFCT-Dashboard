@@ -96,3 +96,26 @@ describe('POST /api/courses/[id]/group-sets', () => {
     expect(prismaMock.groupSet.create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Which names count as taken.
+ *
+ * The uniqueness check is per course: two courses may each have a "Project 1". The prisma
+ * mock answers with its fixture whatever the `where` says, so without the `courseId` a name
+ * already used in somebody else's course would block this one, and the friendly 409 would be
+ * about a set the instructor cannot see.
+ */
+describe('which names a new group set clashes with', () => {
+  it('checks the name against this course only', async () => {
+    staff();
+    prismaMock.groupSet.findFirst.mockResolvedValue(null);
+    prismaMock.groupSet.create.mockResolvedValue({ id: 'gs1', name: 'Project 1' });
+
+    const res = await post({ name: 'Project 1' });
+    expect(res.status).toBe(201);
+
+    expect(prismaMock.groupSet.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1', name: { equals: 'Project 1', mode: 'insensitive' } },
+    });
+  });
+});

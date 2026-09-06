@@ -125,3 +125,22 @@ describe('POST /api/courses/[id]/problems/[pid]/duplicate', () => {
     expect(prismaMock.problem.create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Which problem gets duplicated.
+ *
+ * The problem id comes from the path, so this lookup is the only thing tying it to the course
+ * the caller was proven staff of. The prisma mock returns the source either way, so without
+ * the `courseId` a faculty member could copy another course's problem, solution file and all,
+ * into their own bank.
+ */
+describe('which problem a duplicate copies', () => {
+  it('reads the source only from this course', async () => {
+    const res = await call({ title: 'Copy of Lab' });
+    expect(res.status).toBe(201);
+
+    expect(prismaMock.problem.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'p1', courseId: 'c1' },
+    });
+  });
+});

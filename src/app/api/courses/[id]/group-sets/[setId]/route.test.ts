@@ -52,13 +52,21 @@ describe('GET group-set detail', () => {
 
 describe('PATCH rename set', () => {
   const patch = (body: unknown) =>
-    PATCH(new NextRequest('http://localhost/x', { method: 'PATCH', body: JSON.stringify(body) }), ctx);
+    PATCH(
+      new NextRequest('http://localhost/x', { method: 'PATCH', body: JSON.stringify(body) }),
+      ctx,
+    );
 
   it('409 on a duplicate name in the course (case-insensitive)', async () => {
     prismaMock.groupSet.findFirst.mockResolvedValue({ id: 'other' });
     const res = await patch({ name: ' project 2 ' });
     expect(res.status).toBe(409);
     expect(prismaMock.groupSet.update).not.toHaveBeenCalled();
+    // "in the course" is the whole point of the rule, and only the `courseId` in this query
+    // says so: without it a name already used in somebody else's course would be refused here.
+    expect(prismaMock.groupSet.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1' },
+    });
   });
 
   it('renames when the name is free', async () => {

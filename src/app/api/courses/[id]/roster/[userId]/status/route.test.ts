@@ -80,6 +80,13 @@ describe('PATCH /api/courses/[id]/roster/[userId]/status', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ status: 'DROPPED', changed: true });
 
+    // Which roster row was looked up, not just that one was. The update goes by id, so the
+    // lookup is the only thing tying this to the student named in the URL: without the
+    // `userId` it drops whoever findFirst happens to return.
+    expect(prismaMock.roster.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1', userId: 'u1' },
+    });
+
     const updateArg = prismaMock.roster.update.mock.calls[0][0];
     expect(updateArg.where).toEqual({ id: 'r1' });
     expect(updateArg.data.status).toBe('DROPPED');

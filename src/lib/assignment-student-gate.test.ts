@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { overridesForStudentWhere } from '@/lib/assignment-visibility';
 
 const prismaMock = vi.hoisted(() => ({
   assignment: { findFirst: vi.fn() },
@@ -98,5 +99,33 @@ describe('resolveStudentContentGate', () => {
 
     expect(gate.locked).toBe(true);
     expect(gate.unlockAt).toEqual(new Date('2026-07-30T00:00:00.000Z'));
+  });
+});
+
+/**
+ * Whose exceptions the gate reads.
+ *
+ * Whether an assignment is open for a student depends on the date exceptions that apply to
+ * them, so this read has to name both the assignment and the student (their own row or their
+ * group's, via the shared helper). The prisma mock returns its fixture whatever the `where`
+ * says: without the `assignmentId` a later deadline granted on other work would unlock this
+ * one, and without the student clause anybody's extension would unlock it for everybody.
+ */
+describe('whose exceptions the content gate reads', () => {
+  it('asks for this assignment, and for this student or their group', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      assignedToEveryone: true,
+      unlockAt: null,
+      dueDate: null,
+      allowLateSubmissions: false,
+      lateCutoff: null,
+    });
+
+    await resolveStudentContentGate('a1', 'stu-1', NOW);
+
+    expect(prismaMock.assignmentOverride.findMany.mock.calls[0][0]).toMatchObject({
+      where: { assignmentId: 'a1', ...overridesForStudentWhere('stu-1') },
+    });
   });
 });

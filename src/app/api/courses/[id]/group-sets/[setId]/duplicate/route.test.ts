@@ -88,3 +88,28 @@ describe('POST duplicate', () => {
     expect(createManyRows.map((r) => r.userId)).toEqual(['active1']);
   });
 });
+
+/**
+ * What a duplicate copies, and what it clashes with.
+ *
+ * The set id comes from the path and the new name from the body, so both lookups have to name
+ * the course. The prisma mock answers with its fixture whatever the `where` says: without the
+ * `courseId` on the first, another course's group set (and its membership list, which is
+ * student data) is copied in; without it on the second, an unrelated course's name blocks
+ * this one.
+ */
+describe('what a group set duplicate reaches', () => {
+  it('reads the source and checks the new name inside this course only', async () => {
+    prismaMock.groupSet.findFirst.mockResolvedValueOnce(source).mockResolvedValueOnce(null);
+
+    const res = await post({ name: 'Project 1 Copy', includeMemberships: false });
+    expect(res.status).toBe(201);
+
+    expect(prismaMock.groupSet.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'gs1', courseId: 'c1' },
+    });
+    expect(prismaMock.groupSet.findFirst.mock.calls[1][0]).toMatchObject({
+      where: { courseId: 'c1', name: { equals: 'Project 1 Copy', mode: 'insensitive' } },
+    });
+  });
+});

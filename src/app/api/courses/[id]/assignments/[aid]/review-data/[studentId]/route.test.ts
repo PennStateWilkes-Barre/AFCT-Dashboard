@@ -442,6 +442,27 @@ describe('GET /api/courses/[id]/[aid]/review-data/[studentId]', () => {
     consoleSpy.mockRestore();
   });
 
+  /**
+   * The individual case, which the group test above does not reach.
+   *
+   * Staff may read the whole course, so an unscoped query here is not a disclosure; it is
+   * worse in a quieter way. The page is titled with one student's name, and it would fill with
+   * everybody's attempts, which is a grade entered against the wrong person's work.
+   */
+  it('scopes the submissions query to the one student when there is no group', async () => {
+    resolveGroupMock.mockResolvedValue(null);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost'), { params: Promise.resolve(params) });
+
+    expect(res.status).toBe(200);
+    expect(prismaMock.submission.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assignmentId: params.aid, studentId: params.studentId },
+      }),
+    );
+  });
+
   it('widens the submissions query to the group set when the student is group-assigned', async () => {
     resolveGroupMock.mockResolvedValue('group-1');
     prismaMock.submission.findMany.mockResolvedValue([
@@ -590,6 +611,109 @@ describe('GET review data, feedback visibility', () => {
     expect(await readAs('FACULTY', false)).toMatchObject({
       feedback: 'accepts aab but should reject it',
       feedbackVisible: true,
+    });
+  });
+});
+
+/**
+ * What the review reads are scoped to.
+ *
+ * Staff are proven to manage the course in the URL, but the assignment and the student come
+ * from the path, so every read here has to say so itself. The prisma mock returns its fixture
+ * whatever the `where` says: without the `courseId` an assignment id from another course
+ * resolves, and without the `assignmentId` the problems, comments and grants are every one in
+ * the installation. Whole-object assertions, so a missing key fails here.
+ */
+describe('what the review reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }, i = 0) =>
+    (fn.mock.calls[i][0] as { where: unknown }).where;
+
+  const setup = (groupId: string | null) => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ user: { id: 'faculty-1', role: 'FACULTY' } });
+    contentGateMock.mockResolvedValue({ assigned: true, locked: false, unlockAt: null });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: params.aid,
+      isPublished: true,
+      groupSetId: groupId ? 'gs1' : null,
+      unlockAt: null,
+      dueDate: new Date('2026-12-01T00:00:00.000Z'),
+      lateCutoff: null,
+      allowLateSubmissions: false,
+      overrides: [],
+    });
+    prismaMock.roster.findFirst.mockResolvedValue({ id: 'roster-1', role: 'FACULTY' });
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([
+      {
+        problemId: 'p1',
+        maxSubmissions: 2,
+        showFeedback: true,
+        problem: {
+          id: 'p1',
+          title: 'P1',
+          description: null,
+          type: 'FA',
+          maxStates: null,
+          isDeterministic: null,
+          originalFileName: null,
+        },
+      },
+    ]);
+    prismaMock.comment.findMany.mockResolvedValue([]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([]);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([]);
+    prismaMock.studentGroup.findUnique.mockResolvedValue(
+      groupId ? { id: groupId, name: 'Team 1', memberships: [] } : null,
+    );
+    logMock.mockResolvedValue(undefined);
+    resolveGroupMock.mockResolvedValue(groupId);
+  };
+
+  const read = () =>
+    GET(new Request('http://localhost'), { params: Promise.resolve(params) });
+
+  it('reads the assignment from this course and its rows for this assignment', async () => {
+    setup(null);
+
+    const res = await read();
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({
+      id: 'assignment-1',
+      courseId: 'course-1',
+    });
+    // The problems are read twice: once with the problem detail, once for the caps.
+    for (const call of prismaMock.assignmentProblem.findMany.mock.calls) {
+      expect((call[0] as { where: unknown }).where).toEqual({ assignmentId: 'assignment-1' });
+    }
+    expect(whereOf(prismaMock.comment.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      OR: [{ aboutStudentId: 'student-1' }, { authorId: 'student-1' }],
+    });
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      OR: [{ userId: 'student-1' }],
+    });
+  });
+
+  it('adds the group this student submits with, and only that group', async () => {
+    setup('g1');
+
+    const res = await read();
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.comment.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      OR: [
+        { aboutStudentId: 'student-1' },
+        { authorId: 'student-1' },
+        { aboutGroupId: 'g1' },
+      ],
+    });
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: 'assignment-1',
+      OR: [{ userId: 'student-1' }, { groupId: 'g1' }],
     });
   });
 });

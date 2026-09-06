@@ -11,6 +11,11 @@
             markerWidth="5" markerHeight="5" orient="auto-start-reverse">
       <path d="M0 0 10 5 0 10Z" fill="currentColor" stroke="none" />
     </marker>
+    <!-- Self-loops only: tip lands on the endpoint, not past it. See README. -->
+    <marker id="afct-automaton-four-loop-arrow" viewBox="0 0 10 10" refX="10" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="currentColor" stroke="none" />
+    </marker>
   </defs>
   <g transform="translate(222 117) scale(0.92) translate(-218 -126)">
       <line x1="18" y1="127" x2="23" y2="127" marker-end="url(#afct-automaton-four-arrow)" />
@@ -24,7 +29,7 @@
       <text x="342.0" y="82.9" font-size="15" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">0</text>
       <line x1="192.1" y1="177.0" x2="352.1" y2="135.7" stroke-linecap="round" marker-end="url(#afct-automaton-four-arrow)" />
       <text x="276.1" y="171.9" font-size="15" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">1</text>
-      <path d="M363.4 104.4C342.8 50.4 429.2 50.4 408.6 104.4" stroke-linecap="round" marker-end="url(#afct-automaton-four-arrow)" />
+      <path d="M363.4 104.4C342.8 50.4 429.2 50.4 408.6 104.4" stroke-linecap="round" marker-end="url(#afct-automaton-four-loop-arrow)" />
       <text x="386" y="49.9" font-size="15" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">0</text>
       <circle cx="55" cy="127" r="28" />
       <text x="55" y="127" font-size="18" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">q0</text>

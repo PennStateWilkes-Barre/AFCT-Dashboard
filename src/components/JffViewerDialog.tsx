@@ -429,50 +429,97 @@ function StateProperties({
         </div>
       ) : null}
 
-      {/* Everything that touches this state, as a list rather than two paragraphs of prose, and
-          each row a way into that transition's own properties: the canvas is the only other way
-          to reach one, and a canvas cannot be tabbed into. */}
-      <div className="space-y-1.5">
-        <div className="text-muted-foreground text-xs">
-          {state.links.length === 0 ? 'Transitions' : `Transitions (${state.links.length})`}
-        </div>
-        {state.links.length === 0 ? (
+      {/* Everything that touches this state, in two lists rather than one mixed one. Which way a
+          transition runs is the first thing you want of it, and reading that off a prefix on
+          every row made the reader do the sorting. A self-loop is listed once, under Outgoing:
+          it is something the state does, not something done to it.
+
+          Each row is a way into that transition's own properties, because the canvas is the
+          only other way to reach one and a canvas cannot be tabbed into. */}
+      {state.links.length === 0 ? (
+        <div className="space-y-1.5">
+          <div className="text-muted-foreground text-xs">Transitions</div>
           <p className="text-muted-foreground text-xs">Nothing touches this state</p>
-        ) : (
-          <ul className="divide-border divide-y rounded-md border">
-            {state.links.map((link, i) => (
-              <li key={`${link.from}-${link.to}-${link.label}-${i}`}>
-                <button
-                  type="button"
-                  onClick={() => onOpenTransition(link.from, link.to)}
-                  className="hover:bg-muted focus-visible:ring-ring/70 flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs focus-visible:ring-[3px] focus-visible:outline-none"
-                >
-                  <span className="text-muted-foreground shrink-0">
-                    {link.direction === 'out' ? 'Out:' : 'In:'}
-                  </span>
-                  <span className="min-w-0 flex-1 font-mono break-all">
-                    {link.direction === 'out' ? (
-                      <>
-                        on {link.label} <span aria-hidden="true">&rarr;</span>
-                        <span className="sr-only">to</span> {link.other}
-                      </>
-                    ) : (
-                      <>
-                        {link.other} <span aria-hidden="true">&rarr;</span> on {link.label}
-                      </>
-                    )}
-                  </span>
-                  <ChevronRight
-                    className="text-muted-foreground h-3.5 w-3.5 shrink-0"
-                    aria-hidden="true"
-                  />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          <TransitionLinkList
+            heading="Outgoing"
+            links={state.links.filter((link) => link.direction === 'out')}
+            stateName={state.name}
+            onOpenTransition={onOpenTransition}
+          />
+          <TransitionLinkList
+            heading="Incoming"
+            links={state.links.filter((link) => link.direction === 'in')}
+            stateName={state.name}
+            onOpenTransition={onOpenTransition}
+          />
+        </>
+      )}
     </PropertiesPanel>
+  );
+}
+
+/**
+ * One direction's worth of the transitions touching a state.
+ *
+ * Left out entirely when there are none rather than shown empty: a state that nothing points at
+ * says more by having no Incoming heading than by having one over the words "none". The whole
+ * block is only reached when the state has at least one transition either way, so this can
+ * never leave the panel with nothing under the coordinates.
+ */
+function TransitionLinkList({
+  heading,
+  links,
+  stateName,
+  onOpenTransition,
+}: {
+  heading: 'Outgoing' | 'Incoming';
+  links: StateDescription['links'];
+  /** For the list's accessible name, since the visible heading alone says "Outgoing" of what. */
+  stateName: string;
+  onOpenTransition: (from: string, to: string) => void;
+}) {
+  if (links.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-muted-foreground text-xs">
+        {heading} ({links.length})
+      </div>
+      <ul
+        className="divide-border divide-y rounded-md border"
+        aria-label={`${heading} transitions of state ${stateName}`}
+      >
+        {links.map((link, i) => (
+          <li key={`${link.from}-${link.to}-${link.label}-${i}`}>
+            <button
+              type="button"
+              onClick={() => onOpenTransition(link.from, link.to)}
+              className="hover:bg-muted focus-visible:ring-ring/70 flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs focus-visible:ring-[3px] focus-visible:outline-none"
+            >
+              <span className="min-w-0 flex-1 font-mono break-all">
+                {link.direction === 'out' ? (
+                  <>
+                    on {link.label} <span aria-hidden="true">&rarr;</span>
+                    <span className="sr-only">to</span> {link.other}
+                  </>
+                ) : (
+                  <>
+                    {link.other} <span aria-hidden="true">&rarr;</span> on {link.label}
+                  </>
+                )}
+              </span>
+              <ChevronRight
+                className="text-muted-foreground h-3.5 w-3.5 shrink-0"
+                aria-hidden="true"
+              />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

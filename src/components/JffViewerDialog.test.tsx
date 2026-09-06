@@ -848,13 +848,38 @@ describe('clicking a state', () => {
     await waitForEngine();
     tapNode('0');
 
-    const rows = await screen.findAllByRole('button', { name: /^(Out|In):/ });
+    const outgoing = await screen.findByRole('list', { name: /outgoing transitions of state q0/i });
+    const rows = within(outgoing).getAllByRole('button');
     expect(rows.length).toBeGreaterThan(0);
 
     fireEvent.click(rows[0]!);
 
     expect(await screen.findByRole('group', { name: /transition from/i })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+  });
+
+  /**
+   * Which way a transition runs is the first thing you want of it. It used to be a prefix on
+   * every row of one mixed list, which left the reader doing the sorting.
+   */
+  it('lists what leaves the state apart from what arrives at it', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    // q0 -> q1 on a is the whole machine, so q0 has an outgoing list and no incoming one.
+    tapNode('0');
+    expect(
+      await screen.findByRole('list', { name: /outgoing transitions of state q0/i }),
+    ).toHaveTextContent('q1');
+    expect(screen.queryByRole('list', { name: /incoming transitions/i })).toBeNull();
+    expect(screen.getByText('Outgoing (1)')).toBeInTheDocument();
+
+    // And q1 the other way round: nothing leaves it.
+    tapNode('1');
+    expect(
+      await screen.findByRole('list', { name: /incoming transitions of state q1/i }),
+    ).toHaveTextContent('q0');
+    expect(screen.queryByRole('list', { name: /outgoing transitions/i })).toBeNull();
   });
 
   it('offers where the state sits, and moves it when the numbers change', async () => {

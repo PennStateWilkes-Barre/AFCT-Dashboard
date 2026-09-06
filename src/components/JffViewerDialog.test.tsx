@@ -726,6 +726,22 @@ describe('clicking a state', () => {
     expect(panel).toHaveTextContent(/State\s+q0/);
   });
 
+  it('closes on Escape from anywhere in the panel, not only from the close button', async () => {
+    // The handler used to sit on the close button, which was the only thing that took focus.
+    // It is not any more: a reader typing a name has to be able to press Escape too.
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    const name = await screen.findByLabelText('Name');
+    name.focus();
+
+    fireEvent.keyDown(name, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
+  });
+
   it('closes on Escape from the keyboard, since it is not a modal that traps it', async () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();

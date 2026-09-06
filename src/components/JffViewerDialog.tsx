@@ -300,7 +300,26 @@ function PropertiesPanel({
 }) {
   return (
     // Fills the frame above, which is what carries the position and the animation.
-    <div className="flex min-h-0 w-full flex-1 flex-col" role="group" aria-label={label}>
+    // The Escape handler below is on the group rather than on a control. The rule this turns
+    // off guards against divs pretending to be buttons; this adds a shortcut to a container
+    // whose controls all remain reachable and operable on their own, which is what Radix does
+    // for its own dismissable layers.
+    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
+    <div
+      className="flex min-h-0 w-full flex-1 flex-col"
+      role="group"
+      aria-label={label}
+      // Escape from anywhere in the panel, not just from the close button. It used to be on
+      // that button alone, which was defensible when the button was the only thing in here
+      // that took focus and is not now: a reader in the Name box, a coordinate box or a
+      // transition row pressed Escape and nothing happened. In the standalone window nothing
+      // else is listening, so this closes the panel alone; inside a dialog Radix's own handler
+      // is on the document, so the dialog closes too, which is what anybody would expect of
+      // Escape in a dialog.
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose();
+      }}
+    >
       <div className="flex items-start gap-2.5 border-b px-3 py-2.5">
         <span
           className="bg-muted text-muted-foreground mt-px flex size-6 shrink-0 items-center justify-center rounded-md"
@@ -322,13 +341,6 @@ function PropertiesPanel({
               // reaches for it.
               className="-mt-0.5 -mr-1 h-8 w-8 shrink-0 p-0 @[48rem]/viewer:h-7 @[48rem]/viewer:w-7"
               onClick={onClose}
-              // Escape as well as the click. On the button rather than on the panel because it
-              // is the first thing in here that takes focus. In the standalone window nothing
-              // else is listening, so this closes the panel alone; inside a dialog the dialog
-              // closes too, which is what anybody would expect of Escape in a dialog.
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') onClose();
-              }}
               aria-label={closeLabel}
             >
               <X className="h-3.5 w-3.5" />
@@ -662,24 +674,33 @@ function TransitionLinkList({
 
   return (
     <div className="space-y-1">
-      {/* The count belongs at the end of the heading, where a reader looking for "how many go
-          out of here" can find it without counting rows. */}
-      <div className="text-muted-foreground flex items-baseline justify-between gap-2 text-xs">
+      {/* The count sits against its heading, not against the far edge. Right-aligned it landed
+          in the same column as the rows' chevrons and read as one more column of the list, so
+          the right edge of the section carried two unrelated things. Beside the word it is
+          plainly a property of the word. */}
+      <div className="text-muted-foreground flex items-center gap-1.5 text-xs">
         <span className="font-medium">{heading}</span>
-        <span className="tabular-nums">{links.length}</span>
+        <span className="bg-muted rounded px-1.5 py-0.5 text-[10px] tabular-nums">
+          {links.length}
+        </span>
       </div>
       {/* No box around the rows. Boxing each direction put two frames inside a 320px column,
           which reads as clutter; the heading above and the hover under the cursor are enough to
-          say where the list starts and that its rows can be clicked. */}
-      <ul className="-mx-1" aria-label={`${heading} transitions of state ${stateName}`}>
+          say where the list starts and that its rows can be clicked.
+
+          The negative margin is the row padding, so the hover background reaches a little wider
+          than the text while the text itself lines up with the heading above it. */}
+      <ul className="-mx-1.5" aria-label={`${heading} transitions of state ${stateName}`}>
         {links.map((link, i) => (
           <li key={`${link.from}-${link.to}-${link.label}-${i}`}>
             <button
               type="button"
               onClick={() => onOpenTransition(link.from, link.to)}
-              className="hover:bg-muted focus-visible:ring-ring/70 flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs focus-visible:ring-[3px] focus-visible:outline-none"
+              // A grid rather than a flex row, so the chevrons share one fixed column and form
+              // a single line down the list however long or short the labels beside them are.
+              className="hover:bg-muted focus-visible:ring-ring/70 grid w-full grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs focus-visible:ring-[3px] focus-visible:outline-none"
             >
-              <span className="min-w-0 flex-1 font-mono break-all">
+              <span className="min-w-0 font-mono break-all">
                 {link.direction === 'out' ? (
                   <>
                     on {link.label} <span aria-hidden="true">&rarr;</span>
@@ -694,7 +715,7 @@ function TransitionLinkList({
               {/* A real button, so it is reachable by Tab and answers Enter and Space. The
                   chevron says the row leads somewhere; it is not the only thing that does. */}
               <ChevronRight
-                className="text-muted-foreground h-3.5 w-3.5 shrink-0"
+                className="text-muted-foreground size-3.5 justify-self-end"
                 aria-hidden="true"
               />
             </button>
@@ -758,8 +779,10 @@ function TransitionProperties({
         <dl className="grid grid-cols-2 gap-x-2 gap-y-1.5 text-xs">
           <dt className="text-muted-foreground">From</dt>
           <dt className="text-muted-foreground">To</dt>
-          <dd className="truncate font-mono">{edge.from}</dd>
-          <dd className="truncate font-mono">{edge.to}</dd>
+          {/* Not truncated, unlike the subtitle above: long state names have to be readable
+              somewhere, and this is the panel's canonical copy of the pair. */}
+          <dd className="font-mono break-all">{edge.from}</dd>
+          <dd className="font-mono break-all">{edge.to}</dd>
         </dl>
         <div className="text-muted-foreground flex flex-wrap items-center gap-1.5 text-xs">
           <span>{MACHINE_TYPE_LABEL[machineType]}</span>

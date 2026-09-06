@@ -160,6 +160,23 @@ export function LoginBrandPanel({
               Through Automated Feedback
             </span>
           </p>
+
+          {/* The supporting line. Both audiences sign in here, so it names what each of them
+              came to do: students learn, staff teach and assess.
+
+              Held to max-w-lg (512px) so it breaks to two lines rather than running the width
+              of the panel; a measure that long is hard to read and would compete with the
+              headline for the eye. Muted and 400 against the headline's near-white bold, which
+              is what keeps it secondary.
+
+              16px, stepping to 18px only at 2xl. The panel's tight case is height, not width
+              (see the note above about a 720px window at xl), and this block sits directly
+              above the automaton, which takes whatever height is left. Holding 16px at xl
+              keeps two lines here from eating into the drawing on a short laptop screen. */}
+          <p className="text-sidebar-muted-foreground mt-5 max-w-lg text-base leading-normal font-normal 2xl:mt-6 2xl:text-lg">
+            Learn, teach, and assess computing theory with intelligent feedback and streamlined
+            tools.
+          </p>
         </div>
       </div>
 

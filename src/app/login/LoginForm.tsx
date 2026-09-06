@@ -483,8 +483,21 @@ export default function LoginForm({
           distance from the drawing to the card, and that never drops below 200px anywhere
           across 1440 to 2560. The 2xl step also makes the 1536 dip shallower rather than
           deeper: 79px instead of 63. */}
-      <div className="auth-form-surface 3xl:pr-40 relative z-10 flex min-h-dvh w-full flex-col items-center px-4 pt-8 pb-5 sm:px-6 lg:pt-10 lg:pb-6 2xl:pr-16">
-        <div className="mb-6 flex w-full max-w-[680px] flex-col items-center text-center lg:hidden">
+      <div className="auth-form-surface 3xl:pr-40 relative z-10 flex min-h-dvh w-full flex-col items-center px-4 py-6 sm:px-6 lg:pt-10 lg:pb-6 2xl:pr-16">
+        {/* Out of flow on purpose. In flow this block sat above the card, so `flex-1` on the
+            card's wrapper measured only the height left underneath it and the card centred in
+            that remainder, which put it visibly low on a phone. Absolute inside the container
+            that is already `relative`, so the wrapper below can centre the card against the
+            whole viewport instead. Anchored near the top rather than at a fixed coordinate the
+            card has to dodge: the form has vertical priority here, the branding does not.
+
+            A ladder, because being out of flow means nothing pushes the card away any more:
+            above 700px tall the block is whole; between 600 and 700 the descriptor goes and
+            the offset tightens; below 600 the block goes entirely. That last rung is not
+            fussiness. A card taller than the viewport starts at the top rather than centring,
+            so there is no space left for anything above it, and a logo drawn across the email
+            field is worse than no logo. */}
+        <div className="absolute inset-x-0 top-6 flex flex-col items-center px-4 text-center sm:top-8 lg:hidden [@media(max-height:600px)]:hidden [@media(max-height:700px)]:top-4">
           <AuthBrandMark
             className="size-12 text-blue-400"
             // Light on dark, the same pairing the desktop panel uses. This block sits on the
@@ -497,7 +510,11 @@ export default function LoginForm({
           <p className="text-sidebar-foreground mt-3 text-xl font-semibold tracking-tight sm:text-2xl">
             AFCT Dashboard
           </p>
-          <p className="text-sidebar-muted-foreground mt-1 text-sm">
+          {/* First casualty on a short screen (a phone held sideways, mostly). The card is
+              centred against the full viewport now, so on a squat window it rises toward this
+              block; dropping the descriptor and tightening the offset above is what keeps them
+              apart, rather than pushing the card back down to make room. */}
+          <p className="text-sidebar-muted-foreground mt-1 text-sm [@media(max-height:700px)]:hidden">
             Automated Feedback for Computing Theory
           </p>
         </div>

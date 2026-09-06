@@ -660,3 +660,66 @@ describe('POST /api/courses/[id]/duplicate', () => {
     consoleSpy.mockRestore();
   });
 });
+
+/**
+ * Where a duplicate copies from.
+ *
+ * Every source read here is bounded by the course being copied. The prisma mock answers from
+ * its fixture whatever the `where` says, so nothing above notices a missing key: without the
+ * `courseId` the new course is seeded with every assignment, every problem and every roster
+ * row in the installation, which puts other courses' material and other courses' students
+ * into it.
+ */
+describe('where a duplicate copies from', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  const runDuplicate = async (copyMode: string, extra: Record<string, unknown> = {}) => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'ADMIN', isAdmin: true } });
+    prismaMock.user.findUnique.mockResolvedValue({ timezone: 'UTC' });
+    prismaMock.systemSettings.findUnique.mockResolvedValue({ timezone: 'UTC' });
+    prismaMock.course.findUnique.mockResolvedValueOnce({ timezone: 'UTC' }).mockResolvedValue(null);
+
+    const tx = {
+      course: { create: vi.fn().mockResolvedValue({ id: 'new-course' }) },
+      roster: { create: vi.fn(), createMany: vi.fn() },
+      assignment: { create: vi.fn() },
+      assignmentProblem: { createMany: vi.fn() },
+      problem: { create: vi.fn() },
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: (c: typeof tx) => unknown) => cb(tx));
+
+    const req = new NextRequest('http://localhost/api/courses/c1/duplicate', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'New',
+        code: 'CS 101',
+        semester: 'Fall',
+        startDate: '2025-01-01T09:00',
+        endDate: '2025-05-01T09:00',
+        registrationOpenAt: '2024-12-01T09:00',
+        registrationCloseAt: '2025-01-15T09:00',
+        credits: 3,
+        instructorIds: ['fac-1'],
+        copyMode,
+        ...extra,
+      }),
+    });
+
+    const res = await POST(req, { params: Promise.resolve({ id: 'c1' }) });
+    expect(res.status).toBe(201);
+  };
+
+  it('reads the source assignments and roster from the course being copied', async () => {
+    await runDuplicate('assignments', { copyFaculty: true });
+
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({ courseId: 'c1' });
+  });
+
+  it('reads the source problems from the course being copied', async () => {
+    await runDuplicate('problems');
+
+    expect(whereOf(prismaMock.problem.findMany)).toEqual({ courseId: 'c1' });
+  });
+});

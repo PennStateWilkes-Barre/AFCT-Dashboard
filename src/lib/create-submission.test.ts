@@ -882,3 +882,57 @@ describe('partial file writes', () => {
     expect(fsMock.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('stored-uuid.jff'));
   });
 });
+
+/**
+ * What the grant read is scoped to.
+ *
+ * The extra attempts a submitter is working against are read here and nowhere else, so this
+ * `where` alone decides the cap. The prisma mock returns whatever grants a test installed
+ * regardless of the query, so nothing above notices a key going missing: without the
+ * `problemId` a grant for one problem raises the cap on every problem in the assignment, and
+ * without the group arm scoped to the submitter's own groups it would pick up grants written
+ * for somebody else's group.
+ */
+describe('what the grant read is scoped to', () => {
+  const whereOf = () =>
+    (prismaMock.submissionGrant.findMany.mock.calls[0][0] as { where: unknown }).where;
+
+  it('asks for this problem, on this assignment, for this student', async () => {
+    setup();
+
+    await call();
+
+    expect(whereOf()).toEqual({
+      assignmentId: 'a-1',
+      problemId: 'p-1',
+      OR: [{ userId: 'student-1' }, { groupId: { in: [] } }],
+    });
+  });
+
+  it('adds only the groups this submitter is actually in', async () => {
+    setup({
+      assignment: {
+        id: 'a-1',
+        courseId: 'course-1',
+        unlockAt: null,
+        dueDate: future(),
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        isPublished: true,
+        assignedToEveryone: false,
+        groupSetId: 'gs-1',
+        assignees: [{ targetType: 'GROUP', userId: null, groupId: 'group-9' }],
+        overrides: [],
+        groupSet: { groups: [{ id: 'group-9' }] },
+      },
+    });
+
+    await call();
+
+    expect(whereOf()).toEqual({
+      assignmentId: 'a-1',
+      problemId: 'p-1',
+      OR: [{ userId: 'student-1' }, { groupId: { in: ['group-9'] } }],
+    });
+  });
+});

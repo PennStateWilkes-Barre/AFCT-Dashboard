@@ -251,7 +251,7 @@ export function LoginBrandPanel({
             column creeping toward the login card as it gets taller. The icons align to the
             first line of each row rather than centring on the block, so the three glyphs sit
             on one vertical rhythm whether a description wraps to one line or two. */}
-        <ul className="max-w-[30rem] space-y-6">
+        <ul className="max-w-[30rem] space-y-7">
           {FEATURES.map(({ icon: Icon, title, body }) => (
             <li key={title} className="flex items-start gap-3.5">
               {/* A tinted disc rather than a bare glyph: an unframed icon reads as debris

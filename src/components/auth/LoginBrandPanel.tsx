@@ -109,17 +109,27 @@ export function LoginBrandPanel({
 
         {/* What the letters stand for, and therefore part of the identity rather than part of
             the greeting: close enough to the lockup to read as one block, and muted, because
-            three coloured lines in a row would leave nothing looking primary. Tracked open a
-            little, which is the same trick DASHBOARD uses far harder; at 0.05em it reads as
-            a descriptor rather than as a second label competing with it. */}
-        <p className="text-sidebar-muted-foreground mt-3 text-sm tracking-wider xl:text-base">
+            three coloured lines in a row would leave nothing looking primary.
+
+            A tracked caps label now, at 0.2em, which is the same trick DASHBOARD uses harder
+            still at 0.32em. Small, spaced and quiet is what makes it read as branding rather
+            than as page copy, and it has to stay quiet: the headline below is the loud thing.
+
+            Set in caps by CSS rather than typed in caps, as DASHBOARD is. The source stays
+            readable and searchable, and a screen reader gets the sentence rather than a string
+            some of them spell out letter by letter.
+
+            Colour is the existing muted token (#CBD5E1, a light gray with a blue cast) rather
+            than a new value: it is already the "not quite white" this wants, it carries a
+            measured 12.0:1 against this ground, and it moves with the theme. */}
+        <p className="text-sidebar-muted-foreground mt-4 text-xs font-medium tracking-[0.2em] uppercase xl:mt-5 xl:text-sm">
           Automated Feedback for Computing Theory
         </p>
 
         {/* A separate block, and the gap is what says so. The tight case is not the narrow
             pane but the short one: a 720px-high window at xl leaves 25px between this block
             and the automaton below, which is what caps this gap rather than the width. */}
-        <div className="mt-10 2xl:mt-12">
+        <div className="mt-12 2xl:mt-14">
           {/* One headline in two lines, not a heading with body copy under it. The second line
               finishes the sentence the first starts, so the two share a size, a weight and a
               leading, and differ only in colour: near-white for the claim, the panel's blue

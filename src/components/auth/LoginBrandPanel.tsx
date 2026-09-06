@@ -197,11 +197,25 @@ export function LoginBrandPanel({
           laptop and on a 1440px display. Its width sets its size and `aspect-[444/234]` turns
           that into a height; `max-h-full` is the safety net, so a short window shrinks the
           drawing rather than pushing the footer off the screen. The diagram itself changes
-          every few minutes; see RotatingAuthAutomaton. */}
+          every few minutes; see RotatingAuthAutomaton.
+
+          Sized to fill this row rather than to sit in it. With the copy above ending at the
+          supporting sentence, the row is most of the panel, and a drawing that only occupied
+          a third of it read as a diagram someone had left near the footer. `max-w-[96%]` is
+          the ceiling that matters at lg and xl, where the panel, not this number, is the
+          binding constraint.
+
+          Nudged up and slightly right of centre so it sits under the open half of the column
+          instead of squarely under the text's left edge. The shift is small on purpose: the
+          login card is in the next column and this must not drift toward it.
+
+          `auth-automaton` is what gives the drawing its internal depth, in globals.css. It is
+          a class rather than a pile of arbitrary variants because it is eight selectors, and
+          eight of those in a className is not something anyone can read. */}
       <div className="relative flex min-h-0 items-center justify-center">
         <RotatingAuthAutomaton
           automata={automata}
-          className="pointer-events-none aspect-[444/234] max-h-full w-[30rem] max-w-[96%] text-blue-300 opacity-[0.22] xl:w-[35rem] 2xl:w-[40rem]"
+          className="auth-automaton pointer-events-none aspect-[444/234] max-h-full w-[34rem] max-w-[96%] translate-x-2 -translate-y-3 text-blue-300 opacity-[0.32] xl:w-[40rem] xl:translate-x-6 2xl:w-[46rem]"
         />
       </div>
 

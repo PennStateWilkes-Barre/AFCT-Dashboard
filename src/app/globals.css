@@ -550,6 +550,68 @@
   --primary: oklch(0.4882 0.2172 264.3763); /* #1D4ED8 */
 }
 
+/**
+ * Depth inside the sign-in page's decorative automaton.
+ *
+ * The drawings are SVG files inlined into the page (see RotatingAuthAutomaton and
+ * public/auth-automata/README.md). They are drawn flat: one colour, one stroke opacity, no
+ * classes. Flat is fine at a glance and muddy once the drawing is large, because every part
+ * shouts equally and the eye finds no subject. This gives it a reading order without touching
+ * the files: states first, their labels next, the transitions and their labels behind.
+ *
+ * It leans on the conventions the folder's README now documents, which every drawing follows:
+ * a state is `circle r=28`, an accepting state adds `r=32` and `r=26`, a state label is
+ * `font-size=18` and a transition label is `font-size=15`. A drawing that ignores them still
+ * renders, it simply renders flat, which is what it did before this existed.
+ *
+ * Everything here is relative. The wrapper's own opacity is what keeps the whole thing
+ * decorative, and these values only distribute emphasis underneath it.
+ */
+.auth-automaton :where(svg) circle {
+  stroke-opacity: 0.85;
+}
+
+/* The accepting state, drawn as two rings. A little brighter than the rest, because which
+   state accepts is the one thing the picture is actually saying. */
+.auth-automaton :where(svg) circle[r='32'],
+.auth-automaton :where(svg) circle[r='26'] {
+  stroke-opacity: 1;
+}
+
+/* Transitions sit behind the states. Their arrowheads are filled rather than stroked, so they
+   need dimming separately or they end up the brightest thing in the drawing. */
+.auth-automaton :where(svg) line,
+.auth-automaton :where(svg) path {
+  stroke-opacity: 0.45;
+}
+.auth-automaton :where(svg) marker path {
+  fill-opacity: 0.5;
+}
+
+/* q0, q1, q2: the labels that make the picture legible at all. */
+.auth-automaton :where(svg) text[font-size='18'] {
+  fill-opacity: 1;
+}
+
+/* The alphabet on the transitions. Present, not competing. */
+.auth-automaton :where(svg) text[font-size='15'] {
+  fill-opacity: 0.6;
+}
+
+/**
+ * A haze behind the drawing, and it has to stay barely there.
+ *
+ * Painted by a ::before so it needs no extra element, and it lands behind the diagrams because
+ * it comes first in paint order among the wrapper's positioned children. It also inherits the
+ * wrapper's opacity, so the value below is already multiplied down by the time it is seen.
+ */
+.auth-automaton::before {
+  content: '';
+  position: absolute;
+  inset: -10% -6%;
+  background: radial-gradient(ellipse at center, rgba(147, 197, 253, 0.1), transparent 68%);
+}
+
 .dark {
   /* Slate/navy, chosen to sit under the charcoal sidebar rather than beside it. Dark
      surfaces climb an elevation ladder so layered states read apart:

@@ -512,3 +512,48 @@ describe('the due date on a row', () => {
     expect(rows[0]?.dueDate).toBe('2026-01-01T23:59:00.000Z');
   });
 });
+
+/**
+ * Which memberships the group-extension lookup reads.
+ *
+ * A GROUP override names a group; a submission names a student, so the members are read once
+ * and matched up. That read is bounded by the groups the overrides on this page actually
+ * mention. The prisma mock returns its fixture whatever the `where` says, so without the
+ * `groupId` it reads every membership row in the installation to answer a question about one
+ * page of submissions.
+ */
+describe('which memberships the group extension reads', () => {
+  it('asks only about the groups named by these overrides', async () => {
+    prismaMock.submission.findMany.mockResolvedValue([{ ...row, studentId: 's1' }]);
+    prismaMock.submission.count.mockResolvedValue(1);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        dueDate: new Date('2026-01-01T23:59:00.000Z'),
+        unlockAt: null,
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        overrides: [
+          {
+            targetType: 'GROUP',
+            userId: null,
+            groupId: 'g1',
+            unlockAt: null,
+            dueDate: new Date('2026-01-05T23:59:00.000Z'),
+            lateCutoff: null,
+            allowLateSubmissions: null,
+          },
+        ],
+      },
+    ]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([{ groupId: 'g1', userId: 's1' }]);
+
+    const { rows } = await getAutograderSubmissionsPage({ skip: 0, take: 10 });
+
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { groupId: { in: ['g1'] } },
+    });
+    // And the extension actually reached the member, which is why the read exists.
+    expect(rows[0]?.dueDate).toBe('2026-01-05T23:59:00.000Z');
+  });
+});

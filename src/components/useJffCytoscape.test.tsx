@@ -2118,3 +2118,96 @@ describe('undoing a change to the machine', () => {
     await waitFor(() => expect(api().viewModified).toBe(false));
   });
 });
+
+/**
+ * Undo and redo across a refresh.
+ *
+ * The remembered view already brought a machine back exactly as the reader had left it, and
+ * then refused to undo any of it: Undo was greyed out over work that was plainly still there.
+ * The history travels with the rest of the view now.
+ */
+describe('carrying the undo history through a refresh', () => {
+  const KEY = 'submissions:machine.jff';
+
+  const stored = () => JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`) ?? '{}');
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('writes the steps down beside the arrangement', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().setFinalState('0', true));
+
+    await waitFor(() => expect(stored().history?.undo).toHaveLength(1));
+    expect(stored().history.redo).toEqual([]);
+    // The step is the drawing as it stood BEFORE the change, which is what undo returns to.
+    expect(stored().history.undo[0].finals ?? {}).toEqual({});
+    expect(stored().history.undo[0].positions).toHaveProperty('0');
+  });
+
+  it('brings Undo back enabled, and stepping back still works', async () => {
+    window.sessionStorage.setItem(
+      `afct.viewer.view.${KEY}`,
+      JSON.stringify({
+        v: 1,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+        // The layout this viewer opens on: the restore is skipped when they disagree, because
+        // one layout's positions over the other's is what made Auto-arranged look inert.
+        honorPositions: false,
+        modified: true,
+        renames: { '0': 'start' },
+        history: {
+          undo: [
+            {
+              positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+              honorPositions: false,
+            },
+          ],
+          redo: [],
+        },
+      }),
+    );
+
+    const { api } = renderViewer({ viewStateKey: KEY });
+
+    await waitFor(() => expect(lastCy().byId('0')?.data('label')).toBe('start'));
+    expect(api().canUndo).toBe(true);
+
+    act(() => api().undo());
+
+    // Back to the step's own answers, which named no renames at all.
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().canRedo).toBe(true);
+  });
+
+  /**
+   * A history is keyed by state id the same way an arrangement is, so one machine's steps must
+   * never be applied to another's states.
+   */
+  it('ignores a history that names states this machine does not have', async () => {
+    window.sessionStorage.setItem(
+      `afct.viewer.view.${KEY}`,
+      JSON.stringify({
+        v: 1,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+        honorPositions: false,
+        history: {
+          undo: [{ positions: { '99': { x: 0, y: 0 } }, honorPositions: false }],
+          redo: [],
+        },
+      }),
+    );
+
+    const { api } = renderViewer({ viewStateKey: KEY });
+
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    expect(api().canUndo).toBe(false);
+  });
+});

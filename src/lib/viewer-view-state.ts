@@ -30,8 +30,7 @@ export type ViewerViewport = { zoom: number; pan: { x: number; y: number } };
  * line on the canvas.
  */
 export type ViewerSelection =
-  | { kind: 'state'; id: string }
-  | { kind: 'transition'; from: string; to: string };
+  { kind: 'state'; id: string } | { kind: 'transition'; from: string; to: string };
 
 /** Where every state sits, plus the camera looking at it. */
 export type ViewerViewState = {
@@ -100,7 +99,36 @@ export type ViewerViewState = {
    * moves.
    */
   transitions?: Record<number, ViewerTransitionEdit>;
+  /**
+   * What Undo and Redo would step back through.
+   *
+   * The rest of this record is where the reader got to; this is how they got there. Without it
+   * a refresh brought the machine back exactly as they had left it and then refused to undo any
+   * of it, which is the one thing a reader who has just moved six states and reloaded the page
+   * is most likely to want.
+   *
+   * Trimmed to the most recent {@link VIEWER_HISTORY_LIMIT} steps a side. A step carries every
+   * state's position, and a long session on a large machine would otherwise be the biggest
+   * thing in storage by a wide margin, for steps nobody walks back to.
+   */
+  history?: ViewerHistory;
 };
+
+/** One step of the viewer's undo history: the whole drawing as it stood before a change. */
+export type ViewerHistoryStep = {
+  positions: Record<string, { x: number; y: number }>;
+  honorPositions: boolean;
+  renames?: Record<string, string>;
+  /** Three-valued like the field above: absent is untouched, null is "no initial state". */
+  initialState?: string | null;
+  finals?: Record<string, boolean>;
+  transitions?: Record<number, ViewerTransitionEdit>;
+};
+
+export type ViewerHistory = { undo: ViewerHistoryStep[]; redo: ViewerHistoryStep[] };
+
+/** How many steps a side survive a refresh. See `history` above for why there is a limit. */
+export const VIEWER_HISTORY_LIMIT = 25;
 
 /** The parts of a transition a reader can change. */
 export type ViewerTransitionEdit = {
@@ -174,8 +202,53 @@ function isViewState(value: unknown): value is ViewerViewState {
       return false;
     }
   }
+  if (s.history !== undefined && !isHistory(s.history)) return false;
   if (!s.positions || typeof s.positions !== 'object') return false;
   return Object.values(s.positions as Record<string, unknown>).every(isPoint);
+}
+
+function isHistoryStep(value: unknown): value is ViewerHistoryStep {
+  if (!value || typeof value !== 'object') return false;
+  const step = value as Record<string, unknown>;
+  if (typeof step.honorPositions !== 'boolean') return false;
+  if (!step.positions || typeof step.positions !== 'object') return false;
+  if (!Object.values(step.positions as Record<string, unknown>).every(isPoint)) return false;
+  if (
+    step.initialState !== undefined &&
+    step.initialState !== null &&
+    typeof step.initialState !== 'string'
+  ) {
+    return false;
+  }
+  // The three maps are checked only for shape. Their contents are the same values the fields
+  // above carry and are validated there; a step that named a state this machine does not have
+  // is caught by `viewStateFits` on the positions, which every step also has.
+  const isStringMap = (v: unknown) =>
+    v === undefined ||
+    (!!v &&
+      typeof v === 'object' &&
+      Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string'));
+  const isBoolMap = (v: unknown) =>
+    v === undefined ||
+    (!!v &&
+      typeof v === 'object' &&
+      Object.values(v as Record<string, unknown>).every((x) => typeof x === 'boolean'));
+  if (!isStringMap(step.renames)) return false;
+  if (!isBoolMap(step.finals)) return false;
+  if (step.transitions !== undefined && (!step.transitions || typeof step.transitions !== 'object'))
+    return false;
+  return true;
+}
+
+function isHistory(value: unknown): value is ViewerHistory {
+  if (!value || typeof value !== 'object') return false;
+  const h = value as Record<string, unknown>;
+  return (
+    Array.isArray(h.undo) &&
+    Array.isArray(h.redo) &&
+    h.undo.every(isHistoryStep) &&
+    h.redo.every(isHistoryStep)
+  );
 }
 
 export function readViewState(key: string | null | undefined): ViewerViewState | null {
@@ -219,4 +292,19 @@ export function clearViewState(key: string | null | undefined): void {
 export function viewStateFits(state: ViewerViewState, nodeIds: readonly string[]): boolean {
   const ids = new Set(nodeIds);
   return Object.keys(state.positions).every((id) => ids.has(id));
+}
+
+/**
+ * Whether a remembered history belongs to the machine now on screen.
+ *
+ * The same question `viewStateFits` asks, of every step: a step names positions by state id,
+ * and stepping back to one belonging to a different machine would scatter it. Answered
+ * separately because the two can disagree. The view is written on every pan, and the history
+ * only when it changes, so an entry can carry a history older than the arrangement beside it.
+ */
+export function historyFits(history: ViewerHistory, nodeIds: readonly string[]): boolean {
+  const ids = new Set(nodeIds);
+  const stepFits = (step: ViewerHistoryStep) =>
+    Object.keys(step.positions).every((id) => ids.has(id));
+  return history.undo.every(stepFits) && history.redo.every(stepFits);
 }

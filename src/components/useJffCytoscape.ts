@@ -31,6 +31,9 @@ import {
   readViewState,
   writeViewState,
   viewStateFits,
+  historyFits,
+  VIEWER_HISTORY_LIMIT,
+  type ViewerHistoryStep,
   type ViewerSelection,
   type ViewerViewport,
   type ViewerViewState,
@@ -295,6 +298,36 @@ type ViewerSnapshot = Arrangement & {
   finalOverrides: Record<string, boolean>;
   transitionEdits: Record<number, Partial<Parsed['transitions'][number]>>;
 };
+
+/**
+ * A snapshot on its way to storage, and back.
+ *
+ * Two shapes rather than one because the stored record is a public contract, versioned and
+ * validated, while the snapshot in memory is this file's own business. `initialOverride` is the
+ * only awkward part: it is three-valued, and `JSON.stringify` drops an `undefined` field
+ * entirely, which is exactly the encoding wanted here (absent means the file's own answer).
+ */
+function toStoredStep(snapshot: ViewerSnapshot): ViewerHistoryStep {
+  return {
+    positions: snapshot.positions,
+    honorPositions: snapshot.honorPositions,
+    renames: snapshot.renames,
+    initialState: snapshot.initialOverride,
+    finals: snapshot.finalOverrides,
+    transitions: snapshot.transitionEdits,
+  };
+}
+
+function fromStoredStep(step: ViewerHistoryStep): ViewerSnapshot {
+  return {
+    positions: step.positions,
+    honorPositions: step.honorPositions,
+    renames: step.renames ?? {},
+    initialOverride: step.initialState,
+    finalOverrides: step.finals ?? {},
+    transitionEdits: step.transitions ?? {},
+  };
+}
 
 /** The reader's changes laid over the file as parsed, which is how every load draws them. */
 function deriveParsed(
@@ -947,6 +980,12 @@ export function useJffCytoscape({
         initialState: initialOverrideRef.current,
         finals: finalOverridesRef.current,
         transitions: transitionEditsRef.current,
+        // The most recent steps a side. Trimmed from the front, so what is dropped is the
+        // oldest history, which is the part a reader is least likely to walk back to.
+        history: {
+          undo: undoStack.current.slice(-VIEWER_HISTORY_LIMIT).map(toStoredStep),
+          redo: redoStack.current.slice(-VIEWER_HISTORY_LIMIT).map(toStoredStep),
+        },
       });
     } catch {
       // A graph mid-teardown, or storage refusing. Neither is worth interrupting a reader.
@@ -1083,6 +1122,14 @@ export function useJffCytoscape({
         // A refresh does not undo the reader's rearranging, so it must not quietly forget it
         // happened either.
         if (saved.modified) setRestoredModified(true);
+        // Nor should it leave Undo greyed out over work that is plainly still there. Only when
+        // every step names states this machine has: see historyFits.
+        if (saved.history && historyFits(saved.history, ids)) {
+          undoStack.current = saved.history.undo.map(fromStoredStep);
+          redoStack.current = saved.history.redo.map(fromStoredStep);
+          setUndoDepth(undoStack.current.length);
+          setRedoDepth(redoStack.current.length);
+        }
         cy.zoom(saved.zoom);
         // The point that was in the middle, put back in the middle of whatever width the canvas
         // has now. Falling back to the raw pan for an entry written before that was recorded.

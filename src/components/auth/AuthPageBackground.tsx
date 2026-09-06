@@ -54,7 +54,9 @@ export function AuthPageBackground() {
         className="pointer-events-none fixed inset-y-0 left-0 z-0 w-screen bg-[radial-gradient(ellipse_at_center,transparent_42%,rgba(2,6,23,0.16)_100%)]"
       />
 
-      <AuthDecorativeWave className="pointer-events-none fixed bottom-0 left-0 z-0 h-40 w-screen text-blue-400 xl:h-44" />
+      {/* A little taller than the original contour strip so the new wireframe has room to show
+          perspective. Its own masks keep the footer and sign-in card areas quiet. */}
+      <AuthDecorativeWave className="pointer-events-none fixed -bottom-2 left-0 z-0 h-52 w-screen text-blue-400 xl:h-60 2xl:h-64" />
     </>
   );
 }

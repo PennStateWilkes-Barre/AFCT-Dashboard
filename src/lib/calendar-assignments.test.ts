@@ -263,3 +263,68 @@ describe('how many assignments fit in a day cell', () => {
     expect(visibleAssignmentsForWidth(1280)).toBe(3);
   });
 });
+
+/**
+ * What the calendar's own reads are scoped to.
+ *
+ * The assignment query is asserted above. The reads that hang off it are not, and they are
+ * the ones that decide what a student is told about their own work and what staff are told
+ * about their class. Every prisma mock here answers from its fixture whatever the `where`
+ * says: without the `studentId` the "you have submitted this" markers come from every
+ * student's attempts, and without the `courseId` the class-size count is the whole
+ * installation.
+ */
+describe('what the calendar reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  const assignmentRow = (over: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    title: 'A1',
+    dueDate: new Date('2026-01-15'),
+    courseId: 'student-course',
+    isPublished: true,
+    course: { id: 'student-course', name: 'C1', code: 'CS1' },
+    overrides: [],
+    ...over,
+  });
+
+  it('reads the viewer’s own courses, and their own work only', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([
+      { courseId: 'student-course', role: 'STUDENT' },
+    ]);
+    prismaMock.assignment.findMany.mockResolvedValue([assignmentRow()]);
+
+    await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({
+      userId: 'u1',
+      NOT: { role: 'STUDENT', status: 'DROPPED' },
+    });
+    expect(whereOf(prismaMock.user.findUnique)).toEqual({ id: 'u1' });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      studentId: 'u1',
+      assignmentId: { in: ['a1'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      studentId: 'u1',
+      assignmentId: { in: ['a1'] },
+    });
+  });
+
+  it('counts students and graded work for the staff courses on the calendar only', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([{ courseId: 'staff-course', role: 'FACULTY' }]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      assignmentRow({ courseId: 'staff-course', course: { id: 'staff-course', name: 'C', code: 'C' } }),
+    ]);
+
+    await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(whereOf(prismaMock.roster.groupBy)).toMatchObject({
+      courseId: { in: ['staff-course'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+  });
+});

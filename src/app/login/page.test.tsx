@@ -105,6 +105,10 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => searchState.current,
 }));
 
+// Flipped per test. Reduced motion is a real branch in this form now (it skips the sign-in
+// transition rather than shortening it), so the suite has to be able to ask for it.
+const reduceMotionRef = vi.hoisted(() => ({ value: false }));
+
 vi.mock('framer-motion', () => {
   const motionProxy = new Proxy(
     {},
@@ -124,7 +128,7 @@ vi.mock('framer-motion', () => {
     LazyMotion: ({ children }: { children: React.ReactNode }) => <>{children}</>,
     domAnimation: {},
     AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    useReducedMotion: () => false,
+    useReducedMotion: () => reduceMotionRef.value,
   };
 });
 
@@ -247,6 +251,8 @@ beforeEach(() => {
   mockPublicSettings(true);
   configureLocation();
   nowRef.value = 0;
+  reduceMotionRef.value = false;
+  window.sessionStorage.clear();
 });
 
 describe('LoginPage', () => {
@@ -945,5 +951,129 @@ describe('the sign-in screen', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in with Penn State' }));
 
     expect(signInMock).toHaveBeenCalledWith('oidc', { callbackUrl: '/dashboard' });
+  });
+});
+
+/**
+ * The sign-in transition, from this side of it.
+ *
+ * The page leaves two things behind on its way to the dashboard: a full-screen wipe that
+ * covers what the reader is looking at, and a one-shot sessionStorage flag that tells the
+ * dashboard to pick the movement up. Neither may appear unless the credentials were actually
+ * accepted, because both of them say "you are in" before the browser has gone anywhere.
+ */
+describe('the exit to the dashboard', () => {
+  const TRANSITION_KEY = 'afct-login-transition';
+
+  const overlay = () => document.querySelector('.auth-exit-overlay');
+  const armed = () => window.sessionStorage.getItem(TRANSITION_KEY);
+
+  const signIn = async (user: ReturnType<typeof userEvent.setup>) => {
+    fireEvent.change(screen.getByLabelText(/email/i), { target: { value: 'admin@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^password$/i), { target: { value: 'StrongPass1!' } });
+    await user.click(getSubmitButton(LOGIN_SUBMIT_LABEL));
+  };
+
+  it('covers the page and arms the dashboard once the credentials are accepted', async () => {
+    signInMock.mockResolvedValueOnce({ error: null });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await signIn(user);
+
+    await waitFor(() => expect(overlay()).toBeInTheDocument());
+    expect(armed()).toBe('true');
+    // Decorative: it says nothing to a screen reader and cannot be clicked through to.
+    expect(overlay()).toHaveAttribute('aria-hidden', 'true');
+    // And the destination is unchanged by any of it.
+    await waitFor(() => expect(window.location.href).toBe('/dashboard'));
+  });
+
+  it('blocks a second submit while the page is on its way out', async () => {
+    signInMock.mockResolvedValueOnce({ error: null });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await signIn(user);
+    await waitFor(() => expect(overlay()).toBeInTheDocument());
+
+    const button = getSubmitButton(/Signed in/i);
+    expect(button).toBeDisabled();
+    fireEvent.submit(button.closest('form') as HTMLFormElement);
+
+    expect(signInMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['bad credentials', 'ok' as const],
+    ['a captcha challenge', 'challenge' as const],
+    ['a rate-limit block', 'blocked' as const],
+  ])('starts nothing after %s', async (_label, status) => {
+    setLoginCheckStatus(status);
+    signInMock.mockResolvedValueOnce({ error: 'CredentialsSignin' });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await signIn(user);
+
+    await waitFor(() => expect(signInMock).toHaveBeenCalled());
+    expect(overlay()).toBeNull();
+    expect(armed()).toBeNull();
+    expect(window.location.href).toBe('');
+  });
+
+  it('starts nothing when the form never gets as far as signing in', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await user.click(getSubmitButton(LOGIN_SUBMIT_LABEL));
+
+    expect(signInMock).not.toHaveBeenCalled();
+    expect(overlay()).toBeNull();
+    expect(armed()).toBeNull();
+  });
+
+  /**
+   * Skipped, not shortened. Nothing is drawn and nothing is left for the dashboard to draw
+   * either, so the whole movement is absent rather than played quickly.
+   */
+  it('goes straight to the dashboard under reduced motion', async () => {
+    reduceMotionRef.value = true;
+    signInMock.mockResolvedValueOnce({ error: null });
+    const user = userEvent.setup();
+    render(<LoginPage />);
+
+    await signIn(user);
+
+    await waitFor(() => expect(window.location.href).toBe('/dashboard'));
+    expect(overlay()).toBeNull();
+    expect(armed()).toBeNull();
+  });
+
+  it('is the same exit after a successful signup', async () => {
+    const user = userEvent.setup();
+    render(<LoginPage />);
+    await switchMode(user, /Create account/i);
+
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/auth/signup')) return createJsonResponse({}, 200);
+      return createJsonResponse({ timezone: 'UTC', allowSignup: true }, 200);
+    });
+    signInMock.mockResolvedValue({ error: null });
+
+    fireEvent.change(screen.getByLabelText('First Name'), { target: { value: 'Grace' } });
+    fireEvent.change(screen.getByLabelText('Last Name'), { target: { value: 'Hopper' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'grace@example.com' } });
+    fireEvent.change(screen.getByLabelText(/^Password$/), { target: { value: 'StrongPass1!' } });
+    fireEvent.change(screen.getByLabelText('Confirm Password'), {
+      target: { value: 'StrongPass1!' },
+    });
+
+    await user.click(getSubmitButton(SIGNUP_SUBMIT_LABEL));
+
+    await waitFor(() => expect(overlay()).toBeInTheDocument());
+    expect(armed()).toBe('true');
+    await waitFor(() => expect(window.location.href).toBe('/dashboard'));
   });
 });

@@ -116,8 +116,12 @@ export function LoginBrandPanel({
           masks its own left third away under this text, so the film was solving a problem that
           had already been solved somewhere better, and one less surface on the page is worth
           having. `ml-4` rather than the pill's horizontal padding, which lines the row up with
-          the copy block above instead of leaving it 4px out. */}
-      <div className="text-sidebar-foreground/85 relative ml-4 flex w-fit flex-wrap items-center gap-x-3 gap-y-2 py-2.5 text-xs font-medium xl:gap-x-4 xl:text-sm">
+          the copy block above instead of leaving it 4px out.
+
+          `pb-0` is how this sits lower. The grid pins this row's bottom edge to the panel's
+          padding, so a margin above it moves nothing; dropping its own bottom padding is what
+          lets the text settle the last 10px toward the foot of the panel. */}
+      <div className="text-sidebar-foreground/85 relative ml-4 flex w-fit flex-wrap items-center gap-x-3 gap-y-2 pt-2.5 pb-0 text-xs font-medium xl:gap-x-4 xl:text-sm">
         <span className="inline-flex items-center gap-2">
           <Code2 className={FOOTER_ICON} aria-hidden="true" />
           Open source

@@ -285,4 +285,40 @@ describe('what an override is allowed to reach', () => {
       where: { id: 'g1', groupSetId: 'gs1' },
     });
   });
+
+  /**
+   * When the assignment has a named audience, the student has to be in it. That check is the
+   * only thing stopping a deadline exception being written for somebody this assignment was
+   * never given to, and without its `userId` any assignee row on the assignment satisfies it.
+   */
+  it('checks the student against the audience of this assignment', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      ...INDIVIDUAL_ASSIGNMENT,
+      assignedToEveryone: false,
+    });
+    prismaMock.roster.findUnique.mockResolvedValue({ role: 'STUDENT', status: 'ENROLLED' });
+
+    await post({
+      targetType: 'STUDENT',
+      userId: 'stu-1',
+      dueDate: '2026-02-01T00:00:00.000Z',
+    });
+
+    expect(prismaMock.assignmentAssignee.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { assignmentId: 'a1', userId: 'stu-1' },
+    });
+  });
+
+  /** Reading the list has its own lookup, and it is scoped the same way. */
+  it('lists overrides for an assignment in this course only', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue(INDIVIDUAL_ASSIGNMENT);
+    prismaMock.assignmentOverride.findMany.mockResolvedValue([]);
+
+    const res = await GET(new NextRequest('http://localhost/x'), ctx);
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.assignment.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', courseId: 'c1' },
+    });
+  });
 });

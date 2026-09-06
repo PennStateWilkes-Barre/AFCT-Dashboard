@@ -146,17 +146,25 @@ export function LoginBrandPanel({
               2xl, which keeps each phrase on one line at every width the panel is drawn at. */}
           <p className="text-3xl leading-[1.08] font-bold tracking-tight xl:text-4xl 2xl:text-5xl">
             Stronger Learning
-            {/* A gradient across the second line only, clipped to the glyphs. The three stops
-                are sky-300 / blue-300 / blue-100, which are #7DD3FC / #93C5FD / #DBEAFE: the
-                middle one is the same blue-300 this panel already uses for DASHBOARD and the
-                automaton, so the line stays inside the existing palette and only drifts
-                brighter at one end and paler at the other.
+            {/* A gradient across the second line only, clipped to the glyphs.
+
+                The stops descend in lightness left to right, and that is the whole point:
+                #7DD3FC (L .58) to #8EBBF5 (L .48) to #7FA8EA (L .39). An earlier version ended
+                on blue-100, whose lightness climbs back to .81, so the ramp got paler than it
+                started and "Feedback" bleached toward white on the dark ground. Even weight
+                across the phrase is what keeps it reading as one line of text rather than as a
+                word that faded. All three sit between 7.3:1 and 10.6:1 on #111827.
+
+                Written as hex rather than palette names because two of the three are not
+                Tailwind colours; only the first is (sky-300). Naming one and hexing two would
+                imply the first is special, when they are one authored ramp. Not worth three
+                theme tokens for a single headline.
 
                 `w-fit` is load-bearing, not tidiness. `block` alone stretches the box to the
                 paragraph's full width, so the gradient would finish past the end of the text
-                and the last word would land mid-ramp instead of on the pale stop. Sizing the
+                and the last word would land mid-ramp rather than on the final stop. Sizing the
                 box to the glyphs makes the ramp start and end where the words do. */}
-            <span className="block w-fit bg-gradient-to-r from-sky-300 via-blue-300 to-blue-100 bg-clip-text text-transparent">
+            <span className="block w-fit bg-gradient-to-r from-[#7DD3FC] via-[#8EBBF5] to-[#7FA8EA] bg-clip-text text-transparent">
               Through Automated Feedback
             </span>
           </p>

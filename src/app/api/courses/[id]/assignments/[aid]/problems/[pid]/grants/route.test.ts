@@ -199,4 +199,42 @@ describe('what a grant is allowed to reach', () => {
       where: { id: 'g1', groupSetId: 'gs1' },
     });
   });
+
+  /**
+   * When the assignment has a named audience rather than going to everyone, the target must
+   * be in it. That check is a query, and it is the only thing stopping a grant being written
+   * for somebody this assignment was never given to. Without its `assignmentId` any assignee
+   * row anywhere satisfies it.
+   */
+  it('checks group membership of the audience on this assignment only', async () => {
+    prismaMock.assignmentProblem.findFirst.mockResolvedValue({
+      maxSubmissions: 3,
+      assignment: { groupSetId: 'gs1', assignedToEveryone: false },
+    });
+
+    await post({ targetType: 'GROUP', groupId: 'g1', extraSubmissions: 2 });
+
+    expect(prismaMock.assignmentAssignee.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { assignmentId: 'a1', groupId: 'g1' },
+    });
+  });
+
+  it('checks a student against the audience on this assignment, directly or through a group', async () => {
+    prismaMock.assignmentProblem.findFirst.mockResolvedValue({
+      maxSubmissions: 3,
+      assignment: { groupSetId: null, assignedToEveryone: false },
+    });
+
+    await post({ targetType: 'STUDENT', userId: 'stu-1', extraSubmissions: 2 });
+
+    expect(prismaMock.assignmentAssignee.findFirst.mock.calls[0][0]).toMatchObject({
+      where: {
+        assignmentId: 'a1',
+        OR: [
+          { userId: 'stu-1' },
+          { studentGroup: { memberships: { some: { userId: 'stu-1' } } } },
+        ],
+      },
+    });
+  });
 });

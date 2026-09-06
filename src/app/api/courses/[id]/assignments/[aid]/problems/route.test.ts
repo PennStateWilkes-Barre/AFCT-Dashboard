@@ -458,3 +458,66 @@ describe('DELETE /api/courses/[id]/[aid]/problems (remove a problem)', () => {
     consoleSpy.mockRestore();
   });
 });
+
+/**
+ * What the problem link checks are scoped to.
+ *
+ * The problem ids come from the request body, so both the add and the remove path have to
+ * confirm each one belongs to this course. The existing-links read is bounded the same way,
+ * through the assignment's own course. The prisma mock answers from its fixture whatever the
+ * `where` says: without the `courseId` a problem from another course can be attached to this
+ * assignment, which puts another course's problem statement in front of these students.
+ */
+describe('what the problem link checks are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  beforeEach(() => {
+    authMock.mockResolvedValue({ user: { id: 'admin-1', role: 'ADMIN', isAdmin: true } });
+    prismaMock.assignment.findFirst.mockResolvedValue({
+      id: 'a1',
+      courseId: 'c1',
+      isPublished: true,
+      isGroup: false,
+    });
+    prismaMock.assignment.findUnique.mockResolvedValue({
+      id: 'a1',
+      problems: [{ problem: { id: 'p1', title: 'P1' } }],
+    });
+    activityLogMock.mockResolvedValue(undefined);
+  });
+
+  it('accepts only problems from this course, and reads links through this assignment', async () => {
+    prismaMock.problem.findMany.mockResolvedValue([{ id: 'p1' }]);
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([]);
+    prismaMock.assignmentProblem.createMany.mockResolvedValue({ count: 1 });
+
+    const req = new Request('http://localhost/api/courses/c1/assignments/a1/problems', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ problemIds: ['p1'] }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.problem.findMany)).toEqual({ id: { in: ['p1'] }, courseId: 'c1' });
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({
+      assignmentId: 'a1',
+      assignment: { courseId: 'c1' },
+    });
+  });
+
+  it('removes a link only for a problem in this course', async () => {
+    prismaMock.problem.findFirst.mockResolvedValue({ id: 'p1' });
+    prismaMock.assignmentProblem.deleteMany.mockResolvedValue({ count: 1 });
+
+    const req = new Request('http://localhost/api/courses/c1/assignments/a1/problems', {
+      method: 'DELETE',
+      body: JSON.stringify({ problemId: 'p1' }),
+    });
+    const res = await DELETE(req, { params: Promise.resolve({ id: 'c1', aid: 'a1' }) });
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.problem.findFirst)).toEqual({ id: 'p1', courseId: 'c1' });
+  });
+});

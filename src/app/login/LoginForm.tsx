@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { showToast } from '@/lib/toast';
 import { LazyMotion, m, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { Building2 } from 'lucide-react';
+import { Building2, LockKeyhole, Mail } from 'lucide-react';
 import { AuthBrandMark } from '@/components/auth/AuthBrandMark';
 import { AuthPageBackground } from '@/components/auth/AuthPageBackground';
 import { LoginBrandPanel } from '@/components/auth/LoginBrandPanel';
@@ -613,6 +613,7 @@ export default function LoginForm({
                         id="login-email"
                         label="Email"
                         name="login-email"
+                        leadingIcon={Mail}
                         required
                         requiredMark
                         autoComplete="username"
@@ -627,6 +628,7 @@ export default function LoginForm({
                         <InputGroup
                           label="Password"
                           name="login-password"
+                          leadingIcon={LockKeyhole}
                           required
                           requiredMark
                           autoComplete="current-password"

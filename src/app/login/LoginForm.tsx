@@ -525,9 +525,19 @@ export default function LoginForm({
               at 376, and it is now the same measure at every desktop size rather than being
               squeezed to 457 at the narrow end. */}
           <div className="relative mx-auto w-full max-w-[440px]">
+            {/* Two shadows rather than one. The first is an ordinary dark drop, which is what
+                lifts the card off the page. The second is a wide, very faint cobalt ambient at
+                0.08, which is not a glow to be seen in its own right: it stops the white
+                rectangle reading as if it were cut out and pasted onto a blue photograph, by
+                letting a little of the ground's colour gather at its edge.
+
+                Held under 0.1 deliberately. Push the blue much past that and it stops being
+                depth and becomes an outline, which is a different and much louder object. The
+                card itself stays opaque white; nothing here makes the background show through
+                it. */}
             <section
               aria-labelledby="auth-heading"
-              className="bg-card relative z-10 w-full rounded-2xl border p-5 shadow-lg sm:p-6 lg:p-8"
+              className="bg-card relative z-10 w-full rounded-2xl border p-5 shadow-[0_18px_50px_rgba(2,6,23,0.28),0_0_40px_rgba(59,130,246,0.08)] sm:p-6 lg:p-8"
             >
               {/* Outside the animated panels, so switching mode retitles the page rather than
                 replacing its h1: one h1 that changes its words, not two that take turns. */}

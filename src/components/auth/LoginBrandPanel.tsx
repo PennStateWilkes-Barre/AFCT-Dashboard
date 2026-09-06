@@ -80,7 +80,11 @@ export function LoginBrandPanel({
         className,
       )}
     >
-      <div className="relative mt-3 ml-4 max-w-xl">
+      {/* Widened from max-w-xl for the headline below: at 2xl its second line is about 600px,
+          which 576px would have wrapped. Nothing else in here is near that width, so the
+          lockup and the tagline sit exactly where they did. The column's own padding is the
+          real limit at every size, so this cap only ever releases the headline. */}
+      <div className="relative mt-3 ml-4 max-w-3xl">
         {/* Identity: the lockup and the words it stands for. The tagline sits under the whole
             row, not inside the text column beside the mark, so the block squares off on the
             mark's left edge instead of stepping in by the width of the mark. */}
@@ -115,15 +119,24 @@ export function LoginBrandPanel({
         {/* A separate block, and the gap is what says so. The tight case is not the narrow
             pane but the short one: a 720px-high window at xl leaves 25px between this block
             and the automaton below, which is what caps this gap rather than the width. */}
-        <div className="mt-10 space-y-3 2xl:mt-12">
-          {/* A step down from where it started. Blue, bold and the same size as a headline, it
-              was a second focal point in a column that should only have one: AFCT. */}
-          <p className="text-lg font-semibold tracking-tight text-blue-300 xl:text-xl 2xl:text-2xl">
-            Welcome to AFCT Dashboard
-          </p>
-          <p className="text-sidebar-muted-foreground max-w-md text-sm leading-relaxed xl:text-base">
-            Deliver intelligent feedback, streamline grading, and support student learning in
-            computing theory.
+        <div className="mt-10 2xl:mt-12">
+          {/* One headline in two lines, not a heading with body copy under it. The second line
+              finishes the sentence the first starts, so the two share a size, a weight and a
+              leading, and differ only in colour: near-white for the claim, the panel's blue
+              accent for what makes it true.
+
+              Deliberately a <p> and not an <h1>. The form already owns the page's only h1
+              (`auth-heading`), which is what names the login card to a screen reader; a second
+              one here would compete with it and change the document outline for what is a
+              typographic decision, not a structural one.
+
+              Sizes step with the panel's own breakpoints rather than the viewport's usual
+              ones, because this panel does not exist below lg (`hidden lg:grid` on the
+              caller). So lg is the small case, not mobile: 30px at lg, 36px at xl, 48px at
+              2xl, which keeps each phrase on one line at every width the panel is drawn at. */}
+          <p className="text-3xl leading-[1.08] font-bold tracking-tight xl:text-4xl 2xl:text-5xl">
+            Stronger Learning
+            <span className="block text-blue-300">Through Automated Feedback</span>
           </p>
         </div>
       </div>

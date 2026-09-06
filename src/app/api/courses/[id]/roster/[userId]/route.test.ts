@@ -563,3 +563,142 @@ describe('PATCH /api/courses/[id]/roster/[userId]', () => {
     );
   });
 });
+
+/**
+ * Which course each lookup in this route is asking about.
+ *
+ * Every one of these can lose its `courseId` with the rest of the file still green, because
+ * the prisma mock answers regardless of the query. They are not all the same kind of wrong:
+ * two decide who is acted on, one decides what the caller may do, and one is a safety guard
+ * whose failure is silent.
+ */
+describe('the course scoping of every roster lookup', () => {
+  const req = new NextRequest('http://localhost/api/courses/c1/roster/u2');
+  const params = { params: Promise.resolve({ id: 'c1', userId: 'u2' }) };
+
+  const whereOfCall = (fn: { mock: { calls: unknown[][] } }, i = 0) =>
+    (fn.mock.calls[i][0] as { where: Record<string, unknown> }).where;
+
+  it('reads the target for the dialog from this course', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: true } });
+    isAdminMock.mockReturnValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { id: 'u2', email: 'a@b.c' },
+    });
+
+    await GET(req, params);
+
+    expect(whereOfCall(prismaMock.roster.findFirst)).toMatchObject({
+      courseId: 'c1',
+      userId: 'u2',
+    });
+  });
+
+  it('counts the remaining faculty within this course, not the whole installation', async () => {
+    // The guard is "you cannot remove the last faculty member". Counting every FACULTY row
+    // anywhere would keep the total comfortably above one forever, so the guard would never
+    // fire and a course could be left with nobody running it.
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: true } });
+    isAdminMock.mockReturnValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+    prismaMock.roster.count.mockResolvedValue(1);
+
+    const res = await DELETE(req, params);
+
+    expect(res.status).toBe(400);
+    expect(whereOfCall(prismaMock.roster.count)).toEqual({ courseId: 'c1', role: 'FACULTY' });
+  });
+
+  it('checks for submissions by the person being removed, not by anyone', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: true } });
+    isAdminMock.mockReturnValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT' });
+    prismaMock.assignment.findMany.mockResolvedValue([{ id: 'a1' }]);
+    prismaMock.submission.findFirst.mockResolvedValue({ id: 's1' });
+
+    const res = await DELETE(req, params);
+
+    expect(res.status).toBe(400);
+    expect(whereOfCall(prismaMock.submission.findFirst)).toMatchObject({ studentId: 'u2' });
+  });
+});
+
+/**
+ * The same course scoping on the two verbs that change things.
+ *
+ * A role change and a removal both find their target with `{ courseId, userId }` and then act
+ * on it by id, so the lookup is the only thing tying the action to the course in the URL.
+ * `viewerRoster` decides what the caller is allowed to do, read from their role in this course
+ * rather than whichever course they happen to teach in.
+ */
+describe('the course scoping of the verbs that change things', () => {
+  const params = { params: Promise.resolve({ id: 'c1', userId: 'u2' }) };
+  const patchReq = (role: string) =>
+    new NextRequest('http://localhost/api/courses/c1/roster/u2', {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+
+  const wheres = (fn: { mock: { calls: unknown[][] } }) =>
+    fn.mock.calls.map((c) => (c[0] as { where: Record<string, unknown> }).where);
+
+  it('finds the person being removed on this course roster', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: true } });
+    isAdminMock.mockReturnValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT' });
+    prismaMock.assignment.findMany.mockResolvedValue([]);
+    prismaMock.roster.deleteMany.mockResolvedValue({ count: 1 });
+
+    await DELETE(new NextRequest('http://localhost/api/courses/c1/roster/u2'), params);
+
+    expect(wheres(prismaMock.roster.findFirst)[0]).toMatchObject({
+      courseId: 'c1',
+      userId: 'u2',
+    });
+  });
+
+  it('finds the person being re-roled in this course', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: false } });
+    isAdminMock.mockReturnValue(false);
+    canManageCourseMock.mockResolvedValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({ id: 'r1', role: 'STUDENT' });
+    prismaMock.roster.count.mockResolvedValue(2);
+    prismaMock.roster.update.mockResolvedValue({ id: 'r1', role: 'TA' });
+
+    await PATCH(patchReq('TA'), params);
+
+    expect(wheres(prismaMock.roster.findFirst)[0]).toMatchObject({
+      courseId: 'c1',
+      userId: 'u2',
+    });
+  });
+
+  it("reads the caller's own standing in this course, for the actions the dialog offers", async () => {
+    // A non-admin viewer: the route looks up their role here to decide what they may do, and
+    // reading it from whichever other course they teach in would answer a different question.
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: false } });
+    isAdminMock.mockReturnValue(false);
+    canAccessCourseMock.mockResolvedValue(true);
+    prismaMock.roster.findFirst
+      .mockResolvedValueOnce({ role: 'STUDENT', user: { id: 'u2', email: 'a@b.c' } })
+      .mockResolvedValueOnce({ role: 'FACULTY' });
+
+    await GET(new NextRequest('http://localhost/api/courses/c1/roster/u2'), params);
+
+    const asked = wheres(prismaMock.roster.findFirst);
+    expect(asked).toContainEqual(expect.objectContaining({ courseId: 'c1', userId: 'u1' }));
+  });
+
+  it("counts this course's faculty before demoting the last one", async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: true } });
+    canManageCourseMock.mockResolvedValue(true);
+    prismaMock.roster.findFirst.mockResolvedValue({ id: 'r1', role: 'FACULTY' });
+    prismaMock.roster.count.mockResolvedValue(1);
+
+    const res = await PATCH(patchReq('STUDENT'), params);
+
+    expect(res.status).toBe(400);
+    expect(wheres(prismaMock.roster.count)[0]).toEqual({ courseId: 'c1', role: 'FACULTY' });
+  });
+});

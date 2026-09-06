@@ -53,7 +53,8 @@ const assignment = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-const titlesOf = async (res: Response) => (await res.json()).assignments.map((a: { id: string }) => a.id);
+const titlesOf = async (res: Response) =>
+  (await res.json()).assignments.map((a: { id: string }) => a.id);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -147,5 +148,26 @@ describe('GET /api/client/v1/courses/[courseId]/assignments', () => {
     expect(grp.isGroup).toBe(true);
     expect(grp.groupName).toBe('Group 1');
     expect(grp.allowLateSubmissions).toBe(true);
+  });
+});
+
+/**
+ * The group-name lookup, scoped to the caller.
+ *
+ * The client shows a student which of their groups an assignment belongs to. That query is
+ * scoped by `userId`, and dropping it returns every membership in those group sets, so the
+ * client would label a student's assignment with somebody else's group. The prisma mock
+ * returns the same fixture either way, so nothing else in this file notices.
+ */
+describe('whose group memberships the client is told about', () => {
+  it('asks only about the signed-in student', async () => {
+    getAssignmentsMock.mockResolvedValue([assignment({ id: 'grp', groupSetId: 'gs1' })]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([]);
+
+    await GET(makeReq('Bearer good'), ctx);
+
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { userId: 'u1' },
+    });
   });
 });

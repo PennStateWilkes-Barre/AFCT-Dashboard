@@ -81,6 +81,12 @@ describe('GET /api/courses/[id]/[aid]', () => {
     );
 
     expect(res.status).toBe(200);
+    // The assignment id is a path parameter and the course gate says nothing about it, so this
+    // lookup is what keeps a URL scoped to one course from reading another's assignment. It
+    // can lose the `courseId` with every other test in this file still passing.
+    expect(prismaMock.assignment.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', courseId: 'c1' },
+    });
   });
 
   it('locks description and problems for a student before the assignment unlocks', async () => {

@@ -556,46 +556,60 @@
  * The drawings are SVG files inlined into the page (see RotatingAuthAutomaton and
  * public/auth-automata/README.md). They are drawn flat: one colour, one stroke opacity, no
  * classes. Flat is fine at a glance and muddy once the drawing is large, because every part
- * shouts equally and the eye finds no subject. This gives it a reading order without touching
- * the files: states first, their labels next, the transitions and their labels behind.
+ * shouts equally and the eye finds no subject. This gives it a reading order: states and
+ * their labels in the brighter blue, transitions and theirs in a darker one.
  *
- * It leans on the conventions the folder's README now documents, which every drawing follows:
- * a state is `circle r=28`, an accepting state adds `r=32` and `r=26`, a state label is
- * `font-size=18` and a transition label is `font-size=15`. A drawing that ignores them still
- * renders, it simply renders flat, which is what it did before this existed.
+ * **Two solid colours, never partial opacity.** That is the whole design of this block, and it
+ * is a correction. Dimming the pieces individually looked right until you noticed the
+ * arrowheads: a transition line runs *underneath* its own marker, so two translucent shapes
+ * overlapped and the arrowhead came out darker than the line feeding it, as though every arrow
+ * had been drawn twice. Opaque shapes cannot double up. The wrapper's own `opacity` is what
+ * makes the drawing recede, and it applies to the rendered result as a whole, so overlaps
+ * inside it are already resolved by the time it fades.
  *
- * Everything here is relative. The wrapper's own opacity is what keeps the whole thing
- * decorative, and these values only distribute emphasis underneath it.
+ * It leans on the conventions the folder's README documents, which every drawing follows: a
+ * state is `circle r=28`, an accepting state adds `r=32` and `r=26`, a state label is
+ * `font-size=18` and a transition label is `font-size=15`. Every shape lives in a single
+ * top-level `<g>`, which is what lets `svg > g` mean "a transition" without also catching the
+ * arrowhead path inside `<defs>`. A drawing that ignores all this still renders, it simply
+ * renders flat, which is what it did before this existed.
  */
-.auth-automaton :where(svg) circle {
-  stroke-opacity: 0.85;
-}
-
-/* The accepting state, drawn as two rings. A little brighter than the rest, because which
-   state accepts is the one thing the picture is actually saying. */
-.auth-automaton :where(svg) circle[r='32'],
-.auth-automaton :where(svg) circle[r='26'] {
+.auth-automaton :where(svg > g) circle {
+  stroke: #93c5fd;
   stroke-opacity: 1;
 }
 
-/* Transitions sit behind the states. Their arrowheads are filled rather than stroked, so they
-   need dimming separately or they end up the brightest thing in the drawing. */
-.auth-automaton :where(svg) line,
-.auth-automaton :where(svg) path {
-  stroke-opacity: 0.45;
+/* The accepting state, drawn as two rings. Its emphasis is weight now rather than opacity,
+   which is the only lever left once everything here is opaque. */
+.auth-automaton :where(svg > g) circle[r='32'],
+.auth-automaton :where(svg > g) circle[r='26'] {
+  stroke-width: 2.5;
 }
-.auth-automaton :where(svg) marker path {
-  fill-opacity: 0.5;
+
+/* Transitions: straight ones, curved self-loops, and the arrowheads that finish them. The
+   arrowhead is a filled path inside <defs>, so it is matched separately and by fill; the
+   shared colour is what makes a line and its head read as one continuous stroke. */
+.auth-automaton :where(svg > g) line,
+.auth-automaton :where(svg > g) path {
+  stroke: #769bd6;
+  stroke-opacity: 1;
+}
+.auth-automaton :where(svg marker) path {
+  fill: #769bd6;
+  fill-opacity: 1;
+  stroke: none;
 }
 
 /* q0, q1, q2: the labels that make the picture legible at all. */
 .auth-automaton :where(svg) text[font-size='18'] {
+  fill: #93c5fd;
   fill-opacity: 1;
 }
 
-/* The alphabet on the transitions. Present, not competing. */
+/* The alphabet on the transitions. Same blue as the arrows they belong to. */
 .auth-automaton :where(svg) text[font-size='15'] {
-  fill-opacity: 0.6;
+  fill: #769bd6;
+  fill-opacity: 1;
 }
 
 /**

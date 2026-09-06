@@ -80,10 +80,12 @@ export function LoginBrandPanel({
         className,
       )}
     >
-      {/* Widened from max-w-xl for the headline below: at 2xl its second line is about 600px,
-          which 576px would have wrapped. Nothing else in here is near that width, so the
-          lockup and the tagline sit exactly where they did. The column's own padding is the
-          real limit at every size, so this cap only ever releases the headline. */}
+      {/* Widened from max-w-xl for the headline below, which at its largest runs past what
+          576px would hold on one line. It has since come down a size and would now fit either
+          way, but the wider cap stays: it only ever releases, never forces, and it means the
+          headline can grow again without the line silently breaking in two. Nothing else in
+          here is close to this width, so the lockup and the tagline sit where they always did,
+          and the column's own padding is the real limit at every size. */}
       <div className="relative mt-3 ml-4 max-w-3xl">
         {/* Identity: the lockup and the words it stands for. The tagline sits under the whole
             row, not inside the text column beside the mark, so the block squares off on the
@@ -142,9 +144,13 @@ export function LoginBrandPanel({
 
               Sizes step with the panel's own breakpoints rather than the viewport's usual
               ones, because this panel does not exist below lg (`hidden lg:grid` on the
-              caller). So lg is the small case, not mobile: 30px at lg, 36px at xl, 48px at
-              2xl, which keeps each phrase on one line at every width the panel is drawn at. */}
-          <p className="text-3xl leading-[1.08] font-bold tracking-tight xl:text-4xl 2xl:text-5xl">
+              caller). So lg is the small case, not mobile: 28px at lg, 32px at xl, 42px at
+              2xl, which keeps each phrase on one line at every width the panel is drawn at.
+
+              In rem, not px, so the whole headline still scales with a reader's own font
+              setting. They are off Tailwind's scale because the scale jumps 36px straight to
+              48px, and the size wanted here sits in that gap. */}
+          <p className="text-[1.75rem] leading-[1.08] font-bold tracking-tight xl:text-[2rem] 2xl:text-[2.625rem]">
             Stronger Learning
             {/* A gradient across the second line only, clipped to the glyphs.
 

@@ -26,16 +26,17 @@ function curve(base: number, amp: number, freq: number, phase: number) {
  *
  * The even spacing is what makes this read as a contour map rather than as water: parallel
  * lines at a constant interval are how height is drawn on a map, and the small phase step
- * between them is the drift that keeps them from looking printed. The lowest line runs off the
- * bottom of the strip, which is deliberate; the set should look like it continues past the
- * edge of the screen rather than stopping neatly on it.
+ * between them is the drift that keeps them from looking printed. The lowest lines are kept
+ * quieter because they pass closest to the footer links; the wave should still be visible at
+ * the foot of the page without becoming a texture the text has to fight through.
  */
 const LINES = Array.from({ length: 9 }, (_, i) => ({
   key: i,
   points: curve(38 + i * 13, 13, 1.5, i * 0.28),
-  // One line carries the set. Nine at the same value is a texture with no depth, and turning
-  // any of them brighter than this reads as a graph drawn on the page.
-  opacity: i === 4 ? 0.28 : 0.13,
+  // One line still carries the set, but the lower third falls away more quickly where the
+  // footer sits. This keeps depth in the drawing without putting high-frequency lines directly
+  // behind small text.
+  opacity: i === 4 ? 0.2 : i >= 6 ? 0.045 : 0.09,
 }));
 
 /**
@@ -44,11 +45,10 @@ const LINES = Array.from({ length: 9 }, (_, i) => ({
  * One colour throughout, taken from the caller as `currentColor`, so the whole set moves
  * together and there is nothing here to keep in sync with the palette.
  *
- * Brightest at the left and falling away to the right, which is not decoration for its own
- * sake: the footer pill sits at the left of the page, and the lines are what its backdrop blur
- * has to work with. Flat across the width, they were faint enough behind the pill to leave it
- * looking like a plain grey chip. The right-hand side is where the sign-in card is, and there
- * the lines want to be quieter, so one gradient serves both ends.
+ * The mask deliberately creates a quiet zone across the left third of the strip, where the
+ * Open source / AGPLv3 / Documentation / GitHub footer sits. The waves then rise through the
+ * open middle of the page before falling away again under the sign-in card. That preserves the
+ * contour motif without asking the footer's translucent pill to hide it.
  *
  * Stretched with `preserveAspectRatio="none"` on purpose. The curves mean nothing, so
  * distorting them to whatever width the page has costs nothing and avoids either tiling or
@@ -67,11 +67,14 @@ export function AuthDecorativeWave({ className }: { className?: string }) {
       strokeWidth="1.2"
     >
       <defs>
-        {/* The id is a plain constant rather than `useId` because this renders once per page:
-            it is the page ground, drawn by `AuthPageBackground`. */}
+        {/* Keep the footer side intentionally faint, let the contours become most visible in
+            the open centre-left, then fade them again beneath the form. */}
         <linearGradient id="afct-contour-falloff" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#fff" stopOpacity="1" />
-          <stop offset="1" stopColor="#fff" stopOpacity="0.25" />
+          <stop offset="0" stopColor="#fff" stopOpacity="0.08" />
+          <stop offset="0.28" stopColor="#fff" stopOpacity="0.16" />
+          <stop offset="0.44" stopColor="#fff" stopOpacity="0.72" />
+          <stop offset="0.72" stopColor="#fff" stopOpacity="0.42" />
+          <stop offset="1" stopColor="#fff" stopOpacity="0.12" />
         </linearGradient>
         <mask id="afct-contour-fade">
           <rect width={W} height={H} fill="url(#afct-contour-falloff)" />

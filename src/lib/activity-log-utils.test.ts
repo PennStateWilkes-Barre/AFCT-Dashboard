@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 import type { PrismaClient } from '@prisma/client';
-import { inferSeverity, createEnhancedActivityLog } from './activity-log-utils';
+import {
+  inferSeverity,
+  createEnhancedActivityLog,
+  ActivityLogQueries,
+} from './activity-log-utils';
 
 // Every action actually used in the app, mapped to its expected severity. Keeps
 // the classifier honest against the real vocabulary.
@@ -318,5 +322,33 @@ describe('what happens when the log itself cannot be written', () => {
     await expect(
       createEnhancedActivityLog(prisma, ctx, { ...entry, courseId: 'c-1' }),
     ).resolves.toBeUndefined();
+  });
+});
+
+/**
+ * What each prebuilt log query is scoped to.
+ *
+ * These builders return a `where` that somebody else passes to prisma, so nothing else can
+ * check them: a caller cannot tell a correctly scoped filter from one that reads the whole
+ * ActivityLog table. Under FERPA that table is the disclosure record, so a filter that
+ * silently widened would show one course's staff another course's student activity.
+ *
+ * Note: nothing imports `ActivityLogQueries` today. These assertions fix the intended scope
+ * for whoever picks it up.
+ */
+describe('what the prebuilt activity log queries are scoped to', () => {
+  it('limits each query to the course, assignment, or person it names', () => {
+    expect(ActivityLogQueries.forCourse('c1').where).toEqual({ courseId: 'c1' });
+    expect(ActivityLogQueries.forAssignment('a1').where).toEqual({ assignmentId: 'a1' });
+    expect(ActivityLogQueries.forUserInCourse('u1', 'c1').where).toEqual({
+      userId: 'u1',
+      courseId: 'c1',
+    });
+  });
+
+  it('takes the row limit it is given', () => {
+    expect(ActivityLogQueries.forCourse('c1', 5).take).toBe(5);
+    expect(ActivityLogQueries.forAssignment('a1', 5).take).toBe(5);
+    expect(ActivityLogQueries.forUserInCourse('u1', 'c1', 5).take).toBe(5);
   });
 });

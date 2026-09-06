@@ -59,6 +59,8 @@ import {
   DEFAULT_CANVAS_TOOL,
   type CanvasTool,
 } from '@/components/viewer/CanvasToolPalette';
+import { CanvasTextLayer } from '@/components/viewer/CanvasTextLayer';
+import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
 import {
   Grid,
   Copy,
@@ -1001,6 +1003,16 @@ export function JffCytoscapeViewer({
    * already means the new thing.
    */
   const backgroundClickRef = useRef<((at: { x: number; y: number }) => boolean) | null>(null);
+  /**
+   * The reader's own writing over this machine, and where it is kept between visits.
+   *
+   * Keyed by the same identifier the remembered view uses, falling back to the file's URL when a
+   * caller has not given one, so two files opened side by side keep their own notes.
+   */
+  const textBoxes = useViewerTextBoxes(viewStateKey ?? src);
+  const selectTextBoxRaw = textBoxes.select;
+  // The element the graph's transform is written to, so the boxes ride the pan and the zoom.
+  const textOverlayRef = useRef<HTMLDivElement | null>(null);
   const onBackgroundClick = useCallback(
     (at: { x: number; y: number }) => backgroundClickRef.current?.(at) ?? false,
     [],
@@ -1072,6 +1084,7 @@ export function JffCytoscapeViewer({
     selectedStatePosition,
     beginEdit,
     moveState,
+    viewportNow,
     zoomIn,
     zoomOut,
     zoom,
@@ -1093,6 +1106,7 @@ export function JffCytoscapeViewer({
     darkMode: isDark,
     honorPositionsDefault,
     onBackgroundClick,
+    graphOverlayRef: textOverlayRef,
     initialZoom,
     viewStateKey,
     onViewportChange,
@@ -1101,11 +1115,46 @@ export function JffCytoscapeViewer({
 
   // What empty canvas is for, at this moment. Returning false leaves the click alone, which is
   // how the Select tool goes on clearing the selection.
+  /**
+   * One thing selected at a time, whichever kind of thing it is.
+   *
+   * The machine's selection lives in the hook and a text box's lives beside it, so the two have
+   * to be told about each other. Selecting a box clears the machine directly, on the click.
+   * The other way round is an effect, because a tap on a state is handled inside the hook and
+   * this is the only place that hears about it. Only that one direction, deliberately: two
+   * effects pointing at each other would each undo the other within one commit.
+   */
+  const clearSelectedStateRef = useRef(clearSelectedState);
+  clearSelectedStateRef.current = clearSelectedState;
+  const selectTextBox = useCallback(
+    (id: string | null) => {
+      if (id) clearSelectedStateRef.current();
+      selectTextBoxRaw(id);
+    },
+    [selectTextBoxRaw],
+  );
+  const machineSelectionKey = selectedState
+    ? `state:${selectedState.id}`
+    : selectedTransition
+      ? `transition:${selectedTransition.from}:${selectedTransition.to}`
+      : null;
+  useEffect(() => {
+    if (machineSelectionKey) selectTextBoxRaw(null);
+  }, [machineSelectionKey, selectTextBoxRaw]);
+
+  const textApi = { ...textBoxes, select: selectTextBox };
+
   backgroundClickRef.current = (at) => {
     if (activeTool === 'state') {
       addState(at);
       return true;
     }
+    if (activeTool === 'text') {
+      textBoxes.addAt(at);
+      return true;
+    }
+    // Select: the click clears whatever was open, text included.
+    selectTextBoxRaw(null);
     return false;
   };
 
@@ -1564,6 +1613,15 @@ export function JffCytoscapeViewer({
               <LoadingSpinner label={PHASE_LABEL[phase]} fullScreen={false} className="min-h-0" />
             </div>
           ) : null}
+          {/* The reader's own notes, over the drawing and outside the machine entirely: nothing
+              here reaches the parse, the counts, the history or an export. In a split window
+              both panes draw their own, since each is annotating a different file. */}
+          <CanvasTextLayer
+            api={textApi}
+            overlayRef={textOverlayRef}
+            viewportNow={viewportNow}
+            zoom={zoom}
+          />
         </div>
 
         {/* The canvas's own tools, opposite the inspector and treated the same way: floating over

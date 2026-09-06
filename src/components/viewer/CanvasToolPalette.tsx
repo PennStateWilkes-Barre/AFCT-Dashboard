@@ -1,18 +1,18 @@
 'use client';
 
-import { Circle, MousePointer, type LucideIcon } from 'lucide-react';
+import { Circle, MousePointer, Type, type LucideIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 /**
  * What clicking the canvas means.
  *
- * A union rather than a boolean, because this is the first two of a longer list: a transition
- * tool, a comment tool and a text tool all belong here eventually, and each of them is another
- * answer to the same question. Everything that reads the mode switches on this one value, so
- * adding the next tool is a case in TOOLS below plus a case wherever the canvas acts on it.
+ * A union rather than a boolean, because this is three of a longer list: a transition tool and
+ * a comment tool belong here eventually too, and each of them is another answer to the same
+ * question. Everything that reads the mode switches on this one value, so adding the next tool
+ * is a case in TOOLS below plus a case wherever the canvas acts on it.
  */
-export type CanvasTool = 'select' | 'state';
+export type CanvasTool = 'select' | 'state' | 'text';
 
 /** The default, and what Escape returns to: the viewer as it has always behaved. */
 export const DEFAULT_CANVAS_TOOL: CanvasTool = 'select';
@@ -31,6 +31,9 @@ const TOOLS: ReadonlyArray<{
     description: 'Select and move elements',
   },
   { tool: 'state', label: 'State', icon: Circle, description: 'Add a state' },
+  // Text is not part of the machine: it writes a note over the drawing and changes nothing
+  // about the automaton. See useViewerTextBoxes.
+  { tool: 'text', label: 'Text', icon: Type, description: 'Add a text box' },
 ];
 
 /**

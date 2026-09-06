@@ -1804,3 +1804,197 @@ describe('telling a reader they have not changed the file', () => {
     expect(screen.getByRole('button', { name: /file changed/i })).toBeInTheDocument();
   });
 });
+
+/**
+ * Writing on the canvas.
+ *
+ * A text box is an annotation over the drawing, not part of the automaton: it is stored beside
+ * the machine, it survives a refresh where the arrangement only survives a session, and nothing
+ * about it reaches the parse. The last test in here is the one that matters most, because it is
+ * the property everything else in the viewer depends on.
+ */
+describe('the Text tool', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+  const STORAGE_KEY = `afct-viewer-text-boxes:${SRC}`;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  const tapBackground = (at = { x: 300, y: 200 }) => {
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown; position?: { x: number; y: number } }) => void) | undefined;
+    act(() => tap?.({ target: h.cy, position: at }));
+  };
+
+  const chooseText = () => fireEvent.click(screen.getByRole('button', { name: 'Text' }));
+  const stored = () => JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
+
+  it('sits under State in the palette', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
+    expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State', 'Text']);
+  });
+
+  it('puts a box where the canvas was clicked, with the caret already in it', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+
+    tapBackground({ x: 300, y: 200 });
+
+    const box = await screen.findByRole('textbox', { name: 'Text box' });
+    // Focused after the frame, not by autoFocus: the click that created it landed on the
+    // canvas, which takes focus back on release.
+    await waitFor(() => expect(document.activeElement).toBe(box));
+  });
+
+  it('keeps what was typed, under a key of this file’s own', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground({ x: 300, y: 200 });
+
+    await user.type(
+      await screen.findByRole('textbox', { name: 'Text box' }),
+      'this loop never ends',
+    );
+
+    await waitFor(() => expect(stored()).toHaveLength(1));
+    expect(stored()[0]).toMatchObject({ x: 300, y: 200, text: 'this loop never ends' });
+    // The point cytoscape reported, in the graph's own coordinates. Nothing is scaled: these
+    // never go into a .jff.
+    expect(window.localStorage.getItem('afct-viewer-text-boxes:/api/files/other.jff')).toBeNull();
+  });
+
+  it('draws them again the next time the file is opened', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([{ id: 'text-1', x: 10, y: 20, width: 200, height: 80, text: 'from before' }]),
+    );
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    expect(await screen.findByText('from before')).toBeInTheDocument();
+  });
+
+  it('drops a box nobody typed into, so a stray click leaves nothing behind', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground();
+    const box = await screen.findByRole('textbox', { name: 'Text box' });
+
+    fireEvent.blur(box);
+
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Text box' })).toBeNull());
+    expect(stored()).toEqual([]);
+  });
+
+  it('stays up, so a reader can label three things without going back to the palette', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+
+    tapBackground({ x: 0, y: 0 });
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'one');
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+    tapBackground({ x: 400, y: 0 });
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'two');
+
+    await waitFor(() => expect(stored()).toHaveLength(2));
+    expect(screen.getByRole('button', { name: 'Text' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('is deleted by the Delete key when it is selected, and not while it is being typed in', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground();
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'keep me');
+
+    // Typing: the key belongs to the caret, and the box stays.
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Text box' }), { key: 'Delete' });
+    expect(stored()).toHaveLength(1);
+
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+    await screen.findByRole('button', { name: /^Resize size$/ });
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    await waitFor(() => expect(stored()).toEqual([]));
+    expect(screen.queryByText('keep me')).toBeNull();
+  });
+
+  it('can be reached and opened from the keyboard', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([{ id: 'text-1', x: 10, y: 20, width: 200, height: 80, text: 'from before' }]),
+    );
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    const box = await screen.findByRole('button', { name: 'from before' });
+    box.focus();
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    expect(await screen.findByRole('textbox', { name: 'Text box' })).toHaveValue('from before');
+  });
+
+  it('moves with the pointer, in the machine’s coordinates', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground({ x: 100, y: 100 });
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'note');
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+
+    const box = await screen.findByText('note');
+    fireEvent.pointerDown(box, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(box, { clientX: 40, clientY: -25 });
+    fireEvent.pointerUp(box, { clientX: 40, clientY: -25 });
+
+    // Zoom is 1 in this mock, so a pixel is a unit.
+    await waitFor(() => expect(stored()[0]).toMatchObject({ x: 140, y: 75 }));
+  });
+
+  it('resizes from a handle, and never below the minimum', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground();
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'note');
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+
+    const handle = await screen.findByRole('button', { name: /^Resize size$/ });
+    fireEvent.pointerDown(handle, { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(handle, { clientX: -400, clientY: 60 });
+    fireEvent.pointerUp(handle, { clientX: -400, clientY: 60 });
+
+    await waitFor(() => expect(stored()[0]).toMatchObject({ width: 80, height: 140 }));
+  });
+
+  /**
+   * The one that matters. A note over a drawing must not become part of the drawing: no state,
+   * no transition, and nothing that says the reader has changed the submitted file.
+   */
+  it('changes nothing about the machine', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    const drawnBefore = h.cy.add.mock.calls.length;
+    chooseText();
+    tapBackground();
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'not a state');
+
+    expect(h.cy.add.mock.calls.length).toBe(drawnBefore);
+    expect(screen.queryByRole('button', { name: /file changed/i })).toBeNull();
+    expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+  });
+});

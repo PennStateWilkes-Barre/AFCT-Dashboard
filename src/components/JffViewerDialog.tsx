@@ -662,6 +662,7 @@ export function JffCytoscapeViewer({
   honorPositionsDefault = false,
   initialZoom = 'fit',
   viewStateKey = null,
+  showInspector = true,
   windowTarget,
   onOpenedInWindow,
   onViewportChange,
@@ -687,6 +688,14 @@ export function JffCytoscapeViewer({
   initialZoom?: 'fit' | 'actual';
   /** Remember the zoom, pan and arrangement under this key. See useJffCytoscape. */
   viewStateKey?: string | null;
+  /**
+   * Whether this viewer may show its properties panel.
+   *
+   * For the split window, where two machines are on screen and two inspectors would take a
+   * third of it between them. The selection itself is untouched: the pane keeps whatever was
+   * clicked in it and shows the panel again the moment the reader goes back to that side.
+   */
+  showInspector?: boolean;
   /** Where the pop-out sends this file, or absent when a link cannot be built for it. */
   windowTarget?: ViewerWindowTarget | null;
   /** Called once the file is on its way to the standalone window. */
@@ -772,7 +781,7 @@ export function JffCytoscapeViewer({
     : selectedTransition
       ? ({ kind: 'transition', edge: selectedTransition } as const)
       : null;
-  const panelOpen = panelSubject !== null;
+  const panelOpen = panelSubject !== null && showInspector;
   const lastPanelSubject = useRef(panelSubject);
   if (panelSubject) lastPanelSubject.current = panelSubject;
   const [panelMounted, setPanelMounted] = useState(panelOpen);

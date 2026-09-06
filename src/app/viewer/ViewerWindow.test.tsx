@@ -15,10 +15,12 @@ const mounts = new Map<string, number>();
 vi.mock('./ViewerClient', () => ({
   ViewerClient: ({
     src,
+    showInspector,
     onViewportChange,
     linkedViewport,
   }: {
     src: string;
+    showInspector?: boolean;
     onViewportChange?: ((v: { zoom: number; pan: { x: number; y: number } }) => void) | null;
     linkedViewport?: { zoom: number; pan: { x: number; y: number } } | null;
   }) => {
@@ -31,6 +33,8 @@ vi.mock('./ViewerClient', () => ({
         data-src={src}
         // Which end of a link this machine is on, and what it has been told to follow.
         data-role={onViewportChange ? 'driving' : linkedViewport ? 'following' : 'alone'}
+        // Whether this pane is allowed to show its properties panel.
+        data-inspector={showInspector ? 'shown' : 'hidden'}
         data-following={linkedViewport ? JSON.stringify(linkedViewport) : ''}
       >
         <button
@@ -687,6 +691,31 @@ describe('a window split into two panes', () => {
 
     fireEvent.pointerDown(screen.getAllByTestId('viewer')[0]!, { clientX: 100 });
     expect(screen.getByTestId('menubar').getAttribute('data-download')).toContain('a.jff');
+
+    rect.mockRestore();
+  });
+
+  /**
+   * One inspector in a split window, on the side being worked in. Two of them took a third of
+   * the window between them, and one of the two was always about a machine the reader had
+   * finished with.
+   */
+  it('offers the properties panel to the focused pane alone', () => {
+    const rect = vi
+      .spyOn(HTMLDivElement.prototype, 'getBoundingClientRect')
+      .mockReturnValue({ left: 0, width: 800, top: 0, height: 600 } as DOMRect);
+
+    renderLayout(splitLayout());
+    const inspectors = () =>
+      screen.getAllByTestId('viewer').map((v) => v.getAttribute('data-inspector'));
+
+    // Opened focused on the right pane.
+    expect(inspectors()).toEqual(['hidden', 'shown']);
+
+    // A click into the left half is what makes it the active side, canvas included.
+    fireEvent.pointerDown(screen.getAllByTestId('viewer')[0]!, { clientX: 100 });
+
+    expect(inspectors()).toEqual(['shown', 'hidden']);
 
     rect.mockRestore();
   });

@@ -656,6 +656,11 @@ export function ViewerWindow({
                       title={tab.title}
                       epsSymbol={tab.eps}
                       viewStateKey={tabKey(tab)}
+                      // One inspector, on the side being worked in. Two of them took a third of
+                      // a split window between them for a panel the reader had finished with on
+                      // one of the sides. The other pane keeps its selection: clicking back into
+                      // it makes it the focused one, and its panel comes back as it was.
+                      showInspector={visible && pane === layout.focused}
                       // Exactly one of these two, and only on a machine that is on screen: the
                       // pane being worked in reports where it is looking, and the other one
                       // follows. A hidden tab does neither, or it would come back showing a

@@ -22,6 +22,7 @@ export function ViewerClient({
   title,
   epsSymbol,
   viewStateKey,
+  showInspector = true,
   onViewportChange,
   linkedViewport,
 }: {
@@ -34,6 +35,8 @@ export function ViewerClient({
    * where the reader was. Only the drawn machines have anything to remember.
    */
   viewStateKey?: string | null;
+  /** Whether this pane may show its properties panel. See JffCytoscapeViewer. */
+  showInspector?: boolean;
   /** Report where this machine is being looked at, for a linked pane. */
   onViewportChange?: ((viewport: ViewerViewport) => void) | null;
   /** Follow another pane's camera. */
@@ -52,6 +55,7 @@ export function ViewerClient({
         // it, matching JFLAP. Fit is a click away for anything that does not fit.
         initialZoom="actual"
         viewStateKey={viewStateKey}
+        showInspector={showInspector}
         onViewportChange={onViewportChange}
         linkedViewport={linkedViewport}
       />

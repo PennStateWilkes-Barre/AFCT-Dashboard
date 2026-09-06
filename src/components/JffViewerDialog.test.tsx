@@ -796,6 +796,27 @@ describe('clicking a state', () => {
     expect(frame).toHaveAttribute('data-state', 'open');
   });
 
+  /**
+   * The split window shows one inspector, on the side being worked in. What it must NOT do is
+   * throw the other side's selection away: going back to that pane has to bring its panel back
+   * as it was, not leave the reader to find their state again.
+   */
+  it('keeps the selection but hides the panel when the pane is not the active one', async () => {
+    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" showInspector={false} />);
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" showInspector />);
+
+    expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('Name')).toHaveValue('q0');
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.

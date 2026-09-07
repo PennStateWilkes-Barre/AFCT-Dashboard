@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -75,15 +75,21 @@ class FakeEl {
   isNode() {
     return this.data_.source === undefined;
   }
-  /** The element plus whatever touches it, which is what tap highlights. */
-  closedNeighborhood() {
-    const touching = this.isNode()
-      ? this.connectedEdges()
-      : [this.source(), this.target()].filter(Boolean);
-    return collection([this as FakeEl, ...(touching as FakeEl[])]);
-  }
   empty() {
     return false;
+  }
+  /**
+   * Take this element off the graph.
+   *
+   * Modelled because the code removes the initial-state marker this way when the reader takes
+   * the marker off every state, and without it that removal silently did nothing here: the
+   * marker stayed on the fake graph and any test of it would have passed for the wrong reason.
+   */
+  remove() {
+    const list = this.isNode() ? this.cy.nodeList : this.cy.edgeList;
+    const at = list.indexOf(this as FakeEl);
+    if (at >= 0) list.splice(at, 1);
+    return this;
   }
   source() {
     return this.cy.byId(String(this.data_.source)) as FakeEl;
@@ -194,10 +200,15 @@ class FakeCy {
   getElementById(id: string) {
     return this.byId(id) ?? MISSING;
   }
-  add(spec: { data: Record<string, unknown>; position: Pos; classes?: string }) {
-    const made = new FakeEl(spec.data, spec.position, spec.classes ?? '');
+  add(spec: { data: Record<string, unknown>; position?: Pos; classes?: string }) {
+    const made = new FakeEl(spec.data, spec.position ?? { x: 0, y: 0 }, spec.classes ?? '');
     made.cy = this;
-    this.nodeList.push(made);
+    // Sorted the way the constructor sorts the elements a load hands over, and for the same
+    // reason. It used to put everything in `nodeList`, which was fine while the only thing
+    // added after a load was the initial-state marker; a line added back by undo went into the
+    // node list, and every test of one passed for the wrong reason.
+    if (spec.data.source !== undefined) this.edgeList.push(made);
+    else this.nodeList.push(made);
     return made;
   }
   layout(opts: { name: string }) {
@@ -294,7 +305,24 @@ class FakeCy {
     return this.panPosition;
   }
   panningEnabled() {}
-  userPanningEnabled() {}
+  /**
+   * Whether a person may drag the canvas, and whether they may drag a state.
+   *
+   * Modelled rather than ignored because they are the whole of how a drag means one thing or
+   * the other: with the Transition tool up the states are held still and the canvas does not
+   * slide away under the gesture. A fake that swallowed both calls would let a test of "the
+   * state did not move" pass because this fake never moves states anyway.
+   */
+  panningByUser = true;
+  userPanningEnabled(next?: boolean) {
+    if (typeof next === 'boolean') this.panningByUser = next;
+    return this.panningByUser;
+  }
+  ungrabbed = false;
+  autoungrabify(next?: boolean) {
+    if (typeof next === 'boolean') this.ungrabbed = next;
+    return this.ungrabbed;
+  }
   userZoomingEnabled() {}
   svg() {
     return '<svg/>';
@@ -318,7 +346,8 @@ vi.mock('cytoscape-elk', () => ({ default: () => {} }));
 vi.mock('cytoscape-svg', () => ({ default: () => {} }));
 
 import { useJffCytoscape, DEFAULT_EPS } from './useJffCytoscape';
-import { describeState } from '@/lib/jflap-parse';
+import { describeState, parseJflap } from '@/lib/jflap-parse';
+import { toJflapXml } from '@/lib/jflap-write';
 import { STATE_FONT_SIZE } from '@/lib/jflap-layout';
 import type { ViewerViewState } from '@/lib/viewer-view-state';
 
@@ -670,7 +699,7 @@ describe('the export actions', () => {
 });
 
 describe('interacting with the graph', () => {
-  it('dims everything except the tapped state and what it touches', async () => {
+  it('dims everything except the one thing that was tapped', async () => {
     renderViewer();
     await waitFor(() => expect(lastCy().handlers.tap).toBeDefined());
     const cy = lastCy();
@@ -680,7 +709,25 @@ describe('interacting with the graph', () => {
 
     expect(q0.hasClass('highlighted')).toBe(true);
     expect(q0.hasClass('faded')).toBe(false);
-    // The state it has no transition with stays dimmed.
+    // Everything else stays dimmed, including the transitions running out of the state that
+    // was clicked. They used to come up with it, which lit four things for one click.
+    expect((cy.byId('1') as FakeEl).hasClass('faded')).toBe(true);
+    const outgoing = cy.edgeList.filter((e) => e.data('source') === '0');
+    expect(outgoing.length).toBeGreaterThan(0);
+    expect(outgoing.every((e) => e.hasClass('faded'))).toBe(true);
+  });
+
+  it('lights the transition alone when a line is tapped', async () => {
+    renderViewer();
+    await waitFor(() => expect(lastCy().handlers.tap).toBeDefined());
+    const cy = lastCy();
+    const edge = cy.edgeList.find((e) => e.data('source') === '0' && e.data('target') === '1')!;
+
+    cy.handlers.tap({ target: edge });
+
+    expect(edge.hasClass('highlighted')).toBe(true);
+    // Not the states at either end of it.
+    expect((cy.byId('0') as FakeEl).hasClass('faded')).toBe(true);
     expect((cy.byId('1') as FakeEl).hasClass('faded')).toBe(true);
   });
 
@@ -1065,7 +1112,7 @@ describe('moving a state by typing its coordinates', () => {
     act(() => cy.handlers.tap({ target: cy.byId('0') }));
 
     // Focus first, which is where the snapshot is taken, exactly as picking a state up is.
-    act(() => api().beginStateMove());
+    act(() => api().beginEdit());
     act(() => api().moveState('0', { x: 250, y: 250 }));
 
     expect(cy.byId('0')?.position()).toEqual({ x: 250, y: 250 });
@@ -1079,7 +1126,7 @@ describe('moving a state by typing its coordinates', () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));
 
-    act(() => api().beginStateMove());
+    act(() => api().beginEdit());
 
     expect(api().canUndo).toBe(false);
   });
@@ -1160,9 +1207,9 @@ describe('renaming a state', () => {
     act(() => api().renameState('0', 'start'));
 
     await waitFor(() =>
-      expect(
-        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).renames,
-      ).toEqual({ '0': 'start' }),
+      expect(JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).renames).toEqual(
+        { '0': 'start' },
+      ),
     );
   });
 
@@ -1190,12 +1237,20 @@ describe('choosing which state is initial', () => {
   it('moves the marker rather than giving the machine two initial states', async () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));
-    expect(api().parsed?.states.filter((st) => st.initial).map((st) => st.id)).toEqual(['0']);
+    expect(
+      api()
+        .parsed?.states.filter((st) => st.initial)
+        .map((st) => st.id),
+    ).toEqual(['0']);
 
     act(() => api().setInitialState('1'));
 
     await waitFor(() =>
-      expect(api().parsed?.states.filter((st) => st.initial).map((st) => st.id)).toEqual(['1']),
+      expect(
+        api()
+          .parsed?.states.filter((st) => st.initial)
+          .map((st) => st.id),
+      ).toEqual(['1']),
     );
     expect(lastCy().byId('1')?.data('initial')).toBe(1);
     expect(lastCy().byId('0')?.data('initial')).toBe(0);
@@ -1257,7 +1312,11 @@ describe('choosing which states are final', () => {
     act(() => api().setFinalState('0', true));
 
     await waitFor(() =>
-      expect(api().parsed?.states.filter((st) => st.final).map((st) => st.id)).toEqual(['0', '1']),
+      expect(
+        api()
+          .parsed?.states.filter((st) => st.final)
+          .map((st) => st.id),
+      ).toEqual(['0', '1']),
     );
     expect(lastCy().byId('0')?.hasClass('final')).toBe(true);
     expect(api().viewModified).toBe(true);
@@ -1528,7 +1587,9 @@ describe('keeping the canvas in step with its container', () => {
     cy.pan({ x: -200, y: -80 });
     act(() => cy.handlers['viewport position']?.({}));
     await waitFor(() =>
-      expect(JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre).toBeDefined(),
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre,
+      ).toBeDefined(),
     );
     const before = JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).centre;
 
@@ -1900,5 +1961,1103 @@ describe('saying that the drawing has been rearranged', () => {
 
     act(() => api().resetMachine());
     await waitFor(() => expect(api().viewModified).toBe(false));
+  });
+});
+
+/**
+ * Undo and redo across the machine itself, not just where the states sit.
+ *
+ * The history used to be the arrangement's alone, so a reader who renamed a state or ticked
+ * the wrong box had no way back short of Reset, which throws away everything else with it.
+ * These check the harder half of that: putting a name back means writing the FILE's name, and
+ * by then the drawing no longer remembers it.
+ */
+describe('undoing a change to the machine', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('puts back the name the file gave a state, not just the reader’s last one', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    await waitFor(() => expect(lastCy().byId('0')?.data('label')).toBe('start'));
+    expect(api().canUndo).toBe(true);
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().parsed?.states.find((st) => st.id === '0')?.name).toBe('q0');
+    expect(api().canRedo).toBe(true);
+
+    act(() => api().redo());
+    expect(lastCy().byId('0')?.data('label')).toBe('start');
+  });
+
+  it('is one step for a whole name, not one per keystroke', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // What typing "start" into the box actually sends.
+    act(() => api().beginEdit());
+    for (const value of ['s', 'st', 'sta', 'star', 'start']) {
+      act(() => api().renameState('0', value));
+    }
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('takes back making a state final, and the double circle with it', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setFinalState('0', true));
+    await waitFor(() => expect(lastCy().byId('0')?.hasClass('final')).toBe(true));
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.hasClass('final')).toBe(false);
+    expect(api().parsed?.states.find((st) => st.id === '0')?.final).toBe(false);
+  });
+
+  it('takes back moving the initial marker', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setInitialState('1'));
+    await waitFor(() => expect(lastCy().byId('1')?.data('initial')).toBe(1));
+
+    act(() => api().undo());
+
+    expect(lastCy().byId('0')?.data('initial')).toBe(1);
+    expect(lastCy().byId('1')?.data('initial')).toBe(0);
+  });
+
+  /**
+   * The marker is one node per initial state, so taking it away removes it entirely. Undoing
+   * back has to make a new one rather than move one that is no longer there.
+   */
+  it('brings the initial marker back after it was taken away', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const markers = () => lastCy().nodeList.filter((n) => n.hasClass('start'));
+    expect(markers()).toHaveLength(1);
+
+    act(() => api().setInitialState(null));
+    await waitFor(() => expect(markers()).toHaveLength(0));
+
+    act(() => api().undo());
+
+    expect(markers()).toHaveLength(1);
+    expect(lastCy().byId('0')?.data('initial')).toBe(1);
+  });
+
+  it('takes back what a transition reads, and redraws the line', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const edge = () =>
+      lastCy().edgeList.find((e) => e.data('source') === '0' && e.data('target') === '1');
+    const before = edge()?.data('label');
+
+    act(() => api().beginEdit());
+    act(() => api().setTransitionField(0, 'read', 'x'));
+    await waitFor(() => expect(edge()?.data('label')).not.toBe(before));
+
+    act(() => api().undo());
+
+    expect(edge()?.data('label')).toBe(before);
+    expect(api().parsed?.transitions[0]?.read).not.toBe('x');
+  });
+
+  it('unwinds a drag and a rename in the order they were made', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const cy = lastCy();
+    const home = { ...cy.byId('0')!.position() };
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    act(() => api().beginEdit());
+    act(() => api().moveState('0', { x: 250, y: 250 }));
+    await waitFor(() => expect(cy.byId('0')?.position()).toEqual({ x: 250, y: 250 }));
+
+    // The move first, because it was last.
+    act(() => api().undo());
+    expect(cy.byId('0')?.position()).toEqual(home);
+    expect(cy.byId('0')?.data('label')).toBe('start');
+
+    act(() => api().undo());
+    expect(cy.byId('0')?.data('label')).toBe('q0');
+  });
+
+  it('makes the redo branch unreachable once something else is changed', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().setFinalState('0', true));
+    act(() => api().undo());
+    expect(api().canRedo).toBe(true);
+
+    act(() => api().setInitialState('1'));
+
+    expect(api().canRedo).toBe(false);
+  });
+
+  /**
+   * The remembered view is what a refresh reads back, so an undo that did not reach it would
+   * be given back the moment the reader reloaded the page.
+   */
+  it('is written down, so a refresh does not hand the change back', async () => {
+    const KEY = 'submissions:machine.jff';
+    const stored = () =>
+      JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`) ?? '{}');
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().beginEdit());
+    act(() => api().renameState('0', 'start'));
+    await waitFor(() => expect(stored().renames).toEqual({ '0': 'start' }));
+
+    act(() => api().undo());
+
+    await waitFor(() => expect(stored().renames).toEqual({}));
+  });
+
+  it('says the drawing matches the file again once the change is undone', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    expect(api().viewModified).toBe(false);
+
+    act(() => api().setFinalState('0', true));
+    await waitFor(() => expect(api().viewModified).toBe(true));
+
+    act(() => api().undo());
+
+    await waitFor(() => expect(api().viewModified).toBe(false));
+  });
+});
+
+/**
+ * Undo and redo across a refresh.
+ *
+ * The remembered view already brought a machine back exactly as the reader had left it, and
+ * then refused to undo any of it: Undo was greyed out over work that was plainly still there.
+ * The history travels with the rest of the view now.
+ */
+describe('carrying the undo history through a refresh', () => {
+  const KEY = 'submissions:machine.jff';
+
+  const stored = () => JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`) ?? '{}');
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('writes the steps down beside the arrangement', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().setFinalState('0', true));
+
+    await waitFor(() => expect(stored().history?.undo).toHaveLength(1));
+    expect(stored().history.redo).toEqual([]);
+    // The step is the drawing as it stood BEFORE the change, which is what undo returns to.
+    expect(stored().history.undo[0].finals ?? {}).toEqual({});
+    expect(stored().history.undo[0].positions).toHaveProperty('0');
+  });
+
+  it('brings Undo back enabled, and stepping back still works', async () => {
+    window.sessionStorage.setItem(
+      `afct.viewer.view.${KEY}`,
+      JSON.stringify({
+        v: 1,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+        // The layout this viewer opens on: the restore is skipped when they disagree, because
+        // one layout's positions over the other's is what made Auto-arranged look inert.
+        honorPositions: false,
+        modified: true,
+        renames: { '0': 'start' },
+        history: {
+          undo: [
+            {
+              positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+              honorPositions: false,
+            },
+          ],
+          redo: [],
+        },
+      }),
+    );
+
+    const { api } = renderViewer({ viewStateKey: KEY });
+
+    // The renames are seeded at mount, but the history comes back with the restore at the very
+    // end of the load, so this has to wait for the load rather than for the label.
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    expect(lastCy().byId('0')?.data('label')).toBe('start');
+
+    act(() => api().undo());
+
+    // Back to the step's own answers, which named no renames at all.
+    expect(lastCy().byId('0')?.data('label')).toBe('q0');
+    expect(api().canRedo).toBe(true);
+  });
+
+  /**
+   * A history is keyed by state id the same way an arrangement is, so one machine's steps must
+   * never be applied to another's states.
+   */
+  it('ignores a history that names states this machine does not have', async () => {
+    window.sessionStorage.setItem(
+      `afct.viewer.view.${KEY}`,
+      JSON.stringify({
+        v: 1,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        positions: { '0': { x: 500, y: 500 }, '1': { x: 640, y: 500 } },
+        honorPositions: false,
+        history: {
+          undo: [{ positions: { '99': { x: 0, y: 0 } }, honorPositions: false }],
+          redo: [],
+        },
+      }),
+    );
+
+    const { api } = renderViewer({ viewStateKey: KEY });
+
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    // `ready` is set before the restore runs, so give the restore a chance to be wrong.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(api().canUndo).toBe(false);
+  });
+});
+
+/**
+ * Drawing a state.
+ *
+ * The viewer had no way to add anything to a machine before this: it could rename, re-mark and
+ * re-word what the file already had, and nothing else. A drawn state is the fifth thing held
+ * beside the parsed file rather than in it, so it survives a rebuild and a refresh the same way
+ * a rename does, and it is undoable through the same history.
+ */
+describe('drawing a state on the canvas', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  /** A click on empty canvas, at a point in the graph's own coordinates. */
+  const tapCanvas = (cy: FakeCy, at: { x: number; y: number }) =>
+    act(() => cy.handlers.tap({ target: cy, position: at }));
+
+  /**
+   * A viewer with the State tool up.
+   *
+   * The hook knows only what a click on empty canvas should do, so the tool is a callback that
+   * calls back into `addState`. That is a circle (the callback needs what the hook returns), and
+   * the viewer breaks it with a ref written during render; here the api handle is enough,
+   * because nothing taps the canvas until after the first render.
+   */
+  const withStateTool = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) => {
+    const handle: { api?: () => ReturnType<typeof useJffCytoscape> } = {};
+    const view = renderViewer({
+      ...props,
+      onBackgroundClick: (at) => {
+        handle.api?.().addState(at);
+        return true;
+      },
+    });
+    handle.api = view.api;
+    return view;
+  };
+
+  it('does nothing with the Select tool: empty canvas still just clears the panel', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const before = lastCy().nodeList.length;
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    expect(lastCy().nodeList).toHaveLength(before);
+    expect(api().selectedState).toBeNull();
+  });
+
+  it('draws one where the click landed, and opens its properties', async () => {
+    const { api } = withStateTool();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    // The point cytoscape reported, which already has the zoom and the pan in it.
+    await waitFor(() => expect(api().selectedState?.name).toBe('q2'));
+    const drawn = lastCy().nodeList.find((n) => n.data('label') === 'q2');
+    expect(drawn?.position()).toEqual({ x: 300, y: 400 });
+    expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(true);
+    // And the toolbar says the drawing is no longer the file.
+    expect(api().viewModified).toBe(true);
+  });
+
+  it('draws a second one without the tool being chosen again', async () => {
+    const { api } = withStateTool();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(api().selectedState?.name).toBe('q2'));
+    tapCanvas(lastCy(), { x: 500, y: 400 });
+
+    await waitFor(() => expect(api().selectedState?.name).toBe('q3'));
+    expect(api().parsed?.states).toHaveLength(4);
+  });
+
+  /** A tap on a state is a different branch entirely, so it can never leave one underneath. */
+  it('does not draw one under an existing state', async () => {
+    const { api } = withStateTool();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const cy = lastCy();
+
+    act(() => cy.handlers.tap({ target: cy.byId('0') }));
+
+    expect(cy.nodeList.filter((n) => !n.hasClass('start') && !n.hasClass('note'))).toHaveLength(2);
+    expect(api().selectedState?.name).toBe('q0');
+  });
+
+  it('is one undo step, and redo puts it back', async () => {
+    const { api } = withStateTool();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const drawn = () => lastCy().nodeList.find((n) => n.data('label') === 'q2');
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(drawn()).toBeDefined());
+
+    act(() => api().undo());
+
+    expect(drawn()).toBeUndefined();
+    expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(false);
+    // The panel cannot go on describing a state that is no longer on the machine.
+    expect(api().selectedState).toBeNull();
+
+    act(() => api().redo());
+
+    expect(drawn()).toBeDefined();
+  });
+
+  it('takes a name nobody is using, including one the reader typed', async () => {
+    const { api } = withStateTool();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // q2 is the next free name, so claim it by hand first.
+    act(() => api().renameState('1', 'q2'));
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    await waitFor(() => expect(api().selectedState?.name).toBe('q3'));
+  });
+
+  it('comes back after a refresh, like a rename does', async () => {
+    const { api } = withStateTool({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).addedStates,
+      ).toHaveLength(1),
+    );
+
+    // A second visit reads it back and draws it.
+    const second = withStateTool({ viewStateKey: KEY });
+    await waitFor(() =>
+      expect(second.api().parsed?.states.some((st) => st.name === 'q2')).toBe(true),
+    );
+  });
+
+  it('goes when the machine is put back the way it opened', async () => {
+    const { api } = withStateTool({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapCanvas(lastCy(), { x: 300, y: 400 });
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(true));
+
+    act(() => api().resetMachine());
+
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.name === 'q2')).toBe(false));
+    expect(api().viewModified).toBe(false);
+  });
+});
+
+/**
+ * Taking something off the drawing.
+ *
+ * Removals are subtraction from the derived machine rather than surgery on the parse, so they
+ * survive a rebuild and undo through the same history as everything else. What is worth
+ * checking beyond that is the part with a rule of its own: a transition cannot outlive either
+ * of the states it runs between.
+ */
+describe('deleting from the drawing', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  const nodeIds = () =>
+    lastCy()
+      .nodeList.filter((n) => !n.hasClass('start') && !n.hasClass('note'))
+      .map((n) => n.id());
+
+  it('takes a state and every transition that touched it', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    expect(api().parsed?.transitions.some((t) => t.from === '0' || t.to === '0')).toBe(true);
+
+    act(() => api().removeState('0'));
+
+    expect(nodeIds()).not.toContain('0');
+    expect(api().parsed?.states.some((st) => st.id === '0')).toBe(false);
+    // A transition into a state that is not there is not a machine, and would draw a line
+    // with nothing on the end of it.
+    expect(api().parsed?.transitions.some((t) => t.from === '0' || t.to === '0')).toBe(false);
+    expect(lastCy().edgeList.some((e) => e.data('source') === '0')).toBe(false);
+    expect(api().selectedState).toBeNull();
+    expect(api().viewModified).toBe(true);
+  });
+
+  it('puts the state, its lines and all back on undo', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const linesBefore = lastCy().edgeList.length;
+
+    act(() => api().removeState('0'));
+    act(() => api().undo());
+
+    expect(nodeIds()).toContain('0');
+    expect(api().parsed?.states.some((st) => st.id === '0')).toBe(true);
+    expect(lastCy().edgeList).toHaveLength(linesBefore);
+  });
+
+  it('takes the transitions a line carries, leaving the states alone', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const onTheLine = (api().parsed?.transitions ?? [])
+      .filter((t) => t.from === '0' && t.to === '1')
+      .map((t) => t.__idx);
+    expect(onTheLine.length).toBeGreaterThan(0);
+
+    act(() => api().removeTransitions(onTheLine));
+
+    expect(api().parsed?.transitions.some((t) => t.from === '0' && t.to === '1')).toBe(false);
+    expect(nodeIds()).toEqual(expect.arrayContaining(['0', '1']));
+    // The line goes with the last transition drawn on it.
+    expect(
+      lastCy().edgeList.some((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toBe(false);
+
+    act(() => api().undo());
+
+    expect(
+      lastCy().edgeList.some((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toBe(true);
+  });
+
+  it('is written down, so a refresh does not bring the state back', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().removeState('0'));
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).removed.states,
+      ).toEqual(['0']),
+    );
+
+    const second = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(second.api().phase).toBe('ready'));
+    expect(second.api().parsed?.states.some((st) => st.id === '0')).toBe(false);
+  });
+
+  it('comes back when the machine is put back the way it opened', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => api().removeState('0'));
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.id === '0')).toBe(false));
+
+    act(() => api().resetMachine());
+
+    await waitFor(() => expect(api().parsed?.states.some((st) => st.id === '0')).toBe(true));
+    expect(api().viewModified).toBe(false);
+  });
+});
+
+/**
+ * A machine nobody may change.
+ *
+ * The palette not offering a State button is not what makes a viewer read-only: anything else
+ * that reaches these (a menu item, a shortcut, a pane linked to another) would sail past it.
+ * The refusal lives here, with the machine, so there is one answer rather than one per caller.
+ */
+describe('a viewer that may not edit the machine', () => {
+  const readOnly = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) =>
+    renderViewer({ ...props, canEditMachine: false });
+
+  it('refuses a rename', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().renameState('0', 'renamed'));
+
+    expect(api().parsed?.states.some((s) => s.name === 'renamed')).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('refuses the initial and final marks', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const wasFinal = api().parsed?.states.find((s) => s.id === '1')?.final;
+
+    act(() => api().setFinalState('1', !wasFinal));
+    act(() => api().setInitialState('1'));
+
+    expect(api().parsed?.states.find((s) => s.id === '1')?.final).toBe(wasFinal);
+    expect(api().parsed?.states.find((s) => s.id === '1')?.initial).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('refuses to draw a state, even when something calls straight through', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.states.length;
+
+    act(() => api().addState({ x: 300, y: 400 }));
+
+    expect(api().parsed?.states.length).toBe(before);
+  });
+
+  it('refuses to delete a state or a line', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const states = api().parsed?.states.length;
+    const transitions = api().parsed?.transitions.length;
+
+    act(() => api().removeState('1'));
+    act(() => api().removeTransitions([0]));
+
+    expect(api().parsed?.states.length).toBe(states);
+    expect(api().parsed?.transitions.length).toBe(transitions);
+  });
+
+  it('refuses to re-word a transition', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions[0]?.read;
+
+    act(() => api().setTransitionField(0, 'read', 'zzz'));
+
+    expect(api().parsed?.transitions[0]?.read).toBe(before);
+  });
+
+  /**
+   * Arranging is not editing. Dragging a state and typing its coordinates move the drawing, not
+   * the machine, and pulling a crowded diagram apart is how a read-only one gets read.
+   */
+  it('still lets the drawing be arranged', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().moveState('1', { x: 640, y: 480 }));
+
+    expect(lastCy().byId('1')?.position()).toEqual({ x: 640, y: 480 });
+  });
+});
+
+/**
+ * Drawing a transition between two states.
+ *
+ * The seventh thing held beside the parsed file rather than in it. A drawn line has no place in
+ * the file's own numbering, so it takes an index above everything the file used and above every
+ * one already handed out: that number is its name in `transitionEdits`, in a deletion and in the
+ * `__idx` the derived machine gives it, and it is the same number after a rebuild, a refresh, an
+ * undo and a redo.
+ */
+describe('drawing a transition on the canvas', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  /**
+   * A viewer with the Transition tool up.
+   *
+   * The hook is told only what a drag between two states means; the viewer decides that it
+   * means a transition. Same circle as the State tool, broken the same way.
+   */
+  const withTransitionTool = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) => {
+    const handle: { api?: () => ReturnType<typeof useJffCytoscape> } = {};
+    const view = renderViewer({
+      honorPositionsDefault: true,
+      ...props,
+      onStateLink: (from, to) => handle.api?.().addTransition(from, to),
+    });
+    handle.api = view.api;
+    return view;
+  };
+
+  /** Where a state is on the graph. The canvas has no box in jsdom, so client is model. */
+  const at = (id: string) => lastCy().byId(id)!.position();
+  const canvas = () => screen.getByTestId('canvas');
+
+  /**
+   * A click on the canvas at a point in the graph's own coordinates. No button held.
+   *
+   * Both halves of what a browser does: the pointer event this gesture listens for, and then
+   * cytoscape's own tap on whatever was under it, which arrives on release. Modelled because
+   * the order is the whole question: the tap comes second, so without it a test cannot see the
+   * tap selecting the state a line had just been joined to and closing the panel about the
+   * line itself.
+   */
+  const clickAt = (to: { x: number; y: number }) => {
+    fireEvent.pointerDown(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
+    const cy = lastCy();
+    const under = cy.nodeList.find(
+      (n) =>
+        !n.hasClass('start') &&
+        !n.hasClass('note') &&
+        !n.hasClass('preview') &&
+        Math.hypot(n.position().x - to.x, n.position().y - to.y) <= 29,
+    );
+    cy.handlers.tap?.(under ? { target: under } : { target: cy, position: to });
+  };
+  const hoverAt = (to: { x: number; y: number }) =>
+    fireEvent.pointerMove(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
+  const nowhere = { x: 5000, y: 5000 };
+
+  /** The whole two-click gesture: one state, then another. */
+  const link = (fromId: string, to: { x: number; y: number }) => {
+    clickAt(at(fromId));
+    clickAt(to);
+  };
+  const classesOn = (id: string) => [...lastCy().byId(id)!.classes];
+
+  const transitionsOf = (api: () => ReturnType<typeof useJffCytoscape>) =>
+    api().parsed?.transitions.map((t) => `${t.from}->${t.to}`) ?? [];
+
+  it('makes one where the second click landed, and opens its properties', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    // Its label starts empty in every field this machine type has, which is what an empty
+    // element in a .jff parses to.
+    const drawn = api().parsed?.transitions.find((t) => t.from === '1' && t.to === '0');
+    expect(drawn?.read).toBe('');
+    // And the panel is on it, so it can be labelled at once. By name, which is how the panel
+    // describes a transition. The state the line was joined to must NOT be what ends up
+    // selected: cytoscape's own tap on that state arrives after this, and it used to take the
+    // new transition's place and put a state's properties in front of somebody who was about
+    // to type a symbol.
+    expect(api().selectedState).toBeNull();
+    expect(api().selectedTransition?.from).toBe('q1');
+    expect(api().selectedTransition?.to).toBe('q0');
+    expect(api().selectedTransition?.transitions.map((t) => t.index)).toEqual([drawn!.__idx]);
+    expect(api().viewModified).toBe(true);
+  });
+
+  /**
+   * Three things a state can be during this gesture, and none of them is "selected".
+   *
+   * Before a line is started the state under the pointer is where one could begin; after it is
+   * started the state under the pointer is where it could end, and the state it came from stays
+   * dressed as its source until the line is finished or given up.
+   */
+  it('says what a click on the state under the pointer would do', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => hoverAt(at('0')));
+    expect(classesOn('0')).toContain('link-candidate');
+    expect(classesOn('0')).not.toContain('highlighted');
+
+    // Off the state again, and the invitation goes with it.
+    act(() => hoverAt(nowhere));
+    expect(classesOn('0')).not.toContain('link-candidate');
+
+    act(() => clickAt(at('0')));
+    expect(classesOn('0')).toContain('link-source');
+    // Nothing was made and nothing was opened: the first click only says where to start.
+    expect(api().canUndo).toBe(false);
+    expect(api().selectedState).toBeNull();
+    expect(api().viewModified).toBe(false);
+
+    act(() => hoverAt(at('1')));
+    expect(classesOn('1')).toContain('link-target');
+    expect(classesOn('1')).not.toContain('link-candidate');
+    // And the source is still plainly the source.
+    expect(classesOn('0')).toContain('link-source');
+  });
+
+  it('draws a line from the source to the pointer, with no button held', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+
+    act(() => clickAt(at('0')));
+
+    const preview = lastCy().edgeList.find((e) => e.hasClass('preview'));
+    expect(preview?.data('source')).toBe('0');
+
+    act(() => hoverAt({ x: 640, y: 480 }));
+
+    expect(lastCy().byId('__afct-link-preview')?.position()).toEqual({ x: 640, y: 480 });
+    // And it is nobody's transition: the machine has not changed.
+    expect(api().parsed?.transitions.some((t) => t.from === '0' && t.to === undefined)).toBe(false);
+  });
+
+  it('does nothing when the canvas is clicked with no line started', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => clickAt(nowhere));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('gives the line up when the canvas is clicked, and stays in the tool', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => clickAt(at('0')));
+
+    act(() => clickAt(nowhere));
+
+    expect(classesOn('0')).not.toContain('link-source');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(api().canUndo).toBe(false);
+    // Still listening: the next two clicks draw a line.
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+  });
+
+  it('takes its own clothes off the states when the line is finished', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    expect(classesOn('1')).not.toContain('link-source');
+    expect(classesOn('0')).not.toContain('link-target');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+  });
+
+  /**
+   * A label that has not been placed is drawn along the middle of its own line, which is what a
+   * newly drawn transition looked like: an epsilon sitting on the arrow it belonged to.
+   */
+  it('lifts the new label clear of the line it belongs to', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    const line = lastCy().edgeList.find(
+      (e) => e.data('source') === '1' && e.data('target') === '0',
+    );
+    await waitFor(() => expect(line!.style()['text-margin-x']).toBeDefined());
+  });
+
+  it('makes a self-loop when the drag ends where it began', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    // Away and back again: the state a line starts from is a valid state to finish it on.
+    act(() => {
+      clickAt(at('0'));
+      hoverAt(nowhere);
+      clickAt(at('0'));
+    });
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
+  });
+
+  it('makes nothing when the drag ends on empty canvas', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => link('0', nowhere));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+    // Nothing to undo either: a given-up gesture never touched the machine.
+    expect(api().canUndo).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('gives the line up on the first Escape and keeps the tool', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+    act(() => clickAt(at('0')));
+    expect(classesOn('0')).toContain('link-source');
+
+    // The answer is what tells the viewer whether the key was spent here or on the tool.
+    let spent = false;
+    act(() => {
+      spent = api().cancelLinkDraft();
+    });
+
+    expect(spent).toBe(true);
+    expect(classesOn('0')).not.toContain('link-source');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(api().parsed?.transitions.length).toBe(before);
+    // And with nothing half-drawn, the key is not spent here, so it goes on to the tool.
+    expect(api().cancelLinkDraft()).toBe(false);
+  });
+
+  /**
+   * The important one: with this tool up, a drag draws a line rather than moving the state.
+   *
+   * Asserted on the graph's own two switches rather than on where the state ended up, because
+   * they are what actually decides it: states are held still for as long as the tool is up, and
+   * the canvas is pinned for the length of a gesture so it cannot slide away under the drag.
+   */
+  it('holds the states still while the tool is up', async () => {
+    const { api, rerender } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    expect(lastCy().ungrabbed).toBe(true);
+
+    const before = { ...at('0') };
+    act(() => link('0', at('1')));
+
+    expect(lastCy().byId('0')!.position()).toEqual(before);
+    // Grabbable again the moment the tool goes, so Select still drags states about.
+    act(() => rerender({ onStateLink: null }));
+    expect(lastCy().ungrabbed).toBe(false);
+  });
+
+  it('takes the half-drawn line off the canvas when the tool changes', async () => {
+    const { api, rerender } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => clickAt(at('0')));
+    act(() => hoverAt(nowhere));
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(true);
+
+    act(() => rerender({ onStateLink: null }));
+
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(lastCy().nodeList.some((n) => n.hasClass('preview'))).toBe(false);
+    expect(classesOn('0')).not.toContain('link-source');
+    // And clicking two states afterwards makes nothing, because nothing is listening.
+    const before = api().parsed?.transitions.length;
+    act(() => link('1', at('0')));
+    expect(api().parsed?.transitions.length).toBe(before);
+  });
+
+  it('is one undo step, and redo puts it back', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    act(() => api().undo());
+
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().redo());
+
+    expect(transitionsOf(api)).toContain('1->0');
+  });
+
+  it('shares a line with the transitions already between the same two states', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const linesBetween = () =>
+      lastCy().edgeList.filter(
+        (e) => e.data('source') === '0' && e.data('target') === '1' && !e.hasClass('preview'),
+      );
+    expect(linesBetween()).toHaveLength(1);
+
+    act(() => link('0', at('1')));
+
+    await waitFor(() => expect(transitionsOf(api).filter((t) => t === '0->1')).toHaveLength(2));
+    // One line, two labels on it: the same way the file's own parallel transitions are drawn.
+    expect(linesBetween()).toHaveLength(1);
+  });
+
+  it('is a transition like any other: named, deleted, and undeleted', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(api().selectedTransition?.from).toBe('q1'));
+    const idx = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
+
+    act(() => api().setTransitionField(idx, 'read', 'b'));
+    expect(api().parsed?.transitions.find((t) => t.__idx === idx)?.read).toBe('b');
+
+    act(() => api().removeTransitions([idx]));
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().undo());
+    expect(transitionsOf(api)).toContain('1->0');
+    // The label came back with it, rather than the line coming back blank.
+    expect(api().parsed?.transitions.find((t) => t.__idx === idx)?.read).toBe('b');
+  });
+
+  it('goes when a state it touches is deleted, and comes back with it', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    act(() => api().removeState('0'));
+
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().undo());
+
+    expect(transitionsOf(api)).toContain('1->0');
+  });
+
+  it('cannot be drawn twice under the same name, even after an undo', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    const first = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
+
+    act(() => api().undo());
+    act(() => {
+      clickAt(at('0'));
+      clickAt(at('0'));
+    });
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
+    const second = api().parsed!.transitions.find((t) => t.from === '0' && t.to === '0')!.__idx;
+    // A reused index would make an edit to one of them silently change the other.
+    expect(second).not.toBe(first);
+    expect(api().parsed!.transitions.map((t) => t.__idx)).toHaveLength(
+      new Set(api().parsed!.transitions.map((t) => t.__idx)).size,
+    );
+  });
+
+  it('comes back after a refresh, like a drawn state does', async () => {
+    const { api } = withTransitionTool({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).addedTransitions,
+      ).toHaveLength(1),
+    );
+
+    const second = withTransitionTool({ viewStateKey: KEY });
+    await waitFor(() => expect(transitionsOf(second.api)).toContain('1->0'));
+  });
+
+  it('is written into the machine that leaves the viewer', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    // What "Download this arrangement" writes out is this machine, so a drawn line reaches the
+    // file the same way a drawn state does.
+    const xml = toJflapXml(api().parsed!);
+    expect(parseJflap(xml).transitions.map((t) => `${t.from}->${t.to}`)).toContain('1->0');
+  });
+
+  it('is refused when the machine may not be edited', async () => {
+    const { api } = renderViewer({ canEditMachine: false, honorPositionsDefault: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => api().addTransition('0', '1'));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+  });
+
+  it('refuses an end that is not on the machine', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => api().addTransition('0', 'nowhere'));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+  });
+});
+
+/**
+ * Putting the selection down.
+ *
+ * Selecting lights one element and dims the rest, so dropping the selection has to undo both.
+ * It used to set the three pieces of React state and nothing else, which closed the panel and
+ * left the drawing insisting something was still selected: the state lit up, the machine behind
+ * it faded, and no way back except clicking the canvas.
+ */
+describe('clearing a selection', () => {
+  const tapNode = (id: string) => {
+    const cy = lastCy();
+    act(() => cy.handlers.tap({ target: cy.byId(id) }));
+  };
+  const lit = () =>
+    lastCy()
+      .nodeList.filter((n) => n.hasClass('highlighted'))
+      .map((n) => n.id());
+  const dimmed = () =>
+    [...lastCy().nodeList, ...lastCy().edgeList].filter((e) => e.hasClass('faded')).length;
+
+  it('takes the light off the state and the dimming off everything else', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapNode('0');
+    expect(lit()).toEqual(['0']);
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().clearSelectedState());
+
+    expect(lit()).toEqual([]);
+    expect(dimmed()).toBe(0);
+    expect(api().selectedState).toBeNull();
+  });
+
+  it('takes it off when the selected state is deleted, since nothing else would', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapNode('0');
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().removeState('0'));
+
+    expect(dimmed()).toBe(0);
+  });
+
+  it('takes it off when the selected line is deleted', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => {
+      const cy = lastCy();
+      cy.handlers.tap({ target: cy.edgeList[0] });
+    });
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().removeTransitions([0]));
+
+    expect(dimmed()).toBe(0);
   });
 });

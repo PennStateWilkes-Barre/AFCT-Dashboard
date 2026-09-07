@@ -1004,6 +1004,26 @@ describe('the exit to the dashboard', () => {
     expect(signInMock).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * A form that has been taken off the screen must not steer the browser a third of a second
+   * later. In the app the page is already leaving by then, so nobody sees it; anywhere the form
+   * is unmounted for another reason, a navigation nobody asked for is a surprise.
+   */
+  it('calls the navigation off if the form goes away first', async () => {
+    signInMock.mockResolvedValueOnce({ error: null });
+    const user = userEvent.setup();
+    const view = render(<LoginPage />);
+
+    await signIn(user);
+    await waitFor(() => expect(overlay()).toBeInTheDocument());
+
+    view.unmount();
+    // Past the exit animation, which is when the navigation would otherwise have run.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    expect(window.location.href).toBe('');
+  });
+
   it.each([
     ['bad credentials', 'ok' as const],
     ['a captcha challenge', 'challenge' as const],

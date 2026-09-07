@@ -4,6 +4,7 @@ import { JffCytoscapeViewer } from '@/components/JffViewerDialog';
 import { CfgViewerContent } from '@/components/dialogs/CfgViewerDialog';
 import { RegexViewerContent } from '@/components/dialogs/RegexViewerDialog';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import type { ViewerCapabilities } from '@/components/viewer/viewer-capabilities';
 
 /** Problem types drawn by the JFLAP (cytoscape) viewer; the rest have their own. */
 const JFF_PROBLEM_TYPES = ['FA', 'PDA', 'TM'];
@@ -22,6 +23,8 @@ export function ViewerClient({
   title,
   epsSymbol,
   viewStateKey,
+  focused = true,
+  capabilities,
   onViewportChange,
   linkedViewport,
 }: {
@@ -34,6 +37,10 @@ export function ViewerClient({
    * where the reader was. Only the drawn machines have anything to remember.
    */
   viewStateKey?: string | null;
+  /** Whether this is the pane being worked in, which is about room. See JffCytoscapeViewer. */
+  focused?: boolean;
+  /** What this pane may do, which is a separate question. See viewer-capabilities. */
+  capabilities?: Partial<ViewerCapabilities>;
   /** Report where this machine is being looked at, for a linked pane. */
   onViewportChange?: ((viewport: ViewerViewport) => void) | null;
   /** Follow another pane's camera. */
@@ -48,10 +55,18 @@ export function ViewerClient({
         epsSymbol={epsSymbol}
         showGridDefault
         honorPositionsDefault
-        // The window has the whole screen, so the machine opens at the size its author drew
-        // it, matching JFLAP. Fit is a click away for anything that does not fit.
-        initialZoom="actual"
+        // Fit, so a file opens showing the whole machine however the window is sized. It used
+        // to open at 1:1, matching JFLAP, which is the right scale for reading a machine and
+        // the wrong one for meeting it: a large automaton arrived with a corner of itself on
+        // screen and the rest to be found by panning.
+        //
+        // Only the FIRST time. This is the fallback for a file with nothing remembered about
+        // it; a file already opened in this window comes back at the zoom the reader left it
+        // at, because the remembered view wins over this.
+        initialZoom="fit"
         viewStateKey={viewStateKey}
+        focused={focused}
+        capabilities={capabilities}
         onViewportChange={onViewportChange}
         linkedViewport={linkedViewport}
       />

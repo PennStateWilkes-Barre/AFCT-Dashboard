@@ -30,8 +30,7 @@ export type ViewerViewport = { zoom: number; pan: { x: number; y: number } };
  * line on the canvas.
  */
 export type ViewerSelection =
-  | { kind: 'state'; id: string }
-  | { kind: 'transition'; from: string; to: string };
+  { kind: 'state'; id: string } | { kind: 'transition'; from: string; to: string };
 
 /** Where every state sits, plus the camera looking at it. */
 export type ViewerViewState = {
@@ -100,7 +99,95 @@ export type ViewerViewState = {
    * moves.
    */
   transitions?: Record<number, ViewerTransitionEdit>;
+  /**
+   * What Undo and Redo would step back through.
+   *
+   * The rest of this record is where the reader got to; this is how they got there. Without it
+   * a refresh brought the machine back exactly as they had left it and then refused to undo any
+   * of it, which is the one thing a reader who has just moved six states and reloaded the page
+   * is most likely to want.
+   *
+   * Trimmed to the most recent {@link VIEWER_HISTORY_LIMIT} steps a side. A step carries every
+   * state's position, and a long session on a large machine would otherwise be the biggest
+   * thing in storage by a wide margin, for steps nobody walks back to.
+   */
+  history?: ViewerHistory;
+  /**
+   * States the reader has added to the drawing, which the file does not have.
+   *
+   * Coordinates in JFLAP's units, the same as the file's own, so a downloaded arrangement puts
+   * them where they are on screen. Like every other field here this is a mark-up of the file
+   * rather than a change to it: the submitted `.jff` is untouched, and closing the window
+   * forgets these along with everything else.
+   */
+  addedStates?: ViewerAddedState[];
+  /**
+   * Transitions the reader has drawn between two states, which the file does not have.
+   *
+   * Optional like the rest, so an entry written before this existed still opens: the worst it
+   * costs is a viewer that comes back without the lines somebody drew before this shipped, and
+   * there were none.
+   */
+  addedTransitions?: ViewerAddedTransition[];
+  /**
+   * What the reader has taken off the drawing.
+   *
+   * States by id and transitions by their place in the file, which is how both are named
+   * everywhere else here. One field rather than two because they are one answer: a machine with
+   * a state removed has no transitions into it either, and the two are always written and read
+   * together.
+   */
+  removed?: ViewerRemoved;
 };
+
+/** A state the reader drew, in the file's own coordinate units. */
+export type ViewerAddedState = { id: string; name: string; xPos: number; yPos: number };
+
+/**
+ * A transition the reader drew, which the file does not have.
+ *
+ * `idx` is its identity everywhere: the key `transitionEdits` is written under, the number
+ * `removed.transitions` names, and the `__idx` it gets in the derived machine. Allocated once,
+ * above every index the file used and above every one already handed out, so it can never mean
+ * one of the file's own transitions and never comes back as a different one after an undo.
+ *
+ * The label fields are the same optional ones a parsed transition has, so a finite automaton
+ * carries `read`, a pushdown automaton adds `pop` and `push`, and a Turing machine has `write`
+ * and `move`. One shape for all three, and the machine type decides which the inspector offers.
+ */
+export type ViewerAddedTransition = {
+  idx: number;
+  from: string;
+  to: string;
+  read?: string;
+  write?: string;
+  move?: string;
+  pop?: string;
+  push?: string;
+};
+
+/** What the reader has taken off the drawing: state ids, and transition indices. */
+export type ViewerRemoved = { states: string[]; transitions: number[] };
+
+/** One step of the viewer's undo history: the whole drawing as it stood before a change. */
+export type ViewerHistoryStep = {
+  positions: Record<string, { x: number; y: number }>;
+  honorPositions: boolean;
+  renames?: Record<string, string>;
+  /** Three-valued like the field above: absent is untouched, null is "no initial state". */
+  initialState?: string | null;
+  finals?: Record<string, boolean>;
+  transitions?: Record<number, ViewerTransitionEdit>;
+  addedStates?: ViewerAddedState[];
+  /** Optional like the rest, so a step written before this existed still steps. */
+  addedTransitions?: ViewerAddedTransition[];
+  removed?: ViewerRemoved;
+};
+
+export type ViewerHistory = { undo: ViewerHistoryStep[]; redo: ViewerHistoryStep[] };
+
+/** How many steps a side survive a refresh. See `history` above for why there is a limit. */
+export const VIEWER_HISTORY_LIMIT = 25;
 
 /** The parts of a transition a reader can change. */
 export type ViewerTransitionEdit = {
@@ -174,8 +261,115 @@ function isViewState(value: unknown): value is ViewerViewState {
       return false;
     }
   }
+  if (s.history !== undefined && !isHistory(s.history)) return false;
+  if (s.addedStates !== undefined && !isAddedStates(s.addedStates)) return false;
+  if (s.addedTransitions !== undefined && !isAddedTransitions(s.addedTransitions)) return false;
+  if (s.removed !== undefined && !isRemoved(s.removed)) return false;
   if (!s.positions || typeof s.positions !== 'object') return false;
   return Object.values(s.positions as Record<string, unknown>).every(isPoint);
+}
+
+function isAddedStates(value: unknown): value is ViewerAddedState[] {
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const st = entry as Record<string, unknown>;
+      return (
+        typeof st.id === 'string' &&
+        st.id.length > 0 &&
+        typeof st.name === 'string' &&
+        typeof st.xPos === 'number' &&
+        Number.isFinite(st.xPos) &&
+        typeof st.yPos === 'number' &&
+        Number.isFinite(st.yPos)
+      );
+    })
+  );
+}
+
+function isAddedTransitions(value: unknown): value is ViewerAddedTransition[] {
+  const isLabel = (v: unknown) => v === undefined || typeof v === 'string';
+  return (
+    Array.isArray(value) &&
+    value.every((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const t = entry as Record<string, unknown>;
+      return (
+        typeof t.idx === 'number' &&
+        Number.isFinite(t.idx) &&
+        typeof t.from === 'string' &&
+        t.from.length > 0 &&
+        typeof t.to === 'string' &&
+        t.to.length > 0 &&
+        isLabel(t.read) &&
+        isLabel(t.write) &&
+        isLabel(t.move) &&
+        isLabel(t.pop) &&
+        isLabel(t.push)
+      );
+    })
+  );
+}
+
+function isRemoved(value: unknown): value is ViewerRemoved {
+  if (!value || typeof value !== 'object') return false;
+  const r = value as Record<string, unknown>;
+  return (
+    Array.isArray(r.states) &&
+    r.states.every((id) => typeof id === 'string') &&
+    Array.isArray(r.transitions) &&
+    r.transitions.every((index) => typeof index === 'number' && Number.isFinite(index))
+  );
+}
+
+function isHistoryStep(value: unknown): value is ViewerHistoryStep {
+  if (!value || typeof value !== 'object') return false;
+  const step = value as Record<string, unknown>;
+  if (typeof step.honorPositions !== 'boolean') return false;
+  if (!step.positions || typeof step.positions !== 'object') return false;
+  if (!Object.values(step.positions as Record<string, unknown>).every(isPoint)) return false;
+  if (
+    step.initialState !== undefined &&
+    step.initialState !== null &&
+    typeof step.initialState !== 'string'
+  ) {
+    return false;
+  }
+  // The three maps are checked only for shape. Their contents are the same values the fields
+  // above carry and are validated there; a step that named a state this machine does not have
+  // is caught by `viewStateFits` on the positions, which every step also has.
+  const isStringMap = (v: unknown) =>
+    v === undefined ||
+    (!!v &&
+      typeof v === 'object' &&
+      Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string'));
+  const isBoolMap = (v: unknown) =>
+    v === undefined ||
+    (!!v &&
+      typeof v === 'object' &&
+      Object.values(v as Record<string, unknown>).every((x) => typeof x === 'boolean'));
+  if (!isStringMap(step.renames)) return false;
+  if (!isBoolMap(step.finals)) return false;
+  if (step.transitions !== undefined && (!step.transitions || typeof step.transitions !== 'object'))
+    return false;
+  if (step.addedStates !== undefined && !isAddedStates(step.addedStates)) return false;
+  if (step.addedTransitions !== undefined && !isAddedTransitions(step.addedTransitions)) {
+    return false;
+  }
+  if (step.removed !== undefined && !isRemoved(step.removed)) return false;
+  return true;
+}
+
+function isHistory(value: unknown): value is ViewerHistory {
+  if (!value || typeof value !== 'object') return false;
+  const h = value as Record<string, unknown>;
+  return (
+    Array.isArray(h.undo) &&
+    Array.isArray(h.redo) &&
+    h.undo.every(isHistoryStep) &&
+    h.redo.every(isHistoryStep)
+  );
 }
 
 export function readViewState(key: string | null | undefined): ViewerViewState | null {
@@ -219,4 +413,23 @@ export function clearViewState(key: string | null | undefined): void {
 export function viewStateFits(state: ViewerViewState, nodeIds: readonly string[]): boolean {
   const ids = new Set(nodeIds);
   return Object.keys(state.positions).every((id) => ids.has(id));
+}
+
+/**
+ * Whether a remembered history belongs to the machine now on screen.
+ *
+ * The same question `viewStateFits` asks, of every step: a step names positions by state id,
+ * and stepping back to one belonging to a different machine would scatter it. Answered
+ * separately because the two can disagree. The view is written on every pan, and the history
+ * only when it changes, so an entry can carry a history older than the arrangement beside it.
+ */
+export function historyFits(history: ViewerHistory, nodeIds: readonly string[]): boolean {
+  const stepFits = (step: ViewerHistoryStep) => {
+    // A step's positions cover the graph as it stood, which includes any states the reader had
+    // drawn by then. Those are not on the machine now if the step that made them has been
+    // undone, so the step carries them and they count as known.
+    const ids = new Set([...nodeIds, ...(step.addedStates ?? []).map((st) => st.id)]);
+    return Object.keys(step.positions).every((id) => ids.has(id));
+  };
+  return history.undo.every(stepFits) && history.redo.every(stepFits);
 }

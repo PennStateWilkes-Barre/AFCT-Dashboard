@@ -3061,3 +3061,153 @@ describe('clearing a selection', () => {
     expect(dimmed()).toBe(0);
   });
 });
+
+/**
+ * Snap to grid, during the drag rather than after it.
+ *
+ * The setting says the states sit on a lattice, and what it used to do was let one follow the
+ * pointer exactly and then jump when it was let go. These are about the difference.
+ *
+ * The fixture here matters: cytoscape drags a node by shifting it from where it currently is by
+ * the distance the pointer moved since the last event, so `dragBy` shifts the node and then
+ * fires `drag`, which is the order and the arithmetic the real thing uses. A mock that set an
+ * absolute position instead would make the interesting bug untestable.
+ */
+describe('snapping a state to the grid as it is dragged', () => {
+  const GRID = 24;
+
+  const putAt = (id: string, at: { x: number; y: number }) => {
+    lastCy().byId(id)!.position(at);
+  };
+  const positionOf = (id = '0') => lastCy().byId(id)!.position();
+  const grab = (id = '0') => act(() => lastCy().handlers['grab']?.({ target: lastCy().byId(id) }));
+  const drop = (id = '0') =>
+    act(() => lastCy().handlers['dragfree']?.({ target: lastCy().byId(id) }));
+
+  /** One pointer move: cytoscape shifts the node, then says it dragged. */
+  const dragBy = (dx: number, dy: number, id = '0') => {
+    const cy = lastCy();
+    const node = cy.byId(id)!;
+    const at = node.position();
+    node.position({ x: at.x + dx, y: at.y + dy });
+    act(() => cy.handlers['drag']?.({ target: node }));
+    return node.position();
+  };
+
+  const withSnap = async () => {
+    const view = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(view.api().phase).toBe('ready'));
+    act(() => view.api().toggleSnapToGrid());
+    await waitFor(() => expect(view.api().snapToGrid).toBe(true));
+    return view;
+  };
+
+  it('leaves the state exactly under the pointer when the setting is off', async () => {
+    const { api } = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    putAt('0', { x: 96, y: 96 });
+    grab();
+
+    expect(dragBy(5, 3)).toEqual({ x: 101, y: 99 });
+    expect(dragBy(5, 3)).toEqual({ x: 106, y: 102 });
+  });
+
+  it('holds the state on its grid point until the pointer crosses the halfway line', async () => {
+    await withSnap();
+    putAt('0', { x: 96, y: 96 });
+    grab();
+
+    // Eleven units along: still nearer 96 than 120, so the state has not moved.
+    dragBy(11, 0);
+    expect(positionOf()).toEqual({ x: 96, y: 96 });
+
+    // Two more takes the pointer past 108, the midpoint, and the state steps a whole cell.
+    dragBy(2, 0);
+    expect(positionOf()).toEqual({ x: 120, y: 96 });
+  });
+
+  /**
+   * The one that the obvious implementation gets wrong. Cytoscape's shift is relative to where
+   * the node is, so snapping and writing back throws away the part of the movement that did not
+   * reach the next cell; a run of small frames each rounds to nothing and the state sits still
+   * under a pointer that has crossed two cells.
+   */
+  it('follows a slow drag, rather than sticking on frames too small to round', async () => {
+    await withSnap();
+    putAt('0', { x: 96, y: 96 });
+    grab();
+
+    // Fifteen units in three-unit steps: enough to pass the midpoint, none of them enough on
+    // its own to round anywhere.
+    for (let i = 0; i < 5; i += 1) dragBy(3, 0);
+
+    expect(positionOf()).toEqual({ x: 120, y: 96 });
+  });
+
+  it('writes nothing while the pointer stays in the cell it is already on', async () => {
+    await withSnap();
+    putAt('0', { x: 96, y: 96 });
+    grab();
+    dragBy(1, 1);
+    const node = lastCy().byId('0')!;
+    const before = { ...node.position() };
+
+    // A frame with no movement at all: the node is where it should be, so nothing is written.
+    act(() => lastCy().handlers['drag']?.({ target: node }));
+
+    expect(node.position()).toEqual(before);
+  });
+
+  it('still puts the final position on the lattice when it is let go', async () => {
+    // The invariant, kept whatever the drag did: a coalesced frame, the setting turned on
+    // halfway, or a state moved by something that is not a drag at all.
+    await withSnap();
+    putAt('0', { x: 37, y: 61 });
+
+    grab();
+    drop();
+
+    expect(positionOf()).toEqual({ x: 48, y: 72 });
+  });
+
+  it('is one undo step, however many grid points it stepped through', async () => {
+    const { api } = await withSnap();
+    putAt('0', { x: 96, y: 96 });
+    expect(api().canUndo).toBe(false);
+
+    grab();
+    for (let i = 0; i < 8; i += 1) dragBy(GRID, 0);
+    drop();
+
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    act(() => api().undo());
+    expect(api().canUndo).toBe(false);
+  });
+
+  it("measures the lattice in the graph's own units, whatever the zoom", async () => {
+    // The painted grid scales with the graph, so a cell is 24 model units at any magnification.
+    // Snapping in rendered pixels would put the states between the lines at anything but 100%.
+    const { api } = await withSnap();
+    act(() => api().setZoom(2.5));
+    putAt('0', { x: 96, y: 96 });
+    grab();
+
+    dragBy(13, 0);
+
+    expect(positionOf()).toEqual({ x: 120, y: 96 });
+  });
+
+  it('leaves a note and the start marker alone', async () => {
+    // Neither is a state: one is the author's words and the other hangs off the initial state,
+    // and both are placed by code that would only be fighting this.
+    await withSnap();
+    const cy = lastCy();
+    const marker = cy.nodeList.find((n) => n.hasClass('start'));
+    expect(marker).toBeDefined();
+    marker!.position({ x: 37, y: 61 });
+
+    act(() => cy.handlers['drag']?.({ target: marker }));
+
+    expect(marker!.position()).toEqual({ x: 37, y: 61 });
+  });
+});

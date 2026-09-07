@@ -5,6 +5,7 @@ import { auth } from '@/lib/auth';
 import QueryProvider from '@/components/providers/QueryProvider';
 import SessionWatcher from '@/components/session/SessionWatcher';
 import { loadViewerProperties, type ViewerProperties } from '@/lib/viewer-properties';
+import { canOpenViewerFile } from '@/lib/viewer-access';
 import { isSafeUploadName } from '@/lib/upload-names';
 import { isViewerFileKind } from '@/lib/viewer-link';
 import { tabKey } from '@/lib/viewer-tabs';
@@ -78,14 +79,34 @@ export default async function ViewerPage({
   }
 
   const read = readLayout(params);
+  const drawable = read.tabs.filter((tab) => KNOWN_TYPES.includes(tab.type.toUpperCase()));
+  /**
+   * Course staff only, decided here rather than by leaving the link off a student's page.
+   * This URL is guessable, bookmarkable and shareable, so a button that is not offered is not
+   * a rule. A student reading their own work has the preview in the assignment page instead,
+   * which is what they need to check they sent the right file.
+   *
+   * Per file, because staffness is per course: somebody can be faculty in one and a student in
+   * another, and a link carrying several files can mix the two.
+   */
+  const openable = await Promise.all(
+    drawable.map((tab) => canOpenViewerFile(tab.kind, tab.file, session.user)),
+  );
+  const allowedTabs = drawable.filter((_, i) => openable[i]);
+  const refused = allowedTabs.length < drawable.length;
   // A type the viewer cannot draw is dropped rather than opened as a broken tab. Settled
   // afterwards, because dropping one can leave a pane empty or showing nothing.
-  const layout = settleLayout({
-    ...read,
-    tabs: read.tabs.filter((tab) => KNOWN_TYPES.includes(tab.type.toUpperCase())),
-  });
+  const layout = settleLayout({ ...read, tabs: allowedTabs });
   if (layout.tabs.length === 0) {
-    return <Refusal message={badLinkMessage(params)} />;
+    return (
+      <Refusal
+        message={
+          refused
+            ? 'This viewer is for course staff. If this is your own work, open it from the assignment page.'
+            : badLinkMessage(params)
+        }
+      />
+    );
   }
 
   // Only for the tabs the window opens with. One added later has never been near the server,

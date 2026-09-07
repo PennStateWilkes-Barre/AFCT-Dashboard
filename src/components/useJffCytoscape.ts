@@ -281,6 +281,15 @@ export type UseJffCytoscapeOptions = {
    */
   canEditMachine?: boolean;
   /**
+   * Whether the states are pinned where the file has them.
+   *
+   * Separate from `canEditMachine`, which is about what the machine IS. Dragging a state moves
+   * the drawing rather than the machine, and a reader pulling a crowded diagram apart is the
+   * usual reason to want that. A preview is the case where even the arrangement should stay
+   * put: it exists to show the file as submitted, so the camera is the only thing that moves.
+   */
+  lockArrangement?: boolean;
+  /**
    * An element to keep in step with the graph's own transform.
    *
    * For anything drawn over the canvas in HTML rather than by cytoscape, which has to move and
@@ -942,6 +951,7 @@ export function useJffCytoscape({
   onLinkAnchor = null,
   graphOverlayRef = null,
   canEditMachine = true,
+  lockArrangement = false,
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
@@ -1141,6 +1151,16 @@ export function useJffCytoscape({
   showNotesRef.current = showNotes;
   const snapToGridRef = useRef(snapToGrid);
   snapToGridRef.current = snapToGrid;
+  /**
+   * Where a state being dragged really is, against where it is being shown.
+   *
+   * Only while snapping, only while a drag is in hand, and never a render: this changes on
+   * every pointer event and nothing outside the gesture wants to know. Keyed by state id
+   * because a drag can carry more than one. See the `drag` handler.
+   */
+  const dragSnap = useRef(
+    new Map<string, { raw: { x: number; y: number }; at: { x: number; y: number } }>(),
+  );
   // A ref because the tap handler is built once per load and would otherwise answer to the
   // tool that was active when the machine was drawn.
   const onBackgroundClickRef = useRef(onBackgroundClick);
@@ -1860,14 +1880,16 @@ export function useJffCytoscape({
     const container = containerRef.current;
     const linking = onStateLink !== null;
     try {
-      cy?.autoungrabify?.(linking);
+      // Both reasons a state might not be draggable: a tool that means something else by a
+      // drag, and a view that does not move anything at all.
+      cy?.autoungrabify?.(linking || lockArrangement);
     } catch {
       // A graph mid-teardown.
     }
     // A crosshair, not a hand: this draws a line from here, it does not pick the state up.
     if (container) container.style.cursor = linking ? 'crosshair' : '';
     if (!linking) cancelLinkDraftRef.current();
-  }, [onStateLink, phase]);
+  }, [onStateLink, lockArrangement, phase]);
 
   /**
    * Take a state off the drawing, and every transition that touched it.
@@ -2703,6 +2725,53 @@ export function useJffCytoscape({
         // plain click as well, which is why the snapshot is only held here.
         cy.on('grab', 'node', () => {
           pendingSnapshot.current = readSnapshot();
+          // A new gesture. Whatever the last one was tracking is finished with.
+          dragSnap.current.clear();
+        });
+
+        /**
+         * Snap to grid, while the state is still in the reader's hand.
+         *
+         * The state stops following the pointer exactly and steps between lattice points
+         * instead, moving only when the pointer crosses the halfway line into the next cell.
+         * That is what the setting says it does, and settling onto the grid at the end of a
+         * free drag is a different thing that happens to end in the same place.
+         *
+         * The tracked `raw` is what makes this work rather than stick. Cytoscape drags a node
+         * by shifting it from wherever it currently is by the distance the pointer moved since
+         * the last event (`silentShift` in its mouse handler), so the position it hands back is
+         * the snapped point plus one frame's movement. Snapping that and writing it back throws
+         * the remainder away, and a slow drag is a run of five-pixel frames each of which
+         * rounds to nothing: the state would sit still under a pointer that had crossed two
+         * cells. So the movement is added to a position of our own, kept apart from the node,
+         * and the node shows that position rounded.
+         *
+         * In graph coordinates throughout, which is what the node reports and what the painted
+         * grid is drawn from, so a cell is the same size at any zoom.
+         */
+        cy.on('drag', 'node', (evt: any) => {
+          if (!snapToGridRef.current) return;
+          const node = evt?.target;
+          if (!node?.position || node.hasClass?.('note') || node.hasClass?.('start')) return;
+          const at = node.position();
+          if (!isFinitePoint(at)) return;
+
+          const id = node.id?.() ?? '';
+          const tracked = dragSnap.current.get(id);
+          // Where the pointer has really taken it: the last raw point plus this frame's
+          // movement, which is the difference between where the node is and where we left it.
+          const raw = tracked
+            ? { x: tracked.raw.x + (at.x - tracked.at.x), y: tracked.raw.y + (at.y - tracked.at.y) }
+            : { x: at.x, y: at.y };
+          const snapped = {
+            x: Math.round(raw.x / GRID_STEP) * GRID_STEP,
+            y: Math.round(raw.y / GRID_STEP) * GRID_STEP,
+          };
+          dragSnap.current.set(id, { raw, at: snapped });
+          // Only when it is not already there. A pointer that has not moved writes nothing, and
+          // neither does one moving inside the cell the state is already on.
+          if (at.x === snapped.x && at.y === snapped.y) return;
+          node.position(snapped);
         });
 
         // Release. Two things happen here, both only when the state really moved: cytoscape
@@ -2723,8 +2792,14 @@ export function useJffCytoscape({
             rememberViewSoon();
           }
 
-          if (!snapToGridRef.current) return;
           const node = evt?.target;
+          dragSnap.current.delete(node?.id?.() ?? '');
+
+          // Kept even though the drag above has been snapping all along. It is the invariant
+          // rather than the experience: a frame the browser coalesced away, the setting turned
+          // on mid-drag, or a state moved by something that is not a drag at all all end here,
+          // and this is the one place that can promise the state is on the grid.
+          if (!snapToGridRef.current) return;
           if (!node?.position || node.hasClass?.('note') || node.hasClass?.('start')) return;
           const at = node.position();
           if (!at || !Number.isFinite(at.x) || !Number.isFinite(at.y)) return;

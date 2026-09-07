@@ -1,11 +1,12 @@
 'use client';
 
-import { Fragment, useId } from 'react';
+import { Fragment, useEffect, useId, useState } from 'react';
 import { Info } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { ViewerProperties } from '@/lib/viewer-properties';
+import { parseViewerSrc } from '@/lib/viewer-link';
 
 /**
  * Where the file on screen came from, a click away on the toolbar.
@@ -25,6 +26,52 @@ import type { ViewerProperties } from '@/lib/viewer-properties';
  * different files in a split window, since the menu follows the tab on screen and this belongs
  * to the pane it sits on.
  */
+/**
+ * Ask the server where a file came from.
+ *
+ * For the surfaces that have no server render behind them: every viewer dialog in the app,
+ * including the student's preview, where "which attempt is this and when did it arrive" is
+ * most of the answer to the question the preview exists for. The standalone window passes its
+ * own in, loaded during the page render, so it has no flash and makes no request.
+ *
+ * Undefined until the answer arrives, which is what keeps the button out of the toolbar rather
+ * than putting a disabled one there and enabling it a moment later. Null is an answer: no such
+ * file, or not this reader's to see.
+ */
+export function useViewerFileProperties(
+  src: string,
+  enabled: boolean,
+): ViewerProperties | null | undefined {
+  const [properties, setProperties] = useState<ViewerProperties | null | undefined>(undefined);
+
+  useEffect(() => {
+    const parsed = enabled ? parseViewerSrc(src) : null;
+    if (!parsed) {
+      setProperties(undefined);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/viewer/properties?kind=${encodeURIComponent(parsed.kind)}&file=${encodeURIComponent(parsed.file)}`,
+        );
+        const value = res.ok ? ((await res.json()) as ViewerProperties) : null;
+        if (!cancelled) setProperties(value);
+      } catch {
+        // Offline, or a request cut short by the dialog closing. No button is a fair answer:
+        // nothing here is needed to read the machine.
+        if (!cancelled) setProperties(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [src, enabled]);
+
+  return properties;
+}
+
 export function ViewerFileProperties({ properties }: { properties: ViewerProperties | null }) {
   const headingId = useId();
 

@@ -37,6 +37,15 @@ type SubmissionViewerDialogProps = {
    * and an arrangement to keep, none of which is theirs to want.
    */
   allowOpenInWindow?: boolean;
+  /**
+   * Show the file and nothing else: zoom, Fit, Center, a pan, and where the file came from.
+   *
+   * The student's surface. Their question is "did I send the right file", not "what would this
+   * machine look like rearranged", and everything a marker needs is the other side of a
+   * capability they do not have. Only the drawn machines have a preview; a grammar and a
+   * regular expression open in their own viewers as they always have.
+   */
+  preview?: boolean;
 };
 
 /**
@@ -57,6 +66,7 @@ export function SubmissionViewerDialog({
   height = '70vh',
   showGridDefault,
   allowOpenInWindow = true,
+  preview = false,
 }: SubmissionViewerDialogProps) {
   const type = problemType ?? '';
   // Null when the file is not one this viewer can build a safe link to, in which case no
@@ -79,6 +89,7 @@ export function SubmissionViewerDialog({
         showGridDefault={showGridDefault}
         epsSymbol={epsSymbol}
         windowTarget={windowTarget}
+        preview={preview}
       />
     );
   }

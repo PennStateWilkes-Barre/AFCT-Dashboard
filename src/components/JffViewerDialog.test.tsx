@@ -127,12 +127,25 @@ const okText = (text: string) => ({
   blob: async () => new Blob([text]),
 });
 
+/**
+ * The viewer asks for two things: the file, and where it came from.
+ *
+ * Routed by URL rather than by call order, so a test that counts attempts at the file is
+ * counting attempts at the file. The properties request is answered here once, for every test,
+ * because no test in this file is about it: the ones that are pass their own rows in.
+ */
+const isPropertiesRequest = (url: string) => url.startsWith('/api/viewer/properties');
+
 beforeEach(() => {
   vi.clearAllMocks();
   fetchImpl = async () => okText(FA_JFF);
   vi.stubGlobal(
     'fetch',
-    vi.fn((url: string) => fetchImpl(url)),
+    vi.fn((url: string) =>
+      isPropertiesRequest(url)
+        ? Promise.resolve({ ...okText(''), ok: false, status: 404 })
+        : fetchImpl(url),
+    ),
   );
   // Export helpers create object URLs; jsdom doesn't implement them.
   URL.createObjectURL = vi.fn(() => 'blob:mock');
@@ -2296,5 +2309,89 @@ describe('viewer capabilities', () => {
     await waitForEngine();
 
     expect(screen.queryByText('a note')).toBeNull();
+  });
+});
+
+/**
+ * The student's preview.
+ *
+ * It answers one question, "is this the file I meant to send", and offers exactly what that
+ * takes: the camera, and where the file came from. Everything a marker uses is the other side
+ * of a capability a student does not have, and the states stay where the file put them, because
+ * a preview that invites rearranging invites a change nobody can save.
+ */
+describe('a preview', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+
+  const tapNode = (id: string) => {
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown }) => void) | undefined;
+    act(() =>
+      tap?.({
+        target: {
+          isNode: () => true,
+          hasClass: () => false,
+          id: () => id,
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+      }),
+    );
+  };
+
+  const preview = () =>
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" preview properties={{ rows: [] }} />);
+
+  it('keeps the camera: zoom, Fit and Center', async () => {
+    preview();
+    await waitForEngine();
+
+    expect(screen.getByRole('button', { name: /zoom in/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /zoom out/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: 'Zoom level' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /fit automaton/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /center automaton/i })).toBeInTheDocument();
+  });
+
+  it('keeps the properties, which is most of the answer to "is this the right file"', async () => {
+    preview();
+    await waitForEngine();
+
+    expect(screen.getByRole('button', { name: 'File properties' })).toBeInTheDocument();
+  });
+
+  it('offers no tools, and no way to inspect or annotate', async () => {
+    preview();
+    await waitForEngine();
+
+    expect(screen.queryByTestId('viewer-tool-palette')).toBeNull();
+    tapNode('0');
+    expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+    expect(screen.queryByTestId('viewer-text-layer')).toBeNull();
+  });
+
+  it('offers no grid and no way out to the standalone window', async () => {
+    render(
+      <JffCytoscapeViewer
+        src={SRC}
+        title="abc.jff"
+        preview
+        properties={{ rows: [] }}
+        windowTarget={{ href: '/viewer?x=1', tab: 'abc' } as never}
+      />,
+    );
+    await waitForEngine();
+
+    expect(screen.queryByRole('button', { name: /toggle grid/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /open in viewer/i })).toBeNull();
+  });
+
+  it('refuses to change the machine even if something calls straight through', async () => {
+    // The absence of a button is not the rule; this is. A preview withholds all three
+    // capabilities, and the machine enforces the one that matters.
+    preview();
+    await waitForEngine();
+    tapNode('0');
+
+    expect(screen.queryByRole('button', { name: /file changed/i })).toBeNull();
   });
 });

@@ -64,7 +64,10 @@ import {
   type ViewerCapabilities,
 } from '@/components/viewer/viewer-capabilities';
 import { CanvasTextLayer } from '@/components/viewer/CanvasTextLayer';
-import { ViewerFileProperties } from '@/components/viewer/ViewerFileProperties';
+import {
+  ViewerFileProperties,
+  useViewerFileProperties,
+} from '@/components/viewer/ViewerFileProperties';
 import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
 import {
   Grid,
@@ -1012,6 +1015,7 @@ export function JffCytoscapeViewer({
   initialZoom = 'fit',
   viewStateKey = null,
   properties,
+  preview = false,
   focused = true,
   capabilities: capabilityOverrides,
   windowTarget,
@@ -1048,6 +1052,20 @@ export function JffCytoscapeViewer({
    * and there is no button. Null is a context that does have the notion and nothing to show.
    */
   properties?: ViewerProperties | null;
+  /**
+   * Show the file, and nothing else.
+   *
+   * The student's surface. A preview exists to answer one question, "is this the file I meant
+   * to send", so it offers the camera and stops: zoom, Fit, Center and a pan. No inspector, no
+   * tools, no comments, no grid, and the states stay where the file has them, because every one
+   * of those invites a reader to change a drawing they cannot save and did not come here to
+   * alter. The properties are still offered, since which attempt this is and when it arrived is
+   * most of the answer to that question.
+   *
+   * A word rather than four props, because it is one decision: this viewer is a preview or it
+   * is the tool. What it resolves to is below, in one place.
+   */
+  preview?: boolean;
   /**
    * Whether this is the pane being worked in.
    *
@@ -1092,9 +1110,18 @@ export function JffCytoscapeViewer({
    * empty canvas), so it stays about the machine and the palette stays about the palette.
    * Adding a tool later is a case in the palette's own list plus whatever it makes a click do.
    */
+  // A preview may do none of the three, whatever a caller passed: the word is the decision.
+  // Passed in by the standalone window, which loads them during its own render; asked for here
+  // by every other surface, which has no server render to carry them.
+  const fetchedProperties = useViewerFileProperties(src, properties === undefined);
+  const fileProperties = properties === undefined ? fetchedProperties : properties;
+
   const capabilities = useMemo(
-    () => resolveViewerCapabilities(capabilityOverrides),
-    [capabilityOverrides],
+    () =>
+      preview
+        ? { inspect: false, editMachine: false, annotate: false }
+        : resolveViewerCapabilities(capabilityOverrides),
+    [capabilityOverrides, preview],
   );
   /**
    * Give up a half-drawn transition, if there is one.
@@ -1227,6 +1254,7 @@ export function JffCytoscapeViewer({
     onLinkAnchor,
     graphOverlayRef: textOverlayRef,
     canEditMachine: capabilities.editMachine,
+    lockArrangement: preview,
     initialZoom,
     viewStateKey,
     onViewportChange,
@@ -1430,11 +1458,13 @@ export function JffCytoscapeViewer({
           <TypeBadge t={type} />
           <FileKindBadge src={src} />
           {/* Beside the type badge and the note below, because all three are about the file
-              rather than about the view of it. Only where a caller has the answer to give, so
-              a viewer inside a dialog has no button: the page around it has already said whose
-              file this is. The menu bar offers the same thing for the tab on screen; this one
-              belongs to the pane, which in a split window is a different file. */}
-          {properties === undefined ? null : <ViewerFileProperties properties={properties} />}
+              rather than about the view of it. Absent until there is an answer, so the toolbar
+              does not show a dead button while the request is out. The menu bar offers the same
+              thing for the tab on screen; this one belongs to the pane, which in a split window
+              is a different file. */}
+          {fileProperties === undefined ? null : (
+            <ViewerFileProperties properties={fileProperties} />
+          )}
           {/*
             Whether the drawing has been changed, and what to do about it.
 
@@ -1444,7 +1474,7 @@ export function JffCytoscapeViewer({
             like editing, and a reader has no way of knowing from the screen that the file they
             were sent is untouched. It says so, and offers the two things they might want next.
           */}
-          {viewModified ? (
+          {viewModified && !preview ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -1477,7 +1507,9 @@ export function JffCytoscapeViewer({
         <div className="flex items-center gap-2">
           {/* View controls */}
           <div className="flex items-center gap-1" role="group" aria-label="View controls">
-            {chromeHasViewControls ? null : (
+            {/* The window's menu owns this, and a preview does not offer it at all: the grid
+                is a drawing aid for somebody arranging a machine. */}
+            {chromeHasViewControls || preview ? null : (
               <>
                 <Button
                   size="sm"
@@ -1616,7 +1648,7 @@ export function JffCytoscapeViewer({
               page they crowded a strip that has to fit beside another one in the Similarity
               comparison, and everything they did is in the standalone window's menus. This
               is the way there, so what was a row of buttons is one. */}
-          {windowTarget ? (
+          {windowTarget && !preview ? (
             <>
               {/* Separator between control groups */}
               <div className="bg-muted-foreground/40 mx-0.5 h-6 w-px shrink-0" aria-hidden="true" />
@@ -1917,6 +1949,7 @@ export default function JffViewerDialog({
   showGridDefault = true,
   honorPositionsDefault = true,
   windowTarget,
+  preview = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1930,6 +1963,8 @@ export default function JffViewerDialog({
   honorPositionsDefault?: boolean;
   /** Where the pop-out sends this file, or absent when a link cannot be built for it. */
   windowTarget?: ViewerWindowTarget | null;
+  /** Show the file and nothing else. See JffCytoscapeViewer. */
+  preview?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1965,6 +2000,7 @@ export default function JffViewerDialog({
               fill
               height={height}
               epsSymbol={epsSymbol}
+              preview={preview}
               darkMode={darkMode}
               showGridDefault={showGridDefault}
               honorPositionsDefault={honorPositionsDefault}

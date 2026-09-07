@@ -223,15 +223,13 @@ describe('the File menu', () => {
     await user.click(screen.getByRole('menuitem', { name: 'File' }));
 
     expect(await screen.findByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
-    // "Export image", because the two above it write out the automaton and these write out a
-    // picture of it, and "Export" alone did not say which.
+    // "Export image": the items above write out the automaton, these write out a picture.
     expect(screen.getByRole('menuitem', { name: 'Export image' })).toBeInTheDocument();
-    // "File properties", because this viewer has properties panels for a state and for a
-    // transition, and the bare word could mean any of the three.
+    // "File properties": this viewer also has properties panels for a state and a transition.
     expect(screen.getByRole('menuitem', { name: 'File properties' })).toBeInTheDocument();
   });
 
-  it('puts PNG before SVG, which is the one people want', async () => {
+  it('puts PNG before SVG', async () => {
     const user = userEvent.setup();
     mount();
 
@@ -257,7 +255,7 @@ describe('View and Arrange own different things', () => {
       </ViewerActionsProvider>,
     );
 
-  it('keeps looking at the machine under View', async () => {
+  it('keeps looking at the automaton under View', async () => {
     const user = userEvent.setup();
     mount();
 
@@ -267,7 +265,7 @@ describe('View and Arrange own different things', () => {
     expect(await screen.findByRole('menuitem', { name: /fit to window/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /center in window/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitemcheckbox', { name: 'Grid' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitemcheckbox', { name: 'JFLAP Notes' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: 'JFLAP notes' })).toBeInTheDocument();
     // Not the arrangement.
     expect(screen.queryByRole('menuitemcheckbox', { name: /snap to grid/i })).toBeNull();
     expect(screen.queryByRole('menuitemradio', { name: /auto-arranged/i })).toBeNull();
@@ -293,7 +291,7 @@ describe('View and Arrange own different things', () => {
 
     await openMenu(user, 'Edit');
 
-    // The clipboard and the far end of Undo, which is where anybody looks for either.
+    // The clipboard, and the far end of Undo.
     expect(await screen.findByRole('menuitem', { name: /copy as png/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /copy as svg/i })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: /reset automaton/i })).toBeInTheDocument();
@@ -320,7 +318,7 @@ describe('View and Arrange own different things', () => {
 describe('copying the automaton', () => {
   // Under Edit with the clipboard. What they copy is a picture of the drawing rather than a
   // selection, which is what the labels say.
-  const openMachine = (user: ReturnType<typeof userEvent.setup>) =>
+  const openEdit = (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('menuitem', { name: 'Edit' }));
 
   const mountWithViewer = () =>
@@ -337,7 +335,7 @@ describe('copying the automaton', () => {
   ] as const)('runs %s', async (name, action) => {
     const user = userEvent.setup();
     mountWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     // fireEvent for the same jsdom reason as the export case above.
     fireEvent.click(await screen.findByRole('menuitem', { name }));
     expect(actions[action]).toHaveBeenCalledTimes(1);
@@ -348,7 +346,7 @@ describe('copying the automaton', () => {
     // ever comes back here as well there would be two ways to do one thing.
     const user = userEvent.setup();
     mountWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     const labels = (await screen.findAllByRole('menuitem')).map((i) => i.textContent);
     expect(labels.filter((l) => l?.startsWith('Copy as'))).toHaveLength(2);
     expect(labels).not.toContain('Copy as text');
@@ -367,7 +365,7 @@ describe('copying the automaton', () => {
 });
 
 describe('Arrange, the arrangement choice', () => {
-  const openLayout = async (user: ReturnType<typeof userEvent.setup>) =>
+  const openArrange = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('menuitem', { name: 'Arrange' }));
 
   it('marks exactly one of the two, never both', async () => {
@@ -380,7 +378,7 @@ describe('Arrange, the arrangement choice', () => {
         <ViewerMenubar downloadHref="/x?download=1" />
       </ViewerActionsProvider>,
     );
-    await openLayout(user);
+    await openArrange(user);
     const items = await screen.findAllByRole('menuitemradio');
     expect(items.filter((i) => i.getAttribute('aria-checked') === 'true')).toHaveLength(1);
     expect(screen.getByRole('menuitemradio', { name: 'Auto-arranged' })).toBeChecked();
@@ -395,7 +393,7 @@ describe('Arrange, the arrangement choice', () => {
         <ViewerMenubar downloadHref="/x?download=1" />
       </ViewerActionsProvider>,
     );
-    await openLayout(user);
+    await openArrange(user);
     expect(screen.getByRole('menuitemradio', { name: 'As drawn' })).toBeChecked();
   });
 
@@ -407,7 +405,7 @@ describe('Arrange, the arrangement choice', () => {
         <ViewerMenubar downloadHref="/x?download=1" />
       </ViewerActionsProvider>,
     );
-    await openLayout(user);
+    await openArrange(user);
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Auto-arranged' }));
     expect(actions.setAutoArranged).toHaveBeenCalledTimes(1);
     expect(actions.setAsDrawn).not.toHaveBeenCalled();
@@ -477,7 +475,7 @@ describe('View, Text representation', () => {
   });
 });
 
-describe('View, JFLAP Notes', () => {
+describe('View, JFLAP notes', () => {
   const openView = (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('menuitem', { name: 'View' }));
 
@@ -490,7 +488,7 @@ describe('View, JFLAP Notes', () => {
       </ViewerActionsProvider>,
     );
     await openView(user);
-    expect(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP Notes' })).toBeChecked();
+    expect(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP notes' })).toBeChecked();
   });
 
   it('follows the viewer when they are hidden', async () => {
@@ -502,7 +500,7 @@ describe('View, JFLAP Notes', () => {
       </ViewerActionsProvider>,
     );
     await openView(user);
-    expect(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP Notes' })).not.toBeChecked();
+    expect(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP notes' })).not.toBeChecked();
   });
 
   it('asks the viewer to toggle them', async () => {
@@ -515,7 +513,7 @@ describe('View, JFLAP Notes', () => {
     );
     await openView(user);
     // fireEvent for the same jsdom reason as the export case above.
-    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP Notes' }));
+    fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'JFLAP notes' }));
     expect(actions.toggleNotes).toHaveBeenCalledTimes(1);
   });
 });
@@ -886,7 +884,7 @@ describe('resetting an automaton', () => {
   // NOT called has to start from a clean count or an earlier test satisfies it.
   beforeEach(() => actions.resetMachine.mockClear());
 
-  const openMachine = async (user: ReturnType<typeof userEvent.setup>) =>
+  const openEdit = async (user: ReturnType<typeof userEvent.setup>) =>
     user.click(screen.getByRole('menuitem', { name: 'Edit' }));
 
   const renderWithViewer = () =>
@@ -902,7 +900,7 @@ describe('resetting an automaton', () => {
     // with the reset, so there is nothing to step back to afterwards.
     const user = userEvent.setup();
     renderWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     await user.click(await screen.findByRole('menuitem', { name: /reset automaton/i }));
 
     expect(await screen.findByText(/Reset this automaton\?/i)).toBeTruthy();
@@ -912,7 +910,7 @@ describe('resetting an automaton', () => {
   it('resets once it is confirmed', async () => {
     const user = userEvent.setup();
     renderWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     await user.click(await screen.findByRole('menuitem', { name: /reset automaton/i }));
     await user.click(await screen.findByRole('button', { name: 'Reset automaton' }));
 
@@ -922,11 +920,32 @@ describe('resetting an automaton', () => {
   it('does nothing if the reader backs out', async () => {
     const user = userEvent.setup();
     renderWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     await user.click(await screen.findByRole('menuitem', { name: /reset automaton/i }));
     await user.click(await screen.findByRole('button', { name: /cancel/i }));
 
     expect(actions.resetMachine).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The description has to match `resetMachine`, which clears the renames, the initial and
+   * final marks, the transition edits, the drawn states and transitions, the deletions, the
+   * arrangement choice, the remembered view and the history, and then re-reads the file. It
+   * does not touch Snap to grid or what the grid and the notes are showing.
+   */
+  it('warns that the edits go, not only the arrangement', async () => {
+    const user = userEvent.setup();
+    renderWithViewer();
+    await openEdit(user);
+
+    await user.click(await screen.findByRole('menuitem', { name: /reset automaton/i }));
+
+    const description = await screen.findByText(/discards every change/i);
+    expect(description).toHaveTextContent(/states and transitions/i);
+    expect(description).toHaveTextContent(/arrangement choice/i);
+    expect(description).toHaveTextContent(/undo history/i);
+    // And not a word about the two settings it leaves alone.
+    expect(description).not.toHaveTextContent(/snap/i);
   });
 
   it('says what it will and will not touch', async () => {
@@ -934,7 +953,7 @@ describe('resetting an automaton', () => {
     // nothing happens to what the student submitted.
     const user = userEvent.setup();
     renderWithViewer();
-    await openMachine(user);
+    await openEdit(user);
     await user.click(await screen.findByRole('menuitem', { name: /reset automaton/i }));
 
     const text = (await screen.findByText(/other open files/i)).textContent ?? '';
@@ -960,7 +979,7 @@ describe('the keyboard route to a split', () => {
       </ViewerActionsProvider>,
     );
     await openView(user);
-    fireEvent.click(await screen.findByRole('menuitem', { name: /move to other side/i }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /move to other pane/i }));
     expect(onMoveToOtherSide).toHaveBeenCalled();
   });
 
@@ -973,7 +992,7 @@ describe('the keyboard route to a split', () => {
       </ViewerActionsProvider>,
     );
     await openView(user);
-    expect(await screen.findByRole('menuitem', { name: /move to other side/i })).toHaveAttribute(
+    expect(await screen.findByRole('menuitem', { name: /move to other pane/i })).toHaveAttribute(
       'data-disabled',
     );
   });
@@ -988,7 +1007,7 @@ describe('the keyboard route to a split', () => {
       </ViewerActionsProvider>,
     );
     await openView(user);
-    expect(screen.queryByRole('menuitem', { name: /move to other side/i })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /move to other pane/i })).toBeNull();
   });
 });
 
@@ -1010,7 +1029,7 @@ describe('linking the two views', () => {
     renderMenu({ onToggleLinkViews, canLinkViews: true, linkViews: false });
     await openView(user);
 
-    const item = await screen.findByRole('menuitemcheckbox', { name: /link the two views/i });
+    const item = await screen.findByRole('menuitemcheckbox', { name: /link views/i });
     expect(item).toHaveAttribute('aria-checked', 'false');
     fireEvent.click(item);
     expect(onToggleLinkViews).toHaveBeenCalled();
@@ -1020,19 +1039,20 @@ describe('linking the two views', () => {
     const user = userEvent.setup();
     renderMenu({ onToggleLinkViews: vi.fn(), canLinkViews: true, linkViews: true });
     await openView(user);
-    expect(
-      await screen.findByRole('menuitemcheckbox', { name: /link the two views/i }),
-    ).toHaveAttribute('aria-checked', 'true');
+    expect(await screen.findByRole('menuitemcheckbox', { name: /link views/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 
-  it('greys it out while there is only one machine on screen', async () => {
+  it('greys it out while there is only one automaton on screen', async () => {
     // Greyed rather than hidden: an item that comes and goes reads as a bug.
     const user = userEvent.setup();
     renderMenu({ onToggleLinkViews: vi.fn(), canLinkViews: false });
     await openView(user);
-    expect(
-      await screen.findByRole('menuitemcheckbox', { name: /link the two views/i }),
-    ).toHaveAttribute('data-disabled');
+    expect(await screen.findByRole('menuitemcheckbox', { name: /link views/i })).toHaveAttribute(
+      'data-disabled',
+    );
   });
 
   it('is absent where there are no panes at all', async () => {
@@ -1040,6 +1060,6 @@ describe('linking the two views', () => {
     const user = userEvent.setup();
     renderMenu({});
     await openView(user);
-    expect(screen.queryByRole('menuitemcheckbox', { name: /link the two views/i })).toBeNull();
+    expect(screen.queryByRole('menuitemcheckbox', { name: /link views/i })).toBeNull();
   });
 });

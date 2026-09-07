@@ -99,6 +99,10 @@ export function ViewerMenubar({
 
   return (
     <Menubar className="bg-card h-auto rounded-none border-x-0 border-t-0 px-2 py-1 shadow-none">
+      {/* The nouns here say "automaton", because that is what this window is nearly always
+          showing. A grammar and a regular expression open in it too, and their graph actions
+          disable themselves rather than being relabelled; making the words follow the content
+          type is worth doing when those can be edited, and not before. */}
       <MenubarMenu>
         <MenubarTrigger>File</MenubarTrigger>
         <MenubarContent>
@@ -116,29 +120,24 @@ export function ViewerMenubar({
                   Original file
                 </a>
               </MenubarItem>
-              {/* The same automaton with the arrangement on screen, which after auto-arranging
-                  is usually far more readable than the one that was submitted. A new file: the
-                  submitted one is never altered.
-
-                  "Current automaton" rather than "Current view": this writes out the automaton,
-                  and the old label read as a screenshot of the viewport, which is what the two
-                  image exports below actually are. */}
+              {/* The automaton with the arrangement on screen, written to a new file: the
+                  submitted one is never altered. Named for what it writes out, since the two
+                  image exports below are the ones that save a picture. */}
               <MenubarItem disabled={!ready} onSelect={() => run('downloadCurrent')}>
                 <FileDown aria-hidden="true" />
                 Current automaton
               </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>
-          {/* Directly under Download, because the two are the same question with different
-              answers: the file, or a picture of it. "Export image" says which this one is. */}
+          {/* Under Download: the two are the same question with different answers, the file or
+              a picture of it. */}
           <MenubarSub>
             <MenubarSubTrigger>
               <Share aria-hidden="true" />
               Export image
             </MenubarSubTrigger>
             <MenubarSubContent>
-              {/* PNG first: it is what somebody pasting into a document or a slide wants, and
-                  SVG is the answer for the smaller number of people who know they want it. */}
+              {/* The common raster format first. */}
               <MenubarItem disabled={!ready} onSelect={() => run('downloadPNG')}>
                 <FileImage aria-hidden="true" />
                 PNG
@@ -150,10 +149,10 @@ export function ViewerMenubar({
             </MenubarSubContent>
           </MenubarSub>
           <MenubarSeparator />
-          {/* Where the file came from, rather than what is in it. "File properties", because
-              this viewer has properties panels for a state and for a transition and the bare
-              word could mean any of the three. Disabled rather than hidden when there is
-              nothing to show, so the menu does not change shape between files. */}
+          {/* Where the file came from, rather than what is in it. Named "File properties"
+              because this viewer also has properties panels for a state and for a transition.
+              Disabled rather than hidden when there is nothing to show, so the menu does not
+              change shape between files. */}
           <MenubarItem disabled={!properties} onSelect={() => setPropertiesOpen(true)}>
             <Info aria-hidden="true" />
             File properties
@@ -176,24 +175,21 @@ export function ViewerMenubar({
             Redo
           </MenubarItem>
           <MenubarSeparator />
-          {/* Under Edit with the clipboard, which is where anybody looks for a copy. What they
-              copy is a picture of the automaton rather than a selection, which is what the
-              labels say and why the two formats are named. Format icons, matching File's
-              Export image, so the same format carries the same icon wherever it appears. */}
+          {/* Under Edit with the clipboard. What these copy is a picture of the automaton
+              rather than a selection, which is what the labels say. Format icons, matching
+              File's Export image, so a format carries the same icon wherever it appears. */}
           <MenubarItem disabled={!ready} onSelect={() => run('copyPNG')}>
             <FileImage aria-hidden="true" />
             Copy as PNG
           </MenubarItem>
-          {/* Pastes as vector art, so it stays sharp in a slide or a printed handout, where
-              the PNG above does not. */}
+          {/* Vector art, which stays sharp at any size where the PNG above does not. */}
           <MenubarItem disabled={!ready} onSelect={() => run('copySVG')}>
             <FileCode2 aria-hidden="true" />
             Copy as SVG
           </MenubarItem>
           <MenubarSeparator />
-          {/* The far end of Undo, and the last thing in this menu for the same reason it is
-              confirmed: it puts back everything the reader has done at once. The ellipsis says
-              a question comes first, which is the convention for exactly that. */}
+          {/* The far end of Undo: it takes back everything the reader has done at once. The
+              ellipsis says a question comes first. */}
           <MenubarItem disabled={!ready} onSelect={() => setResetOpen(true)}>
             <RotateCcw aria-hidden="true" />
             Reset automaton...
@@ -204,17 +200,15 @@ export function ViewerMenubar({
       <MenubarMenu>
         <MenubarTrigger>View</MenubarTrigger>
         <MenubarContent>
-          {/* First because it is the one people reach for most: after zooming or panning
-              about, this is how you get the whole machine back on screen. */}
-          {/* The same icon the toolbar's Fit button uses. One action, one icon, wherever it
-              is offered from. */}
+          {/* How to get the whole automaton back on screen after zooming or panning about.
+              The same icon the toolbar's Fit button uses: one action, one icon, wherever it is
+              offered from. */}
           <MenubarItem disabled={!ready} onSelect={() => run('fitToWindow')}>
             <Scan aria-hidden="true" />
             Fit to window
           </MenubarItem>
-          {/* Under Fit, for the reader who has zoomed in on a corner and lost the machine
-              rather than wanting the whole of it back: this moves the camera and leaves the
-              scale alone. */}
+          {/* Under Fit, and different from it: this moves the camera and leaves the scale
+              alone. */}
           <MenubarItem disabled={!ready} onSelect={() => run('centerInWindow')}>
             <Crosshair aria-hidden="true" />
             Center in window
@@ -231,19 +225,18 @@ export function ViewerMenubar({
             Grid
           </MenubarCheckboxItem>
           {/* On by default: a note is the author's own words, part of the answer rather than
-              decoration. Off is for a busy machine where they cover the states. They are only
-              drawn in the "As drawn" layout, so this does nothing once auto-arranged. */}
+              decoration. Only drawn in the "As drawn" arrangement, so this does nothing once
+              auto-arranged. */}
           <MenubarCheckboxItem
             checked={notes}
             disabled={!ready}
             onCheckedChange={() => run('toggleNotes')}
           >
-            JFLAP Notes
+            JFLAP notes
           </MenubarCheckboxItem>
-          {/* Snap to grid is not here. It changes where the states go rather than what the
-              reader can see, so it sits under Layout with the rest of the arrangement. The
-              grid's visibility stays here, which is the other half of the same pair: one is
-              about looking, one is about moving. */}
+          {/* Snap to grid is not here: it changes where the states go rather than what can be
+              seen, so it sits under Arrange. The grid's visibility stays here, which is the
+              other half of the same pair. */}
           <MenubarSeparator />
           {/* The same content the dialog viewers show in a panel under the graph. Here it
               opens in a window, so the graph keeps the full height of the screen. */}
@@ -256,19 +249,19 @@ export function ViewerMenubar({
               <MenubarSeparator />
               <MenubarItem disabled={!canMoveToOtherSide} onSelect={onMoveToOtherSide}>
                 <Columns2 aria-hidden="true" />
-                Move to other side
+                Move to other pane
               </MenubarItem>
             </>
           ) : null}
           {onToggleLinkViews ? (
-            // Greyed rather than hidden while there is only one machine on screen: an item
+            // Greyed rather than hidden while there is only one automaton on screen: an item
             // that comes and goes reads as a bug, a greyed one reads as "not yet".
             <MenubarCheckboxItem
               checked={linkViews}
               disabled={!canLinkViews}
               onCheckedChange={onToggleLinkViews}
             >
-              Link the two views
+              Link views
             </MenubarCheckboxItem>
           ) : null}
         </MenubarContent>
@@ -347,12 +340,19 @@ export function ViewerMenubar({
         </Dialog>
       ) : null}
 
-      {/* Confirmed rather than immediate: a reader can spend a while pulling a crowded
-          automaton apart, and there is no undo once the history has gone with it. */}
+      {/* Confirmed rather than immediate, and the description is a list rather than a phrase:
+          this now throws away drawn states and transitions as well as an arrangement, and the
+          undo history goes with them, so there is nothing to step back to afterwards.
+
+          Checked against `resetMachine`, which clears the renames, the initial and final marks,
+          the transition edits, the drawn states and transitions, the deletions, the arrangement
+          choice, the remembered view and the history, and then re-reads the file. It does NOT
+          touch Snap to grid or what the grid and the notes are showing, so this does not say
+          it does. */}
       <ConfirmDialog
         open={resetOpen}
         title="Reset this automaton?"
-        description="The states go back where the file has them, and the arrangement, the zoom and the undo history for this automaton are forgotten. The other open files are not affected, and the submitted file is not changed."
+        description="This discards every change you have made here: states and transitions you added, renamed, re-marked, re-worded or deleted, and where everything sits. The arrangement choice, the zoom and the undo history go with them. The submitted file is not changed, and the other open files are not affected."
         confirmText="Reset automaton"
         onConfirm={() => {
           // The action keeps its own name. What it does has not changed; what it is called on

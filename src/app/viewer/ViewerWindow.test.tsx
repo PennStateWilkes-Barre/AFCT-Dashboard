@@ -79,7 +79,7 @@ vi.mock('@/components/viewer/ViewerMenubar', () => ({
       data-properties={properties?.rows[0]?.value ?? ''}
     >
       <button type="button" disabled={!canMoveToOtherSide} onClick={onMoveToOtherSide}>
-        Move to other side
+        Move to other pane
       </button>
       <button
         type="button"
@@ -833,7 +833,7 @@ describe('the heartbeat that lets an opener find this window', () => {
 describe('splitting without a mouse', () => {
   // Dragging a tab is not a gesture everybody can make. The same operation is on the View
   // menu, which is the keyboard, screen-reader and touch route to it.
-  const move = () => fireEvent.click(screen.getByRole('button', { name: 'Move to other side' }));
+  const move = () => fireEvent.click(screen.getByRole('button', { name: 'Move to other pane' }));
 
   it('splits the window from the menu', () => {
     renderWindow([tab('a.jff'), tab('b.jff')], 1);
@@ -864,7 +864,7 @@ describe('splitting without a mouse', () => {
 
   it('is offered only when there is a second file to split away from', () => {
     renderWindow([tab('a.jff')]);
-    expect(screen.getByRole('button', { name: 'Move to other side' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move to other pane' })).toBeDisabled();
   });
 
   it('says which half the menu is acting on, for somebody who cannot see the strip', () => {

@@ -31,6 +31,7 @@ import type { GroupSetSummaryDTO } from '@/lib/group-set-service';
 import type { Assignment } from '@prisma/client';
 import { shouldEnterAdvanceStep } from '@/lib/wizard-keyboard';
 import { formatDateTimeLocal } from '@/lib/date-convert';
+import { queryKeys } from '@/lib/query-keys';
 
 type FormValues = z.input<typeof AssignmentWizardFormSchema>;
 
@@ -149,7 +150,7 @@ export function CreateAssignmentWizardDialog({
   // Group sets for the course, so the Type step can offer one to pin group work to. Shares
   // the ['course', id, 'group-sets'] cache with AssignToFields (step 3), so they dedupe.
   const groupSetsQuery = useQuery({
-    queryKey: ['course', courseId, 'group-sets'],
+    queryKey: queryKeys.course.groupSets(courseId),
     queryFn: () => apiClient.get<GroupSetSummaryDTO[]>(apiPaths.courseGroupSets(courseId)),
     enabled: open && !!courseId,
     staleTime: 30_000,

@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/field';
 import Spinner from '@/components/ui/spinner';
 import { CheckCircle, XCircle, Eye, EyeOff } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /* ---------------- Types ---------------- */
@@ -45,6 +46,13 @@ interface InputGroupProps extends Omit<React.InputHTMLAttributes<HTMLInputElemen
    */
   showDescriptionWithError?: boolean;
   additionalDescribedBy?: string | string[];
+  /**
+   * A decorative glyph inside the field, on the leading edge. Passed as the component rather
+   * than an element so this stays generic: the field knows nothing about which icon it is
+   * drawing, and no icon is hard-coded here. It is `aria-hidden`, because the label already
+   * names the field and an icon repeating that is noise to a screen reader.
+   */
+  leadingIcon?: LucideIcon;
   showStatus?: boolean;
   isValid?: boolean;
   /** `true`, or the words to announce while checking. Either way it draws a spinner. */
@@ -72,6 +80,7 @@ const InputGroup = React.forwardRef<HTMLInputElement, InputGroupProps>(function 
     description,
     showDescriptionWithError,
     additionalDescribedBy,
+    leadingIcon: LeadingIcon,
     showStatus,
     isValid,
     isChecking,
@@ -179,6 +188,9 @@ const InputGroup = React.forwardRef<HTMLInputElement, InputGroupProps>(function 
   // Room for the adornments, which sit 4px in from the border and are 32px wide each.
   const adornmentCount = (hasStatus ? 1 : 0) + (hasEye ? 1 : 0);
   const inputPaddingRight = adornmentCount === 2 ? 'pr-18' : adornmentCount === 1 ? 'pr-10' : '';
+  // Its own decision, deliberately kept apart from the right-hand count above. The two edges
+  // hold different things and a field can have either, both or neither.
+  const inputPaddingLeft = LeadingIcon ? 'pl-10' : '';
 
   const hasValue = String(currentValue ?? defaultValue ?? '').length > 0;
 
@@ -238,9 +250,20 @@ const InputGroup = React.forwardRef<HTMLInputElement, InputGroupProps>(function 
             // rather than Tailwind's `read-only:` variant, because a disabled input matches
             // CSS :read-only too and would pick this up as well.
             readOnly && !disabled && 'bg-muted cursor-text shadow-none',
+            inputPaddingLeft,
             inputPaddingRight,
           )}
         />
+
+        {LeadingIcon ? (
+          // Decorative, and it must never take a click: the whole field is the target, and an
+          // icon that swallowed one would make the left edge feel dead. Centred on the field's
+          // own axis with inset-y-0 rather than a translate, so it stays centred if the height
+          // ever changes.
+          <span className="text-muted-foreground pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            <LeadingIcon className="size-4" aria-hidden="true" />
+          </span>
+        ) : null}
 
         {adornmentCount > 0 && (
           // One slot for both adornments instead of a branch per combination, which is what

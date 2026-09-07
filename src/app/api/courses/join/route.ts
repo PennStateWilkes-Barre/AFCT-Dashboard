@@ -190,5 +190,14 @@ export async function POST(req: Request) {
 
   const message = `You have successfully joined ${course.name} as a Student.`;
 
-  return NextResponse.json({ success: true, message, course });
+  // The course, narrowed to what the caller needs: the toast names it and the page routes to
+  // it. The whole row went back before, `regCode` included, which contradicts the rule the
+  // course route states in as many words ("never send it to a student's client"). They had
+  // just typed this one, so nothing was learned, but a policy that holds in one route and not
+  // its neighbour is one nobody can rely on.
+  return NextResponse.json({
+    success: true,
+    message,
+    course: { id: course.id, name: course.name, code: course.code },
+  });
 }

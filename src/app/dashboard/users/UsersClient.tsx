@@ -33,6 +33,7 @@ import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { apiPaths } from '@/lib/api-paths';
 import type { UserListItem } from '@/lib/users-list';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
+import { queryKeys } from '@/lib/query-keys';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -101,7 +102,7 @@ export default function UsersClient() {
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['admin', 'users', queryParams],
+    queryKey: queryKeys.admin.usersPage(queryParams),
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(queryParams.page),

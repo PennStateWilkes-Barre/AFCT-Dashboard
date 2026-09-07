@@ -611,6 +611,37 @@ describe('runWorkerLoop — claiming and prioritization', () => {
     expect(prismaMock.submission.findUnique).not.toHaveBeenCalled();
   });
 
+  /**
+   * Fairness, expressed as a query. One student must not occupy several worker slots at once,
+   * and the only thing enforcing that is the `notIn` on this read. The prisma mock returns the
+   * same pending row either way, so every other test here passes with the filter gone and the
+   * queue quietly starving everybody behind a student with a batch in flight.
+   */
+  it('skips students who already have work in flight', async () => {
+    prismaMock.submission.findMany.mockResolvedValue([{ studentId: 's1' }, { studentId: 's2' }]);
+    prismaMock.submission.findFirst.mockResolvedValue(null);
+
+    await runWorkerLoop();
+
+    expect(prismaMock.submission.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { status: 'PENDING', studentId: { notIn: ['s1', 's2'] } },
+    });
+  });
+
+  it('asks for any pending work when nobody is busy', async () => {
+    prismaMock.submission.findFirst.mockResolvedValue(null);
+
+    await runWorkerLoop();
+
+    // No ids, so no filter at all: an empty `notIn` matches nothing in Prisma.
+    expect(prismaMock.submission.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { status: 'PENDING' },
+    });
+    expect(
+      (prismaMock.submission.findFirst.mock.calls[0][0] as { where: Record<string, unknown> }).where,
+    ).not.toHaveProperty('studentId');
+  });
+
   it('claims a pending submission then evaluates it', async () => {
     prismaMock.submission.findFirst.mockResolvedValue({ id: 'sub-1', attempts: 0 });
     prismaMock.submission.updateMany.mockResolvedValue({ count: 1 }); // claim wins

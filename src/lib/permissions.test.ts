@@ -104,6 +104,32 @@ describe('canAccessCourse', () => {
     await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(false);
   });
 
+  it('a student may NOT access a published course that has not started yet', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      status: 'ENROLLED',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2099-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(false);
+  });
+
+  it('a student may access it once the start date has passed', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      status: 'ENROLLED',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2000-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u', isAdmin: false }, 'c')).resolves.toBe(true);
+  });
+
+  it('staff may build a course before it opens', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'FACULTY',
+      course: { isPublished: true, deletedAt: null, startDate: new Date('2099-01-01') },
+    });
+    await expect(canAccessCourse({ id: 'u' }, 'c')).resolves.toBe(true);
+  });
+
   it('staff (FACULTY/TA) may access their course even while unpublished', async () => {
     prismaMock.roster.findFirst.mockResolvedValue({
       role: 'FACULTY',
@@ -297,5 +323,55 @@ describe('canViewStudentData', () => {
     await expect(
       canViewStudentData({ id: 'u' }, 'c', 'other', { studentGroupId: null }),
     ).resolves.toBe(false);
+  });
+});
+
+/**
+ * Who each lookup is actually asking about.
+ *
+ * The prisma mock answers whatever it is told regardless of the `where`, so every test in this
+ * file passes with the caller dropped from the query. That is not a small gap here: with
+ * `where: { courseId }` alone, `findFirst` returns whichever roster row it likes, and if that
+ * row happens to be a FACULTY one then any signed-in user is granted access to any course.
+ * These assert the question, because the answers cannot.
+ */
+describe('the caller is part of every membership lookup', () => {
+  const rosterWhere = () =>
+    (prismaMock.roster.findFirst.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+
+  beforeEach(() => {
+    prismaMock.roster.findFirst.mockResolvedValue(null);
+  });
+
+  it('getCourseRole asks about this user in this course', async () => {
+    await getCourseRole('u1', 'c1');
+
+    expect(rosterWhere()).toEqual({ courseId: 'c1', userId: 'u1' });
+  });
+
+  it('canAccessCourse asks about this user in this course', async () => {
+    await canAccessCourse({ id: 'u1', isAdmin: false }, 'c1');
+
+    expect(rosterWhere()).toMatchObject({ courseId: 'c1', userId: 'u1' });
+  });
+
+  it('canManageCourse asks about this user in this course', async () => {
+    await canManageCourse({ id: 'u1', isAdmin: false }, 'c1');
+
+    expect(rosterWhere()).toMatchObject({ courseId: 'c1', userId: 'u1' });
+  });
+
+  it('staffManagesStudent asks about the target and the caller, not either alone', async () => {
+    await staffManagesStudent({ id: 'caller', isAdmin: false }, 'target');
+
+    const where = rosterWhere() as {
+      userId: string;
+      role: string;
+      course: { roster: { some: { userId: string } } };
+    };
+    // The target is the student; the caller has to be staff of a course the target is in.
+    expect(where.userId).toBe('target');
+    expect(where.role).toBe('STUDENT');
+    expect(where.course.roster.some.userId).toBe('caller');
   });
 });

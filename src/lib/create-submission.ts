@@ -29,7 +29,19 @@ import {
 import { extractProvenanceFeatures, type ProvenanceFeatures } from '@/lib/similarity/provenance';
 
 /** Thrown inside the create transaction when the per-problem cap is already met. */
-class SubmissionCapReachedError extends Error {}
+/**
+ * Thrown inside the create transaction when the cap is already met.
+ *
+ * Carries the count it saw so the refusal can be logged with the same fields the
+ * pre-transaction check logs. RQ5 makes submission limits a study variable, so "the cap
+ * stopped someone" has to look the same in `ActivityLog` whichever check caught them; a row
+ * missing `priorCount` would read as a different kind of event to anyone analysing it.
+ */
+class SubmissionCapReachedError extends Error {
+  constructor(readonly priorCount: number) {
+    super('submission cap reached');
+  }
+}
 
 /**
  * Thrown inside the create transaction when the cooldown has not elapsed.
@@ -486,7 +498,7 @@ export async function createSubmission(
           if (!isCourseStaff && limit.max != null) {
             const priorCount = await tx.submission.count({ where: countScope });
             if (priorCount >= limit.max) {
-              throw new SubmissionCapReachedError();
+              throw new SubmissionCapReachedError(priorCount);
             }
           }
 
@@ -547,6 +559,16 @@ export async function createSubmission(
     } catch (err) {
       cleanupFile(uploadedFilePath);
       if (err instanceof SubmissionCapReachedError) {
+        // Logged, like the pre-transaction check and like the cooldown's own concurrent case
+        // beside it. This path wrote nothing at all, so a student stopped by the cap under a
+        // race left no trace: the log said they never tried. `concurrent` is what tells the
+        // two apart when reading the record back.
+        await audit('SUBMISSION_LIMIT_REACHED', 'WARNING', {
+          maxSubmissions: limit.max,
+          grantedExtra: limit.granted,
+          priorCount: err.priorCount,
+          concurrent: true,
+        });
         return { ok: false, status: 409, error: `Submission limit reached (${limit.max}).` };
       }
       if (err instanceof ResubmitTooSoonError) {

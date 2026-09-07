@@ -23,6 +23,7 @@ import { apiPaths } from '@/lib/api-paths';
 import type { GroupSetDetailDTO } from '@/lib/group-set-service';
 import type { AssignmentWizardFormSchema } from '@/schemas/assignment';
 import { memberCountLabel } from '@/components/assignments/labels';
+import { queryKeys } from '@/lib/query-keys';
 
 type FormValues = z.input<typeof AssignmentWizardFormSchema>;
 type FormOverride = NonNullable<FormValues['overrides']>[number];
@@ -85,7 +86,7 @@ export function AssignToFields({
 
   // The chosen group set (from the Type step) and the groups within it.
   const groupSetDetailQuery = useQuery({
-    queryKey: ['course', courseId, 'group-set', groupSetId],
+    queryKey: queryKeys.course.groupSet(courseId, groupSetId),
     queryFn: () => apiClient.get<GroupSetDetailDTO>(apiPaths.courseGroupSet(courseId, groupSetId)),
     enabled: active && !!groupSetId,
     staleTime: 30_000,

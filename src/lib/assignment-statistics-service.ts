@@ -213,6 +213,9 @@ type AssignmentShape = {
   id: string;
   assignedToEveryone: boolean;
   assignees: { userId: string | null; groupId: string | null }[];
+  /** The assignment's group set, or null on an individual assignment. Scopes every membership
+   *  lookup below: "which groups is this student in" only has one right answer per set. */
+  groupSetId: string | null;
 };
 
 type CohortInput = {
@@ -271,6 +274,7 @@ async function buildStudentCohort(
   // Group memberships matter here only when the assignment targets groups; load them once
   // for the assigned decision (individual assignments usually target students directly).
   const groupIdsByStudent = await membershipsOf(
+    assignment.groupSetId,
     assignment.assignedToEveryone || assignment.assignees.some((a) => a.groupId)
       ? roster.map((r) => r.userId)
       : [],
@@ -397,7 +401,7 @@ async function buildGroupCohort(
   const inAGroup = new Set(groups.flatMap((g) => g.memberships.map((m) => m.userId)));
   const strandedIds = [...active].filter((userId) => !inAGroup.has(userId));
   if (strandedIds.length > 0) {
-    const groupIdsByStudent = await membershipsOf(strandedIds);
+    const groupIdsByStudent = await membershipsOf(assignment.groupSetId, strandedIds);
     for (const userId of strandedIds) {
       const assigned = isStudentAssigned(
         { assignedToEveryone: assignment.assignedToEveryone },
@@ -414,12 +418,22 @@ async function buildGroupCohort(
 
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
-/** Group memberships for a set of students, keyed by student. Empty in, empty out. */
-async function membershipsOf(userIds: string[]): Promise<Map<string, string[]>> {
+/**
+ * Group memberships for a set of students **within one group set**, keyed by student. Empty
+ * in, empty out.
+ *
+ * The set id is required rather than optional: this asked for every membership these students
+ * hold anywhere, which is a different question and the wrong one. See `loadStudentGroupIndex`
+ * for what it cost on the gradebook. A null set is an individual assignment, which has none.
+ */
+async function membershipsOf(
+  groupSetId: string | null,
+  userIds: string[],
+): Promise<Map<string, string[]>> {
   const byStudent = new Map<string, string[]>();
-  if (userIds.length === 0) return byStudent;
+  if (userIds.length === 0 || !groupSetId) return byStudent;
   const memberships = await prisma.groupMembership.findMany({
-    where: { userId: { in: userIds } },
+    where: { groupSetId, userId: { in: userIds } },
     select: { userId: true, groupId: true },
   });
   for (const m of memberships) {

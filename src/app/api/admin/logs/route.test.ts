@@ -303,6 +303,19 @@ describe('the records an entry points at', () => {
       problem: 'DFA',
       submission: 's1',
     });
+
+    // Each lookup asks for the ids this page's entries actually carry, one query per kind.
+    // The mocks answer with their fixture whatever the `where` says, so the names above
+    // would still come out right if a lookup asked for the wrong column's ids, or none.
+    expect(prismaMock.course.findMany.mock.calls[0][0]).toMatchObject({
+      where: { id: { in: ['c1'] } },
+    });
+    expect(prismaMock.assignment.findMany.mock.calls[0][0]).toMatchObject({
+      where: { id: { in: ['a1'] } },
+    });
+    expect(prismaMock.problem.findMany.mock.calls[0][0]).toMatchObject({
+      where: { id: { in: ['p1'] } },
+    });
   });
 
   /**

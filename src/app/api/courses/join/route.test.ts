@@ -332,3 +332,32 @@ describe('join-code guessing', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * The join response is a student's payload, and the registration code is the one thing the
+ * course route says in as many words must never reach a student's client. They had just typed
+ * it, so nothing is learned; a rule that holds in one route and not its neighbour is the
+ * problem.
+ */
+describe('what joining hands back', () => {
+  it('names the course without returning its registration code', async () => {
+    authMock.mockResolvedValue({ user: { id: 'user-1', isAdmin: false } });
+    prismaMock.course.findUnique.mockResolvedValue(buildCourse({ code: 'CS101' }));
+    prismaMock.roster.findUnique.mockResolvedValue(null);
+    prismaMock.roster.create.mockResolvedValue({ id: 'roster-1' });
+
+    const res = await POST(
+      new Request('http://localhost/api/courses/join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: 'ABC123' }),
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.course).toEqual({ id: 'course-1', name: 'Course 1', code: 'CS101' });
+    // The one field the course route says in as many words must never reach a student.
+    expect(body.course).not.toHaveProperty('regCode');
+  });
+});

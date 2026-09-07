@@ -11,9 +11,14 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const authMock = vi.hoisted(() => vi.fn());
+const throttledViewMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/auth', () => ({ auth: authMock }));
+vi.mock('@/lib/api/activity', () => ({
+  logThrottledView: throttledViewMock,
+  VIEW_THROTTLE_MS: 600_000,
+}));
 
 import { GET } from './route';
 
@@ -84,7 +89,10 @@ describe('GET /api/courses/[id]/student-grades', () => {
   it('applies default values when a problem has no submissions or grades', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
     prismaMock.roster.findUnique.mockResolvedValue({ id: 'r1' });
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', course: { isPublished: true } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
     prismaMock.assignment.findMany.mockResolvedValue([
       { id: 'a1', title: 'Assignment 1', description: null, dueDate: null },
     ]);
@@ -115,7 +123,10 @@ describe('GET /api/courses/[id]/student-grades', () => {
   it('returns assignment grade payload for an enrolled student', async () => {
     authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
     prismaMock.roster.findUnique.mockResolvedValue({ id: 'r1' });
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', course: { isPublished: true } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
     seedGradeData();
 
     const res = await GET(makeRequest(), params());
@@ -139,6 +150,38 @@ describe('GET /api/courses/[id]/student-grades', () => {
     });
   });
 
+  /**
+   * That they checked their grades. The read is their own record, so it is not a disclosure
+   * and was never logged; RQ1 and RQ2 ask what students do with feedback, and whether they
+   * looked is part of that.
+   */
+  it('records that the student looked at their grades', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
+    prismaMock.roster.findUnique.mockResolvedValue({ id: 'r1' });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
+    seedGradeData();
+
+    await GET(makeRequest(), params());
+
+    expect(throttledViewMock).toHaveBeenCalledTimes(1);
+    const entry = throttledViewMock.mock.calls[0][1];
+    expect(entry).toMatchObject({
+      userId: 'u1',
+      action: 'STUDENT_GRADES_VIEWED',
+      category: 'GRADE',
+      courseId: 'c1',
+      // Per course: without a key, two courses would share one throttle window and the
+      // second would go unrecorded.
+      key: 'c1',
+    });
+    // How much of it was marked, which separates checking a page full of grades from
+    // checking one that has nothing on it yet.
+    expect(entry.metadata).toMatchObject({ assignmentCount: 1, gradedCount: 1 });
+  });
+
   it('allows staff to view grades without course membership', async () => {
     authMock.mockResolvedValue({ user: { id: 'staff-1', role: 'FACULTY', isAdmin: true } });
     prismaMock.roster.findUnique.mockResolvedValue(null);
@@ -157,7 +200,10 @@ describe('GET /api/courses/[id]/student-grades', () => {
     // Branch 137: `groupedProblems[assignment.id] ?? []` for an assignment with no problems.
     authMock.mockResolvedValue({ user: { id: 'u1', role: 'STUDENT' } });
     prismaMock.roster.findUnique.mockResolvedValue({ id: 'r1' });
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', course: { isPublished: true } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      course: { isPublished: true },
+    });
     prismaMock.assignment.findMany.mockResolvedValue([
       { id: 'a1', title: 'A1', description: null, dueDate: new Date('2025-01-01T00:00:00.000Z') },
       { id: 'a2', title: 'A2 (no problems)', description: null, dueDate: null },

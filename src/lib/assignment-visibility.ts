@@ -33,6 +33,25 @@ export function overridesForStudentWhere(userId: string): Prisma.AssignmentOverr
   };
 }
 
+/**
+ * The student's group ids, read back off override rows selected with
+ * `overridesForStudentWhere`.
+ *
+ * `effectiveDeadline` only lets a GROUP override apply when its groupId is in the list it is
+ * given, so a caller that selects group overrides and then passes no groups gets the base
+ * date back and no error. That is a wrong deadline, not a crash, and it is exactly what the
+ * dashboard and the calendar were doing.
+ *
+ * Safe because of how the rows were selected: `overridesForStudentWhere` returns GROUP rows
+ * only for groups this student belongs to, so every groupId present is one of theirs and no
+ * extra membership query is needed. Use the two together, always.
+ */
+export function groupIdsFromOverrides(
+  overrides: ReadonlyArray<{ groupId?: string | null }>,
+): string[] {
+  return overrides.map((o) => o.groupId).filter((id): id is string => id != null);
+}
+
 export function isStudentAssigned(
   assignment: { assignedToEveryone: boolean },
   assignees: Array<{ userId: string | null; groupId?: string | null }>,

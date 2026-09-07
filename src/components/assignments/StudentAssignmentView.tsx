@@ -5,12 +5,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { showToast } from '@/lib/toast';
-import { ArrowLeft, ClipboardList } from 'lucide-react';
+import { ArrowLeft, ClipboardList, Lock } from 'lucide-react';
 import { useEmptyStringSymbol } from '@/hooks/use-empty-string-symbol';
-import { IdentityPanel, IdentityPanelIcon, IDENTITY_LINK } from '@/components/IdentityPanel';
+import {
+  IdentityPanel,
+  IdentityPanelIcon,
+  IDENTITY_BADGE,
+  IDENTITY_LINK,
+} from '@/components/IdentityPanel';
 import { ProblemListCard } from '@/components/assignments/ProblemListCard';
 import ProblemWorkspace from '@/components/assignments/ProblemWorkspace';
 import { SubmissionViewerDialog } from '@/components/dialogs/SubmissionViewerDialog';
@@ -39,6 +44,11 @@ const EMPTY_COMMENTS: Record<string, StudentProblemComment[]> = {};
 const EMPTY_GRADES: Record<string, number | null> = {};
 /** Stable identity, so the memo below is not invalidated on every render. */
 const EMPTY_MISSING: string[] = [];
+const EMPTY_GROUP_MEMBERS: Array<{
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+}> = [];
 
 export default function StudentAssignmentPage({
   initialAssignment = null,
@@ -91,6 +101,9 @@ export default function StudentAssignmentPage({
   // Which of those zeros are for work never handed in, so the list can say so.
   const missingProblems: string[] = contextQuery.data?.missingProblems ?? EMPTY_MISSING;
   const assignmentGrade = contextQuery.data?.assignmentGrade ?? null;
+  // Only ever set on a group assignment, and only ever the caller's own group.
+  const myGroup = contextQuery.data?.group ?? null;
+  const myGroupMembers = contextQuery.data?.groupMembers ?? EMPTY_GROUP_MEMBERS;
   const problemLimits = contextQuery.data?.problemLimits;
   // The cap that applies to THIS student (base plus any extra-submission grants). An
   // unlimited effective cap keeps the base sentinel so the existing "<= 0 or null means
@@ -357,6 +370,46 @@ export default function StudentAssignmentPage({
       ? `Accepted until ${lateCutoffDisplay}`
       : 'Accepted anytime';
   const gradeDisplay = assignmentGrade !== null ? `${assignmentGrade}` : '-';
+  // Individual vs group, derived from the group set link; there is no stored flag. It matters
+  // to a student before they start: a group assignment shares one set of submissions.
+  const typeDisplay = assignment?.groupSetId ? 'Group' : 'Individual';
+  // When it opens, in the student's own timezone plus the course's where they differ, the
+  // same way the deadline beside it is written.
+  const unlockDisplay = assignment?.unlockAt
+    ? formatDeadlineDual(assignment.unlockAt, timezone, assignment.course?.timezone ?? null, hour12)
+    : null;
+  // Either form counts: a rich-only assignment still has something to show.
+  const hasDescription = Boolean(assignment?.description || assignment?.descriptionJson);
+  /**
+   * The description, rendered in whichever of its two homes applies. `headingTag` and
+   * `baseLevel` travel together: the content's own headings must start one level below the
+   * "Description" label above them, and that label sits at a different depth in each home.
+   */
+  const descriptionSection = (headingTag: 'h2' | 'h3', baseLevel: 3 | 4) => {
+    const Heading = headingTag;
+    return (
+      <div className={headingTag === 'h3' ? 'mt-4' : undefined}>
+        {/* "Assignment Description", not "Description": the problem selected below carries one
+            too, and on a page showing both at once the bare word did not say whose. */}
+        <Heading className="mb-2 font-semibold">Assignment Description</Heading>
+        {/* Plain text on the card, not a bordered box that scrolls and drags to resize. The
+            box existed to bound a long description, and the cost was a frame, a scrollbar and
+            a tab stop around three sentences. The focusable-region markup went with it: a
+            container only needs to be reachable by keyboard while it is the thing that
+            scrolls (WCAG 2.1.1), and this one no longer does.
+
+            A div, not a p: a rich description can contain headings, lists and rules, which
+            are invalid inside a paragraph. */}
+        <div className="text-muted-foreground">
+          <RichDescription
+            headingBaseLevel={baseLevel}
+            description={assignment?.description}
+            descriptionJson={assignment?.descriptionJson}
+          />
+        </div>
+      </div>
+    );
+  };
   const courseIsArchived = assignment.course?.isArchived ?? false;
   // The course, written the way the course page's own title writes it, so a student sees the
   // same name in the banner they just came from. The code is not always present, so the name
@@ -385,7 +438,12 @@ export default function StudentAssignmentPage({
     : null;
 
   return (
-    <div className="space-y-6 p-6">
+    // No padding of its own. `dashboard/layout.tsx` puts `px-4 py-6 lg:px-6` on <main> and
+    // WorkspaceSurface restores it inside its negative margins, so a `p-6` here was a second
+    // gutter on top of the first: this page sat further in than the course page it is one
+    // click from, and it did not narrow with the layout's own `px-4` on a phone. The staff
+    // assignment view and the course page both rely on the layout's gutter alone.
+    <div className="space-y-6">
       {/*
         The same branded banner the course page and the staff assignment page lead with, in its
         quieter tone. A student who opens a course gets the navy banner and then landed on a plain
@@ -401,96 +459,117 @@ export default function StudentAssignmentPage({
         its own heading.
       */}
       <IdentityPanel labelledBy="assignment-page-title" tone="operational">
-        <div className="flex items-start gap-3 sm:gap-4">
-          <IdentityPanelIcon icon={ClipboardList} />
-          <div className="flex min-w-0 flex-col gap-1">
-            <h1
-              id="assignment-page-title"
-              className="min-w-0 text-2xl leading-tight font-semibold tracking-tight break-words"
-            >
-              {assignment.title}
-            </h1>
-            {assignment.course || assignment.courseName ? (
-              <span className="max-w-full text-sm">
-                <span className="text-course-banner-muted-foreground">Course: </span>
-                <Link
-                  href={`/dashboard/courses/${assignment.course?.id || assignment.courseId}`}
-                  className={cn(IDENTITY_LINK, 'font-medium break-words')}
-                >
-                  {courseLabel}
-                </Link>
-              </span>
-            ) : null}
+        {/* basis-full below sm so the title claims its own row and the grade drops beneath it,
+            rather than the chip taking the line and squeezing a long assignment name into a
+            column of single letters. The course banner solves the same problem the same way. */}
+        <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="flex min-w-0 flex-1 basis-full items-start gap-3 sm:basis-0 sm:gap-4">
+            <IdentityPanelIcon icon={ClipboardList} />
+            <div className="flex min-w-0 flex-col gap-1">
+              <h1
+                id="assignment-page-title"
+                className="min-w-0 text-2xl leading-tight font-semibold tracking-tight break-words"
+              >
+                {assignment.title}
+              </h1>
+            </div>
           </div>
+
+          {/* The one number a student came for, promoted out of the row of facts below the
+              title and into the banner beside it. IDENTITY_BADGE rather than a badge variant:
+              the banner is navy in every theme, and the semantic fills are page tokens that
+              vanish on it in dark mode. See the note on IdentityPanel. */}
+          <div
+            className={cn(
+              IDENTITY_BADGE,
+              'inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border px-4 py-2',
+            )}
+          >
+            <span className="text-xs font-semibold tracking-widest uppercase">Grade</span>
+            <span className="text-sm leading-none font-semibold tabular-nums">
+              {gradeDisplay} / {assignment.maxPoints}
+            </span>
+          </div>
+        </div>
+
+        {/* The terms the work is done under, written the way the course banner writes its
+            faculty line: label/value pairs on one wrapping row rather than chips. A late
+            policy reads "Accepted until 09/25/26 11:59 PM EDT", which is a sentence, and four
+            chips of that length wrap into a block that competes with the title.
+
+            Indented to the title's text rather than the banner edge on wide screens, so the
+            identity block reads as one column: the sm icon is 56px and the gap beside it 16.
+            No indent below sm, where the rows are stacked full width anyway. */}
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm sm:pl-[4.5rem]">
+          {/* The way back, first on the line rather than tucked under the title. It is the
+              one item here that goes somewhere, so it leads the row the way a breadcrumb
+              would; the rest of the row states the terms of the work. */}
+          {assignment.course || assignment.courseName ? (
+            <span className="max-w-full">
+              <span className="text-course-banner-muted-foreground">Course: </span>
+              <Link
+                href={`/dashboard/courses/${assignment.course?.id || assignment.courseId}`}
+                className={cn(IDENTITY_LINK, 'font-medium break-words')}
+              >
+                {courseLabel}
+              </Link>
+            </span>
+          ) : null}
+          <span>
+            <span className="text-course-banner-muted-foreground">Due: </span>
+            <span className="font-medium">{dueDisplay}</span>
+          </span>
+          <span>
+            <span className="text-course-banner-muted-foreground">Late policy: </span>
+            <span className="font-medium">{latePolicyDisplay}</span>
+          </span>
+          <span>
+            <span className="text-course-banner-muted-foreground">Type: </span>
+            <span className="font-medium">{typeDisplay}</span>
+          </span>
         </div>
       </IdentityPanel>
 
-      {Boolean(assignment.description || assignment.descriptionJson) && (
+      {/* When the assignment has no problems there is no card below to put the description
+          in, so it keeps a card of its own. Same content either way; only the heading level
+          differs, because nested under the problems card it sits below that card's own h2. */}
+      {hasDescription && assignment.problems.length === 0 ? (
         <Card>
-          <CardContent className="pt-6">
-            <h2 className="mb-2 font-semibold">Description</h2>
-            {/* A div, not a p: a rich description can contain headings, lists, and rules,
-                which are invalid inside a paragraph. */}
-            <div
-              className="text-muted-foreground max-h-96 resize-y overflow-y-auto rounded-md border p-3"
-              tabIndex={0}
-              role="group"
-              aria-label="Assignment description"
-            >
-              <RichDescription
-                // Heading base: sits under the h2 "Description", so the description starts one level below it.
-                headingBaseLevel={3}
-                description={assignment.description}
-                descriptionJson={assignment.descriptionJson}
-              />
-            </div>
+          <CardContent className="pt-6">{descriptionSection('h2', 3)}</CardContent>
+        </Card>
+      ) : null}
+
+      {/* Not open yet.
+          The release time withholds the description and the problems, so without this the
+          page rendered its banner and then nothing at all: no prompt, no problem list, and no
+          reason given. The assignment's existence is not the secret (it is listed on the
+          course page with its opening date), so the honest thing is to say when it opens. */}
+      {assignment.locked ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+            <Lock className="text-muted-foreground size-6" aria-hidden="true" />
+            <h2 className="text-lg font-semibold">This assignment has not opened yet</h2>
+            <p className="text-muted-foreground max-w-prose text-sm">
+              {unlockDisplay
+                ? `Its problems and instructions become available on ${unlockDisplay}.`
+                : 'Its problems and instructions are not available yet.'}
+            </p>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
-      {assignment.problems.length > 0 ? (
+      {!assignment.locked && assignment.problems.length > 0 ? (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle aria-level={2} className="text-lg font-semibold">
-              {assignment.title}
-            </CardTitle>
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch lg:justify-between">
-              <div className="flex flex-1 flex-wrap gap-2">
-                <div className="border-border text-foreground inline-flex min-h-10 items-center rounded-full border bg-transparent px-3 py-2 text-sm leading-none">
-                  <span className="mr-2 shrink-0 text-xs font-semibold tracking-widest uppercase">
-                    Due
-                  </span>
-                  <span className="leading-none font-semibold">{dueDisplay}</span>
-                </div>
-                <div className="border-border text-foreground inline-flex min-h-10 items-center rounded-full border bg-transparent px-3 py-2 text-sm leading-none">
-                  <span className="mr-2 shrink-0 text-xs font-semibold tracking-widest uppercase">
-                    Points
-                  </span>
-                  <span className="leading-none font-semibold">{assignment.maxPoints}</span>
-                </div>
-                <div className="border-border text-foreground inline-flex min-h-10 items-center rounded-full border bg-transparent px-3 py-2 text-sm leading-none">
-                  <span className="mr-2 shrink-0 text-xs font-semibold tracking-widest uppercase">
-                    Problems
-                  </span>
-                  <span className="leading-none font-semibold">{assignment.problems.length}</span>
-                </div>
-                <div className="border-border text-foreground inline-flex min-h-10 items-center rounded-full border bg-transparent px-3 py-2 text-sm leading-none">
-                  <span className="mr-2 shrink-0 text-xs font-semibold tracking-widest uppercase">
-                    Late Policy
-                  </span>
-                  <span className="leading-none font-semibold">{latePolicyDisplay}</span>
-                </div>
-              </div>
-              <div className="border-border text-foreground inline-flex min-h-10 items-center rounded-full border bg-transparent px-4 py-2 text-right lg:self-start">
-                <span className="mr-2 shrink-0 text-xs font-semibold tracking-widest uppercase">
-                  Grade
-                </span>
-                <span className="ml-1 text-sm leading-none font-medium">{gradeDisplay}</span>
-                <span className="ml-1 text-sm leading-none font-medium">
-                  / {assignment.maxPoints}
-                </span>
-              </div>
-            </div>
+            {/* The assignment's name is the banner's h1 two inches above; repeating it as the
+                card's title said the same word twice and pushed the first thing a student
+                actually needs to read further down.
+
+                No row of fact chips here either. Due, the late policy and the type are in the
+                banner, where they are terms of the assignment rather than a property of its
+                problem list; the points total is the denominator of the grade beside it there,
+                and the problem count is the list immediately below. */}
+            {hasDescription ? descriptionSection('h2', 3) : null}
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(240px,280px)_1fr]">
@@ -501,12 +580,27 @@ export default function StudentAssignmentPage({
                 className="h-full"
                 scrollAreaClassName="max-h-[520px]"
                 description="Select a problem to review submissions and discussion."
+                // A picker, not a scoreboard. The score and the attempts for the problem being
+                // read are in the workspace beside it, and repeating every problem's numbers
+                // here gave each row three figures to get past before its title.
+                showGrade={false}
+                showSubmissionUsage={false}
               />
 
               <ProblemWorkspace
                 problem={selectedProblemDetails}
                 submissions={selectedProblemSubmissions}
                 assignmentDueDate={assignment.dueDate}
+                // Null on an individual assignment, so the card renders only when there is a
+                // group to name. "You" rather than a name: this is the student's own page.
+                isGroupWork={typeDisplay === 'Group'}
+                group={myGroup}
+                groupMembers={myGroupMembers}
+                subjectName="You"
+                // On group work the attempts table is the group's, not this student's, so it
+                // gains the "Submitted by" column the staff review view already uses. On an
+                // individual assignment every row would name the reader.
+                showSubmitter={typeDisplay === 'Group'}
                 comments={selectedProblemComments}
                 commentText={selectedProblem ? newComment[selectedProblem.problem.id] || '' : ''}
                 onCommentTextChange={(text: string) =>
@@ -551,6 +645,10 @@ export default function StudentAssignmentPage({
         <SubmissionViewerDialog
           open={openDialog.open}
           onOpenChange={(open) => setOpenDialog({ open, submission: null })}
+          // Preview only. The standalone viewer window is a staff tool: it exists for
+          // comparing and arranging several machines while marking, and a student looking at
+          // one attempt of their own has nothing to do with it.
+          allowOpenInWindow={false}
           problemType={
             assignment.problems.find((u) => u.problem.id === openDialog?.submission?.problemId)
               ?.problem?.type

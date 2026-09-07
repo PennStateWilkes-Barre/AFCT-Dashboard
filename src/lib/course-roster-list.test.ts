@@ -220,3 +220,43 @@ describe('getCourseRosterPage', () => {
     });
   });
 });
+
+/**
+ * What the "has submitted anything" lookup asks.
+ *
+ * When the submission delegate has no aggregate available, the helper falls back to one
+ * question per student, and that question has to name both the student and the assignments of
+ * this course. The prisma mock answers from its fixture whatever the `where` says, so without
+ * the `studentId` every student on the page would be marked as having submitted, and without
+ * the assignment list the mark would come from their work in some other course.
+ */
+describe('what the has-submitted fallback asks', () => {
+  it('asks per student, bounded by this course’s assignments', async () => {
+    prismaMock.roster.count.mockResolvedValue(1);
+    prismaMock.roster.findMany.mockResolvedValue([member()]);
+    prismaMock.assignment.findMany.mockResolvedValue([{ id: 'a1' }, { id: 'a2' }]);
+    // No aggregate on the delegate, so the helper takes the per-student path.
+    const noAggregate = { findFirst: prismaMock.submission.findFirst };
+    prismaMock.submission.findFirst.mockResolvedValue({ studentId: 'u1' });
+    const real = { groupBy: prismaMock.submission.groupBy, findMany: prismaMock.submission.findMany };
+    // @ts-expect-error deliberately removing both aggregates to reach the per-student path
+    delete prismaMock.submission.groupBy;
+    // @ts-expect-error same
+    delete prismaMock.submission.findMany;
+
+    try {
+      await getCourseRosterPage({ courseId: 'c1', skip: 0, take: 10 });
+    } finally {
+      prismaMock.submission.groupBy = real.groupBy;
+      prismaMock.submission.findMany = real.findMany;
+    }
+
+    expect(noAggregate.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { studentId: 'u1', assignmentId: { in: ['a1', 'a2'] } },
+    });
+    // And the assignment list itself is this course's.
+    expect(prismaMock.assignment.findMany.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1' },
+    });
+  });
+});

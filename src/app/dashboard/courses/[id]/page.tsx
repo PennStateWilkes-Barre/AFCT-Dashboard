@@ -9,6 +9,8 @@ import { courseLmsLinks } from '@/lib/lti/links';
 import { LaunchNotice } from '@/components/lti/LaunchNotice';
 import { getCourseRole } from '@/lib/permissions';
 import { toStudentSafeEnrolled } from '@/lib/course-format';
+import { courseHasStarted } from '@/lib/course-status';
+import { CourseNotStarted } from '@/components/course/CourseNotStarted';
 
 export const metadata: Metadata = {
   title: 'Course',
@@ -87,6 +89,24 @@ export default async function AdminCoursePage({ params, searchParams }: Props) {
   // canAccessCourse rule and keeps its existence hidden).
   if (!isStaff && !course.isPublished) {
     notFound();
+  }
+
+  // Published but not open yet. Not a 404: the course is listed under Upcoming Courses and a
+  // student may well have just registered for it, so the honest answer is when it opens
+  // rather than pretending it is not there. `canAccessCourse` refuses its content either way,
+  // so every API this page would call is already closed; this is the page saying so in words
+  // instead of failing to load. Staff are exempt, as they are at the gate.
+  if (!isStaff && !courseHasStarted(course.startDate)) {
+    return (
+      <WorkspaceSurface>
+        <CourseNotStarted
+          name={course.name}
+          code={course.code}
+          startDate={course.startDate}
+          timezone={course.timezone}
+        />
+      </WorkspaceSurface>
+    );
   }
 
   const staffMembers = course.roster.map((r) => ({ ...r.user, courseRole: r.role }));

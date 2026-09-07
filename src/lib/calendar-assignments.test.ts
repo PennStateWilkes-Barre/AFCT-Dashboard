@@ -59,7 +59,9 @@ describe('getAssignmentsForUserRange', () => {
       {
         courseId: { in: ['student-course'] },
         isPublished: true,
-        course: { isPublished: true },
+        // Published AND started: a student cannot open a course before its start date, so its
+        // deadlines must not appear on their calendar either.
+        course: { isPublished: true, startDate: { lte: expect.any(Date) } },
         AND: [
           {
             OR: [
@@ -106,7 +108,9 @@ describe('getAssignmentsForUserRange', () => {
       {
         courseId: { in: [] },
         isPublished: true,
-        course: { isPublished: true },
+        // Published AND started: a student cannot open a course before its start date, so its
+        // deadlines must not appear on their calendar either.
+        course: { isPublished: true, startDate: { lte: expect.any(Date) } },
         AND: [
           {
             OR: [
@@ -163,6 +167,73 @@ describe('getAssignmentsForUserRange', () => {
  * calendar away entirely, so no day cell renders there and a test asserting on chips would pass
  * or fail for reasons unrelated to width.
  */
+/**
+ * A group extension is the group members' deadline. The query that decides which assignments
+ * to fetch has always widened on group overrides; the rows it selected to RESOLVE the date
+ * did not, so the override was fetched for the filter and then invisible to the resolver. The
+ * assignment came back on its base date and, when that fell outside the month, was dropped
+ * entirely: gone from the calendar in the very month the group was working to.
+ */
+describe('a group extension on the calendar', () => {
+  const groupOverride = {
+    targetType: 'GROUP',
+    userId: null,
+    groupId: 'g1',
+    unlockAt: null,
+    dueDate: new Date('2026-01-20T12:00:00.000Z'),
+    lateCutoff: null,
+    allowLateSubmissions: null,
+  };
+
+  const setup = (overrides: unknown[]) => {
+    prismaMock.roster.findMany.mockResolvedValue([{ courseId: 'c1', role: 'STUDENT' }]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'Group Lab',
+        courseId: 'c1',
+        // Base due is in December, outside the January range the calendar asked for.
+        dueDate: new Date('2025-12-10T12:00:00.000Z'),
+        unlockAt: null,
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        isPublished: true,
+        overrides,
+        course: { id: 'c1', code: 'CMPEN 331', name: 'Computer Organization' },
+      },
+    ]);
+  };
+
+  it('moves the assignment to the group date, inside the month it was asked for', async () => {
+    setup([groupOverride]);
+
+    const res = await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(res).toHaveLength(1);
+    expect(res[0].dueDate).toEqual(new Date('2026-01-20T12:00:00.000Z'));
+  });
+
+  it("selects the group rows to resolve with, not just the student's own", async () => {
+    setup([groupOverride]);
+
+    await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    // The pairing that the bug broke: select with overridesForStudentWhere, resolve with the
+    // group ids it returns. Asserting the select keeps a future edit from narrowing it back
+    // to `{ userId }`, which fails silently rather than loudly.
+    const args = prismaMock.assignment.findMany.mock.calls[0][0];
+    expect(args.select.overrides.where).toEqual(overridesForStudentWhere('u1'));
+  });
+
+  it('still drops an assignment whose own extension moved it out of the range', async () => {
+    setup([{ ...groupOverride, dueDate: new Date('2026-05-01T12:00:00.000Z') }]);
+
+    const res = await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(res).toEqual([]);
+  });
+});
+
 describe('how many assignments fit in a day cell', () => {
   it('shows none on a phone, where the cell has room for the date alone', () => {
     expect(visibleAssignmentsForWidth(360)).toBe(0);
@@ -190,5 +261,70 @@ describe('how many assignments fit in a day cell', () => {
     expect(visibleAssignmentsForWidth(768)).toBe(3);
     expect(visibleAssignmentsForWidth(1279)).toBe(3);
     expect(visibleAssignmentsForWidth(1280)).toBe(3);
+  });
+});
+
+/**
+ * What the calendar's own reads are scoped to.
+ *
+ * The assignment query is asserted above. The reads that hang off it are not, and they are
+ * the ones that decide what a student is told about their own work and what staff are told
+ * about their class. Every prisma mock here answers from its fixture whatever the `where`
+ * says: without the `studentId` the "you have submitted this" markers come from every
+ * student's attempts, and without the `courseId` the class-size count is the whole
+ * installation.
+ */
+describe('what the calendar reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  const assignmentRow = (over: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    title: 'A1',
+    dueDate: new Date('2026-01-15'),
+    courseId: 'student-course',
+    isPublished: true,
+    course: { id: 'student-course', name: 'C1', code: 'CS1' },
+    overrides: [],
+    ...over,
+  });
+
+  it('reads the viewer’s own courses, and their own work only', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([
+      { courseId: 'student-course', role: 'STUDENT' },
+    ]);
+    prismaMock.assignment.findMany.mockResolvedValue([assignmentRow()]);
+
+    await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({
+      userId: 'u1',
+      NOT: { role: 'STUDENT', status: 'DROPPED' },
+    });
+    expect(whereOf(prismaMock.user.findUnique)).toEqual({ id: 'u1' });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      studentId: 'u1',
+      assignmentId: { in: ['a1'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      studentId: 'u1',
+      assignmentId: { in: ['a1'] },
+    });
+  });
+
+  it('counts students and graded work for the staff courses on the calendar only', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([{ courseId: 'staff-course', role: 'FACULTY' }]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      assignmentRow({ courseId: 'staff-course', course: { id: 'staff-course', name: 'C', code: 'C' } }),
+    ]);
+
+    await getAssignmentsForUserRange({ userId: 'u1', ...range });
+
+    expect(whereOf(prismaMock.roster.groupBy)).toMatchObject({
+      courseId: { in: ['staff-course'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
   });
 });

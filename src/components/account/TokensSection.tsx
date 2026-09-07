@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Copy, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import InputGroup from '@/components/ui/InputGroup';
@@ -9,6 +10,7 @@ import { showToast } from '@/lib/toast';
 import { formatDateTimeInTimeZone } from '@/lib/date-format';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { SettingsSection, SETTINGS_STANDARD } from '@/components/settings/settings-layout';
+import { queryKeys } from '@/lib/query-keys';
 
 type ClientToken = {
   id: string;
@@ -32,7 +34,6 @@ export function TokensSection() {
   // Dates in the course/effective timezone, like every other date the app shows, rather than
   // whatever the browser happens to be set to.
   const { timezone, hour12 } = useEffectiveTimezone();
-  const [tokens, setTokens] = useState<ClientToken[] | null>(null);
   const [label, setLabel] = useState('');
   const [issuing, setIssuing] = useState(false);
   /** The plaintext of a token just issued. Held in memory only, and never fetched again. */
@@ -57,21 +58,31 @@ export function TokensSection() {
   /** Where focus lands after a revoke: the row that held the button is gone by then. */
   const tokensHeadingRef = useRef<HTMLHeadingElement>(null);
 
-  const load = async () => {
-    try {
+  /**
+   * Cached, so leaving the Account page and coming back does not refetch, and so a revoke in
+   * one place updates anywhere else reading the same key. It also gets the retry-once default:
+   * before this, a single flaky response left the list empty with a toast and no second try.
+   */
+  const queryClient = useQueryClient();
+  const tokensQuery = useQuery({
+    queryKey: queryKeys.me.clientTokens(),
+    queryFn: async () => {
       const res = await fetch('/api/me/client-tokens');
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { tokens: ClientToken[] };
-      setTokens(data.tokens);
-    } catch {
-      setTokens([]);
-      showToast.error('Could not load your tokens. Reload the page to try again.');
-    }
-  };
+      if (!res.ok) throw new Error('Failed to load tokens');
+      return ((await res.json()) as { tokens: ClientToken[] }).tokens;
+    },
+  });
+  // `null` means "still loading", which the list below renders as a spinner. A failed read
+  // resolves to an empty list rather than a permanent spinner, the way it did before.
+  const tokens: ClientToken[] | null = tokensQuery.isPending ? null : (tokensQuery.data ?? []);
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (tokensQuery.isError)
+      showToast.error('Could not load your tokens. Reload the page to try again.');
+  }, [tokensQuery.isError]);
+
+  /** Re-read the list after issuing or revoking, through the cache so other readers follow. */
+  const load = () => queryClient.invalidateQueries({ queryKey: queryKeys.me.clientTokens() });
 
   const issue = async () => {
     setIssuing(true);

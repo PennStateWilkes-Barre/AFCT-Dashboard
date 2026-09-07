@@ -1,7 +1,11 @@
 import { prisma } from '@/lib/prisma';
 import { ACTIVE_STUDENT_ROSTER } from '@/lib/roster-status';
 import { effectiveDeadline } from '@/lib/effective-deadline';
-import { assignedToStudentWhere, overridesForStudentWhere } from '@/lib/assignment-visibility';
+import {
+  assignedToStudentWhere,
+  groupIdsFromOverrides,
+  overridesForStudentWhere,
+} from '@/lib/assignment-visibility';
 import type { CalendarAssignment } from '@/lib/calendar-shared';
 export { getDateKeyInTimeZone, getMonthRangeIso } from '@/lib/calendar-shared';
 // Re-exported so existing importers keep working; the implementation now lives in
@@ -42,9 +46,7 @@ export async function getAssignmentsForUserRange(params: {
   const staffCourseIds = new Set(
     isAdmin
       ? courseIds
-      : rosterEntries
-          .filter((r) => r.role === 'FACULTY' || r.role === 'TA')
-          .map((r) => r.courseId),
+      : rosterEntries.filter((r) => r.role === 'FACULTY' || r.role === 'TA').map((r) => r.courseId),
   );
   const staffCourseIdsArr = courseIds.filter((id) => staffCourseIds.has(id));
   const studentCourseIdsArr = courseIds.filter((id) => !staffCourseIds.has(id));
@@ -62,7 +64,10 @@ export async function getAssignmentsForUserRange(params: {
         {
           courseId: { in: studentCourseIdsArr },
           isPublished: true,
-          course: { isPublished: true },
+          // Published AND started. `canAccessCourse` refuses a student the contents of a
+          // course before its start date, so listing its work here would put deadlines on
+          // their calendar that they cannot open.
+          course: { isPublished: true, startDate: { lte: new Date() } },
           AND: [
             // Base due OR an override that applies to this student falls in the range. Their
             // group's counts: an extension granted to a group is the group members' deadline,
@@ -101,9 +106,13 @@ export async function getAssignmentsForUserRange(params: {
       // Carried through so staff can see (and the UI can mark) unpublished/draft
       // assignments. Students only ever receive published ones (see the OR above).
       isPublished: true,
-      // This viewer's own override (0 or 1 row), to resolve their effective due date.
+      // The overrides that bind this viewer: their own STUDENT row and the GROUP row for any
+      // group they are in. It used to select `{ userId }` alone, which meant a group extension
+      // was invisible here while the filter above had already widened on it: the assignment
+      // was fetched because the group's date fell in the month, then resolved back to its base
+      // date and dropped as out of range. The student lost it from the month it was due in.
       overrides: {
-        where: { userId },
+        where: overridesForStudentWhere(userId),
         select: {
           targetType: true,
           userId: true,
@@ -186,6 +195,7 @@ export async function getAssignmentsForUserRange(params: {
         { unlockAt, dueDate: a.dueDate, allowLateSubmissions, lateCutoff },
         overrides ?? [],
         userId,
+        groupIdsFromOverrides(overrides ?? []),
       ).dueDate;
       // The widened query can return an assignment whose base due is in range but whose
       // override moved this student's effective due out of it; drop those.
@@ -198,7 +208,13 @@ export async function getAssignmentsForUserRange(params: {
       const gradedCount = gradedCountByAssignment[a.id] ?? 0;
       const allGraded = totalStudents > 0 && gradedCount >= totalStudents;
       const duePassed = dueDate < now;
-      results.push({ ...entry, crossedOut: duePassed && allGraded, totalStudents, gradedCount, allGraded });
+      results.push({
+        ...entry,
+        crossedOut: duePassed && allGraded,
+        totalStudents,
+        gradedCount,
+        allGraded,
+      });
     } else {
       results.push({
         ...entry,

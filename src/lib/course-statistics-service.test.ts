@@ -59,6 +59,26 @@ const grade = (studentId: string, problemId: string, value: number, assignmentId
   updatedAt: GRADED_AT,
 });
 
+/**
+ * Membership rows, handed back in full whatever the query asked for.
+ *
+ * Deliberately unfiltered, which is the one case where ignoring the where clause is the point:
+ * it stands in for a database that returns rows from other sets, which is what the unscoped
+ * query used to produce and what a future edit could reintroduce. The service has to reach the
+ * right answer anyway, because the index keys every row by the set it came from rather than
+ * flattening them onto the student. The scoping of the query itself is a separate guarantee,
+ * asserted separately below.
+ */
+const setMemberships = (rows: { groupSetId: string; userId: string; groupId: string }[]) => {
+  prismaMock.groupMembership.findMany.mockResolvedValue(
+    rows.map((r) => ({
+      userId: r.userId,
+      groupId: r.groupId,
+      group: { groupSetId: r.groupSetId },
+    })),
+  );
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   prismaMock.course.findUnique.mockResolvedValue({
@@ -500,5 +520,109 @@ describe('the course average once missing work counts', () => {
 
     expect(stats.distribution.mean).toBeCloseTo(100, 5);
     expect(stats.distributionGradedOnly.mean).toBeCloseTo(100, 5);
+  });
+});
+
+/**
+ * The scoping bug, from the statistics side.
+ *
+ * `missing-work` reads an empty group list as the exemption: on a group assignment, being in
+ * no group means there was no way to submit, so no zero. This service asked the membership
+ * table with no filter at all, so a student whose only group was in another course came back
+ * looking like a group member here, lost the exemption, and had a zero folded into the course
+ * average that the professor then read as their performance.
+ */
+describe('a student whose only group is in another set', () => {
+  it('is not made accountable for group work they had no way to hand in', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([rosterRow('u1')]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      // Marked work, so this student has a percentage at all: one with no graded cell is left
+      // out of the distribution entirely, derived zeros or not.
+      assignment({ id: 'a1', problems: [problem('p1', 10)] }),
+      // Group work, past due, counting unsubmitted as zero.
+      assignment({
+        id: 'a2',
+        title: 'Group Lab',
+        groupSetId: 'gs1',
+        missingWorkIsZero: true,
+        // The shared DUE is a future date, and a future deadline stops the rule at
+        // "not due yet" before it ever reaches the question about groups.
+        dueDate: new Date('2020-01-01T00:00:00.000Z'),
+        problems: [problem('p2', 10)],
+      }),
+    ]);
+    prismaMock.assignmentProblemGrade.findMany.mockResolvedValue([grade('u1', 'p1', 10, 'a1')]);
+    // u1 is in a group, but it belongs to a different set: another course's teams. They are in
+    // no group for a2, so they could not have submitted it and it must not count against them.
+    setMemberships([{ groupSetId: 'some-other-set', userId: 'u1', groupId: 'gOther' }]);
+
+    const stats = (await getCourseStatistics('c1'))!;
+
+    // 10 of 10, the work actually asked of them. Attributing the other set's group to this
+    // assignment made a2 accountable too and reported this student at 50%.
+    expect(stats.distribution.includedCount).toBe(1);
+    expect(stats.distribution.mean).toBeCloseTo(100, 5);
+  });
+
+  it("asks the membership table only for this course's own sets", async () => {
+    prismaMock.roster.findMany.mockResolvedValue([rosterRow('u1')]);
+    prismaMock.assignment.findMany.mockResolvedValue([assignment({ groupSetId: 'gs1' })]);
+    setMemberships([]);
+
+    await getCourseStatistics('c1');
+
+    // It used to pass no `where` whatsoever, so one course's statistics page read every
+    // membership row in the installation. Five universities share one deployment.
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { groupSetId: { in: ['gs1'] } },
+    });
+  });
+});
+
+/**
+ * What the course statistics reads are scoped to.
+ *
+ * Given a course id, every read here has to stay inside it: the cohort, the assignments, the
+ * overrides and grades those assignments produced, and the submissions. The prisma mocks
+ * answer from their fixtures whatever the `where` says, so nothing above notices a missing
+ * key: without the `courseId` the roster read is every student in the installation, and the
+ * submission read is every attempt ever made. This service already shipped one bug of exactly
+ * that shape (an unscoped membership read), so the queries are asserted whole.
+ */
+describe('what the course statistics reads are scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('keeps the cohort, the work, and the attempts inside this course', async () => {
+    prismaMock.roster.findMany.mockResolvedValue([rosterRow('s1')]);
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'A1',
+        dueDate: DUE,
+        unlockAt: null,
+        lateCutoff: null,
+        allowLateSubmissions: false,
+        isPublished: true,
+        assignedToEveryone: true,
+        missingWorkIsZero: false,
+        groupSetId: null,
+        assignees: [],
+        problems: [problem('p1')],
+      },
+    ]);
+
+    await getCourseStatistics('c1');
+
+    expect(whereOf(prismaMock.roster.findMany)).toEqual({ courseId: 'c1', role: 'STUDENT' });
+    expect(whereOf(prismaMock.assignment.findMany)).toEqual({ courseId: 'c1' });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({ courseId: 'c1' });
+    // The rows hanging off those assignments, bounded by the ids this course produced.
+    expect(whereOf(prismaMock.assignmentOverride.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
   });
 });

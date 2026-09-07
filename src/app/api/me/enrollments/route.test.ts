@@ -47,3 +47,21 @@ describe('GET /api/me/enrollments', () => {
     expect(res.status).toBe(500);
   });
 });
+
+/**
+ * This route answers "which courses am I in", and the only thing making that true is the
+ * `userId` in its query. The prisma mock returns its fixture regardless, so dropping that line
+ * left all three tests passing while the route listed every enrolment in the installation.
+ */
+describe('whose enrolments this returns', () => {
+  it('asks only for the signed-in user', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', isAdmin: false } });
+    prismaMock.roster.findMany.mockResolvedValue([]);
+
+    await GET();
+
+    expect(prismaMock.roster.findMany.mock.calls[0][0]).toMatchObject({
+      where: { userId: 'u1' },
+    });
+  });
+});

@@ -87,6 +87,12 @@ interface DataTableProps<TData, TValue> {
    */
   stickyHeader?: boolean;
   /**
+   * Rows per page before the user has chosen one. Ten by default, which suits most tables
+   * here; raise it for a short list that is nicer read whole. Only the starting value: a
+   * deliberate change from the page-size select still wins and is remembered per table.
+   */
+  defaultPageSize?: number;
+  /**
    * Draw gridlines between rows and columns (a spreadsheet look). Off by default so
    * existing tables keep their borderless style; opt in for dense grids like the
    * gradebook where cell boundaries aid scanning. Only affects the desktop table, not
@@ -150,6 +156,7 @@ export function DataTable<TData, TValue>({
   loadingMessage = 'Loading data, please wait...',
   emptyAction,
   stickyHeader = false,
+  defaultPageSize = 10,
   bordered = false,
   showFirstLastPage = false,
   manualPagination = false,
@@ -216,10 +223,10 @@ export function DataTable<TData, TValue>({
 
   // Rows-per-page is remembered per table (client mode only -- in server mode the
   // parent owns the whole pagination object, including page size).
-  const [savedPageSize, savePageSize] = usePersistentPageSize(storageKey, 10);
+  const [savedPageSize, savePageSize] = usePersistentPageSize(storageKey, defaultPageSize);
   const [internalPagination, setInternalPagination] = useState<PaginationState>({
     pageIndex: 0,
-    pageSize: 10,
+    pageSize: defaultPageSize,
   });
   const pagination = paginationProp ?? internalPagination;
 

@@ -19,6 +19,7 @@ import {
   visibleAssignmentsForWidth,
 } from '@/lib/calendar-shared';
 import { apiPaths } from '@/lib/api-paths';
+import { queryKeys } from '@/lib/query-keys';
 import { CalendarCourseFilter, type FilterCourse } from './CalendarCourseFilter';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
 
@@ -280,7 +281,7 @@ export default function CalendarClient({
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['assignments', 'range', startIso, endIso],
+    queryKey: queryKeys.assignmentsRange(startIso, endIso),
     queryFn: ({ signal }) => fetchAssignmentsInRange(startIso, endIso, signal),
     initialData:
       isInitialRange && Array.isArray(initialAssignments) ? initialAssignments : undefined,
@@ -295,7 +296,11 @@ export default function CalendarClient({
   // students, drafts included for staff) is done server-side; we only drop archived
   // ones here, since the calendar never shows archived-course assignments anyway.
   const { data: navCourses = [] } = useQuery({
-    queryKey: ['me', 'courses', 'nav'],
+    // The same key the sidebar uses, so the two dedupe onto one read and, more importantly,
+    // so `invalidateQueries(['courses'])` after a publish/archive/duplicate reaches this copy
+    // too. Hand-writing it as ['me','courses','nav'] made this a second, private entry that
+    // every one of those invalidations missed.
+    queryKey: queryKeys.courses.nav(),
     queryFn: async () => {
       const res = await fetch(apiPaths.myCourses({ view: 'nav' }), { credentials: 'same-origin' });
       if (!res.ok) throw new Error('Failed to fetch courses');

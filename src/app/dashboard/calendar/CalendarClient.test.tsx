@@ -426,3 +426,41 @@ describe('CalendarClient', () => {
     expect(screen.getByTestId('due-date-count')).toHaveTextContent('1');
   });
 });
+
+/**
+ * The calendar's course filter and the sidebar read the same endpoint, so they have to read
+ * it under the same key.
+ *
+ * This one hand-wrote `['me','courses','nav']` while the sidebar used the factory's
+ * `['courses','nav']`. Two entries for one answer, which cost a duplicate fetch and, worse,
+ * put the calendar's copy outside every `invalidateQueries(['courses'])` the app fires after
+ * a publish, archive or duplicate. The list of courses to filter by silently kept the old
+ * answer. Asserted behaviourally, through an invalidation, rather than by comparing the key
+ * to the factory, which would pass just as happily if both were wrong.
+ */
+describe('the calendar course filter shares the sidebar cache', () => {
+  const navCalls = () =>
+    fetchMock().mock.calls.filter((c) => String(c[0]).includes('view=nav'));
+
+  it('refetches its course list when courses are invalidated', async () => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn(() => okJson([])).mockName('fetch') as unknown as typeof fetch);
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <CalendarClient />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(navCalls()).toHaveLength(1));
+
+    // What CoursesClient, CourseClient, ArchivedCoursesClient and course-handlers all fire
+    // after a course changes.
+    await client.invalidateQueries({ queryKey: ['courses'] });
+
+    await waitFor(() => expect(navCalls()).toHaveLength(2));
+  });
+});

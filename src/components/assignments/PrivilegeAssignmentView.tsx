@@ -195,7 +195,7 @@ export default function AssignmentDashboardPage({
   // assignees, overrides, etc.) so a type change or audience edit doesn't leave the Assign
   // To tab reading stale sub-queries.
   const invalidateAssignment = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ['course', id, 'assignment', aid] }),
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.assignment.all(id, aid) }),
     [queryClient, id, aid],
   );
 
@@ -302,7 +302,7 @@ export default function AssignmentDashboardPage({
   // hook's ['course', id, 'problems'] cache entry, so the ProblemsCard and this
   // picker dedupe (one canonical way to list a course's problems).
   const problemsQuery = useQuery({
-    queryKey: ['course', id, 'problems'],
+    queryKey: queryKeys.course.problems(id),
     queryFn: async () => {
       const res = await fetch(apiPaths.course(id, { view: 'problems' }));
       if (!res.ok) throw new Error('Failed to fetch problems');
@@ -317,7 +317,7 @@ export default function AssignmentDashboardPage({
   // Read 2: assignment list for the dropdown. Seeded from the SSR-provided
   // initialAssignments so there's no refetch on mount when the server sent it.
   const assignmentsQuery = useQuery({
-    queryKey: ['course', id, 'assignments-list'],
+    queryKey: queryKeys.course.assignmentsList(id),
     queryFn: () =>
       fetch(apiPaths.courseAssignments(id, { includeUnpublished: true }))
         .then((res) => res.json())
@@ -338,7 +338,7 @@ export default function AssignmentDashboardPage({
   // card because the header badge reads the same answer, and removing a link has to change
   // both at once.
   const lmsLinksQuery = useQuery({
-    queryKey: ['course', id, 'assignment', aid, 'lms-links'],
+    queryKey: queryKeys.assignment.lmsLinks(id, aid),
     /**
      * A failure here is a failure, not an answer.
      *
@@ -1005,7 +1005,7 @@ export default function AssignmentDashboardPage({
           courseIsArchived={courseIsArchived}
           assignmentId={aid}
           onCreated={async (created) => {
-            await queryClient.invalidateQueries({ queryKey: ['course', id, 'problems'] });
+            await queryClient.invalidateQueries({ queryKey: queryKeys.course.problems(id) });
             if (created?.id && !aid) {
               await handleAddProblems([created.id]);
             }

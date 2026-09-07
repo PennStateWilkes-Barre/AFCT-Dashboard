@@ -1,27 +1,8 @@
 'use client';
 
-import type { ColumnDef } from '@tanstack/react-table';
 import { useState } from 'react';
-import {
-  ChevronUp,
-  ClipboardCheck,
-  Download,
-  MoreHorizontal,
-  FileText,
-  MessageSquare,
-  RotateCcw,
-  Users,
-} from 'lucide-react';
+import { ChevronUp, ClipboardCheck, FileText, MessageSquare, Users } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from '@/components/ui/dropdown-menu';
-import { StatusBadge } from '@/components/ui/status-badge';
 import { DataTable } from '@/components/ui/data-table';
 import ProblemHeader from '@/components/ProblemHeader';
 import ProblemGradeForm from '@/components/ProblemGradeForm';
@@ -32,13 +13,11 @@ import type { GradeAudience } from '@/components/ProblemGradeForm';
 import type { Comment as DiscussionComment, CommentAudience } from '@/components/DiscussionPanel';
 import type { StudentProblemComment } from '@/lib/assignment-details';
 import type { ProblemSubmission } from '@/lib/problem-submission';
+import { buildSubmissionColumns } from '@/components/assignments/submission-columns';
 import { apiPaths } from '@/lib/api-paths';
-import { getTimingStatusChip, getReviewStatusChip, type StatusChip } from '@/lib/submission-status';
-import { formatDateInTimeZone, formatTimeInTimeZone } from '@/lib/date-format';
+import { getReviewStatusChip } from '@/lib/submission-status';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { GradeSyncCard } from '@/components/assignments/GradeSyncCard';
-import { TEXT_LINK_CLASS } from '@/lib/link-styles';
-import { cn } from '@/lib/utils';
 import { FEEDBACK_WITHHELD_MESSAGE } from '@/lib/feedback-visibility';
 
 type Problem = {
@@ -92,6 +71,13 @@ export type ProblemWorkspaceProps = {
   /** Hold the grade against the autograder, or hand it back. */
   onManualHoldChange?: (held: boolean) => void;
   /** The group whose work this is, on a group assignment. */
+  /**
+   * Whether the assignment is group work at all, which is a different question from whether
+   * this student has a group. Without it a student in no group saw the card simply missing
+   * from a page that says "Type: Group" two inches above, and nothing told them why they
+   * cannot submit.
+   */
+  isGroupWork?: boolean;
   group?: { id: string; name: string } | null;
   /** The other members of that group. */
   groupMembers?: { id: string; firstName: string | null; lastName: string | null }[];
@@ -159,6 +145,7 @@ export default function ProblemWorkspace({
   gradeSource = 'AUTOGRADER',
   onManualHoldChange,
   group = null,
+  isGroupWork = false,
   groupMembers,
   gradeAudience,
   groupGradeValue,
@@ -237,211 +224,21 @@ export default function ProblemWorkspace({
     link.click();
   };
 
-  // Status (timing) and Result (evaluator verdict) each render one of these. StatusBadge
-  // takes its colour from the chip's own variant, so the label and its colour are decided in
-  // lib/submission-status rather than per table, and a dot conveying meaning by colour alone
-  // is replaced by a badge whose text carries it.
-  const renderStatusChip = (chip: StatusChip) => <StatusBadge chip={chip} />;
-
-  // Built inline so each cell's action buttons capture the current handlers/flags.
-  // Status and Result expose a string accessor + multiselect filter so DataTable's own
-  // Filters popover replaces the previous custom status chips.
-  const submissionColumns: ColumnDef<ProblemSubmission>[] = [
-    {
-      id: 'attempt',
-      header: 'Attempt',
-      accessorFn: (s) => attemptNumbers.get(s.id) ?? 0,
-      cell: ({ row }) => (
-        <span className="tabular-nums">{attemptNumbers.get(row.original.id) ?? '—'}</span>
-      ),
-      meta: { align: 'center' },
-    },
-    {
-      id: 'submitted',
-      header: 'Submitted',
-      accessorFn: (s) => new Date(s.submittedAt).getTime(),
-      cell: ({ row }) => {
-        const submission = row.original;
-        const submittedAt = new Date(submission.submittedAt);
-        const isLate =
-          submission.status?.toLowerCase() === 'late' ||
-          (hasValidDueDate && submittedAt.getTime() > dueDate!.getTime());
-        return (
-          <div className="flex flex-col gap-1">
-            <span>{formatDateInTimeZone(submittedAt, timezone)}</span>
-            <span className="text-muted-foreground text-xs">
-              {formatTimeInTimeZone(submittedAt, timezone, hour12)}
-            </span>
-            {isLate ? (
-              <Badge variant="warning" className="mt-1">
-                Late
-              </Badge>
-            ) : null}
-          </div>
-        );
-      },
-      meta: { priority: 1 },
-    },
-    ...(showSubmitter
-      ? [
-          {
-            id: 'submittedBy',
-            header: 'Submitted by',
-            accessorFn: (s: ProblemSubmission) =>
-              typeof s.submittedBy === 'string' ? s.submittedBy : '',
-            cell: ({ row }: { row: { original: ProblemSubmission } }) =>
-              typeof row.original.submittedBy === 'string' ? row.original.submittedBy : '—',
-            meta: { priority: 2 },
-          } as ColumnDef<ProblemSubmission>,
-        ]
-      : []),
-    {
-      id: 'status',
-      header: 'Status',
-      accessorFn: (s) => getTimingStatusChip(s, hasValidDueDate, dueDate).label,
-      enableSorting: false,
-      cell: ({ row }) =>
-        renderStatusChip(getTimingStatusChip(row.original, hasValidDueDate, dueDate)),
-      meta: {
-        priority: 1,
-        filterVariant: 'multiselect',
-        filterLabel: 'Status',
-        filterOptions: [
-          { label: 'On time', value: 'On time' },
-          { label: 'Late', value: 'Late' },
-        ],
-      },
-    },
-    {
-      id: 'result',
-      header: 'Result',
-      accessorFn: (s) => getReviewStatusChip(s).label,
-      enableSorting: false,
-      cell: ({ row }) => renderStatusChip(getReviewStatusChip(row.original)),
-      meta: {
-        priority: 1,
-        filterVariant: 'multiselect',
-        filterLabel: 'Result',
-        filterOptions: [
-          { label: 'Pending', value: 'Pending' },
-          { label: 'Processing', value: 'Processing' },
-          { label: 'Failed', value: 'Failed' },
-          { label: 'Correct', value: 'Correct' },
-          { label: 'Incorrect', value: 'Incorrect' },
-        ],
-      },
-    },
-    {
-      id: 'feedback',
-      header: 'Feedback',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const feedback = row.original.feedback;
-        // Withheld and empty are different things, and the dash alone says the wrong one: a
-        // student would read it as the evaluator having had nothing to tell them.
-        if (row.original.feedbackVisible === false)
-          return <span className="text-muted-foreground text-xs">{FEEDBACK_WITHHELD_MESSAGE}</span>;
-        if (!feedback)
-          return (
-            <span className="text-muted-foreground">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No feedback</span>
-            </span>
-          );
-        // TableCell bakes in whitespace-nowrap; override it here so long evaluator
-        // output wraps (and keeps its own line breaks) inside a bounded width.
-        return (
-          <div className="max-w-[28rem] text-xs break-words whitespace-pre-wrap">
-            {String(feedback)}
-          </div>
-        );
-      },
-      /*
-       * Priority 1, not 2.
-       * Priority 2 hides a column below 768px, and this table becomes cards below 640px, so
-       * between those two widths the cell was removed from the page altogether with no card
-       * to fall back on. A student in a half-width window lost the counterexample and the link
-       * to their own submission, with nothing saying either existed. This table carries a
-       * handful of attempts for one problem, so it has the room.
-       */
-      meta: { priority: 1 },
-    },
-    {
-      id: 'file',
-      header: 'File',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const submission = row.original;
-        if (!submission.fileName)
-          return (
-            <span className="text-muted-foreground">
-              <span aria-hidden="true">—</span>
-              <span className="sr-only">No file</span>
-            </span>
-          );
-        return (
-          // The name previews; everything else lives in the row's menu.
-          <button
-            type="button"
-            onClick={() => onViewSubmission(submission)}
-            className={cn(TEXT_LINK_CLASS, 'break-all')}
-            title={`Preview ${submission.originalFileName || 'submission'}`}
-          >
-            {submission.originalFileName || submission.fileName}
-          </button>
-        );
-      },
-      /*
-       * Priority 1, not 2.
-       * Priority 2 hides a column below 768px, and this table becomes cards below 640px, so
-       * between those two widths the cell was removed from the page altogether with no card
-       * to fall back on. A student in a half-width window lost the counterexample and the link
-       * to their own submission, with nothing saying either existed. This table carries a
-       * handful of attempts for one problem, so it has the room.
-       */
-      meta: { priority: 1 },
-    },
-    {
-      id: 'actions',
-      header: '',
-      enableSorting: false,
-      cell: ({ row }) => {
-        const submission = row.original;
-        if (!submission.fileName) return null;
-        // A re-run while one is already queued or running would do nothing useful, so the
-        // item is disabled rather than hidden: the action still reads as available in
-        // general, just not right now.
-        const pendingOrProcessing =
-          submission.status?.toLowerCase() === 'pending' ||
-          submission.status?.toLowerCase() === 'processing';
-        return (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" aria-label="Attempt actions">
-                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleDownload(submission)}>
-                <Download className="h-4 w-4" aria-hidden="true" />
-                Download file
-              </DropdownMenuItem>
-              {isPrivilegedUser ? (
-                <DropdownMenuItem
-                  disabled={pendingOrProcessing}
-                  onClick={() => onRerunSubmission?.(submission)}
-                >
-                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                  Rerun the autograder
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        );
-      },
-      meta: { align: 'right' },
-    },
-  ];
+  // The attempts table's columns, in their own file: 196 lines of column definitions were the
+  // bulk of this one, and every other table here keeps them in a `*-columns.tsx` beside it.
+  // Rebuilt each render on purpose, so an action cell never holds a stale handler.
+  const submissionColumns = buildSubmissionColumns({
+    timeZone: timezone,
+    hour12,
+    dueDate,
+    hasValidDueDate,
+    attemptNumbers,
+    isPrivilegedUser,
+    showSubmitter,
+    onViewSubmission,
+    onDownload: handleDownload,
+    onRerunSubmission,
+  });
 
   // Named because two places ask it: whether the grade card exists at all, and whether its
   // first section needs a rule under it.
@@ -469,18 +266,9 @@ export default function ProblemWorkspace({
           </div>
           <ProblemHeader
             className="min-w-0"
-            action={
-              isPrivilegedUser ? null : (
-                // A readout, not a state: it says what the grade is, so it stays quiet and
-                // takes the same geometry as the problem facts immediately below it.
-                <Badge variant="outline" className="gap-2 px-3 py-2">
-                  <span className="font-semibold tracking-widest uppercase">Grade</span>
-                  <span>
-                    {currentGrade !== null ? currentGrade : '-'} / {problem.maxPoints}
-                  </span>
-                </Badge>
-              )
-            }
+            // No grade here any more. It used to hang off this heading as a badge, which put
+            // the one number a student came for inside the card about their attempts. It has
+            // its own card in the right column now, where the grader's version of it lives.
             title={problem.title}
             description={problem.description ?? undefined}
             descriptionJson={(problem as { descriptionJson?: unknown }).descriptionJson}
@@ -531,101 +319,147 @@ export default function ProblemWorkspace({
           )}
         </div>
 
-        {/* Right column: what you are doing about this student's work. Two cards, because
-            marking the work and talking about it are two jobs; the thread is long and open
-            ended, the grade is three controls. */}
+        {/* Right column, in the order the questions get asked: what the grade is, who it is
+            shared with, and what anyone has said about it. One card each. They used to be a
+            single box holding the grade and the group under a rule, which made a group look
+            like part of the marking controls rather than a fact about the work. Each renders
+            only when it has something to hold, so an absent one leaves no empty frame. */}
         <div className="flex min-w-0 flex-col gap-4">
-          {/* A student sees neither the grade controls nor, usually, a group, and an empty
-              bordered box is worse than no box: the card only exists if it holds something. */}
-          {showGradeControls || group ? (
+          {showGradeControls ? (
             <div className="bg-card flex min-w-0 flex-col gap-4 rounded-md border p-4">
-              {showGradeControls ? (
-                // The rule belongs between two sections, so it is only drawn when the group
-                // block follows. On its own this is the last thing in the card.
-                <div className={`flex flex-col gap-2 ${group ? 'border-b pb-4' : ''}`}>
-                  <div className="flex items-center gap-2">
-                    <ClipboardCheck className="text-muted-foreground h-4 w-4" aria-hidden="true" />
-                    <h3 className="text-sm font-medium">Problem Grade</h3>
-                  </div>
-                  <ProblemGradeForm
-                    value={gradeInput}
-                    currentGrade={currentGrade}
-                    maxPoints={problem.maxPoints}
-                    disabled={courseIsArchived}
-                    isSaving={isSavingGrade}
-                    isLoading={isLoadingGrade}
-                    error={gradeError}
-                    onChange={onGradeInputChange}
-                    onSubmit={onSaveGrade}
-                    audience={gradeAudience}
-                    groupGradeValue={groupGradeValue}
-                  />
-                  {/* Renders nothing unless the course is linked to an LMS. */}
-                  {assignmentId ? (
-                    <GradeSyncCard
-                      assignmentId={assignmentId}
-                      variant="inline"
-                      studentId={studentId}
-                    />
-                  ) : null}
-                  {/* Under the grade rather than beside the heading: it needs a sentence to
-                    mean anything, and the sentence is the part the old switch was missing. */}
-                  {onManualHoldChange ? (
-                    <GradeHoldControl
-                      autograderEnabled={!!problem.autograderEnabled}
-                      gradeSource={gradeSource}
-                      gradedManually={gradedManually}
-                      hasGrade={currentGrade !== null && currentGrade !== undefined}
-                      onChange={onManualHoldChange}
-                      disabled={courseIsArchived}
-                      className="mt-1"
-                    />
-                  ) : null}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <ClipboardCheck className="text-muted-foreground h-4 w-4" aria-hidden="true" />
+                  <h3 className="text-sm font-medium">Problem Grade</h3>
                 </div>
+                <ProblemGradeForm
+                  value={gradeInput}
+                  currentGrade={currentGrade}
+                  maxPoints={problem.maxPoints}
+                  disabled={courseIsArchived}
+                  isSaving={isSavingGrade}
+                  isLoading={isLoadingGrade}
+                  error={gradeError}
+                  onChange={onGradeInputChange}
+                  onSubmit={onSaveGrade}
+                  audience={gradeAudience}
+                  groupGradeValue={groupGradeValue}
+                />
+                {/* Renders nothing unless the course is linked to an LMS. */}
+                {assignmentId ? (
+                  <GradeSyncCard
+                    assignmentId={assignmentId}
+                    variant="inline"
+                    studentId={studentId}
+                  />
+                ) : null}
+                {/* Under the grade rather than beside the heading: it needs a sentence to
+                    mean anything, and the sentence is the part the old switch was missing. */}
+                {onManualHoldChange ? (
+                  <GradeHoldControl
+                    autograderEnabled={!!problem.autograderEnabled}
+                    gradeSource={gradeSource}
+                    gradedManually={gradedManually}
+                    hasGrade={currentGrade !== null && currentGrade !== undefined}
+                    onChange={onManualHoldChange}
+                    disabled={courseIsArchived}
+                    className="mt-1"
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {/* The student's own grade, in the slot the grader's Problem Grade card occupies.
+              The two never appear together (`showGradeControls` is privileged-only), so the
+              heading and icon are shared deliberately: one name for one thing, whoever is
+              looking. It renders ungraded as well as graded, because "not yet" is an answer
+              to the question a student opened this page to ask. */}
+          {!isPrivilegedUser ? (
+            <div className="bg-card flex min-w-0 flex-col gap-2 rounded-md border p-4">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="text-muted-foreground h-4 w-4" aria-hidden="true" />
+                <h3 className="text-sm font-medium">Problem Grade</h3>
+              </div>
+              <p className="text-2xl leading-none font-semibold tabular-nums">
+                {currentGrade !== null ? currentGrade : '—'}
+                <span className="text-muted-foreground text-base font-normal">
+                  {' / '}
+                  {problem.maxPoints}
+                </span>
+              </p>
+              {currentGrade === null ? (
+                <p className="text-muted-foreground text-xs">Not graded yet.</p>
               ) : null}
-              {group ? (
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-2">
-                    <Users className="text-muted-foreground h-4 w-4" aria-hidden="true" />
-                    <h3 className="text-sm font-medium">
-                      {group.name} · {(groupMembers?.length ?? 0) + 1}{' '}
-                      {(groupMembers?.length ?? 0) + 1 === 1 ? 'member' : 'members'}
-                    </h3>
-                    {/* Collapsed by default: the count in the heading answers the usual
+            </div>
+          ) : null}
+
+          {isGroupWork && !group ? (
+            <div className="bg-card flex min-w-0 flex-col gap-2 rounded-md border p-4">
+              <div className="flex items-center gap-2">
+                <Users className="text-muted-foreground h-4 w-4" aria-hidden="true" />
+                <h3 className="text-sm font-medium">Group</h3>
+              </div>
+              {/* States the fact and its consequence, rather than leaving a gap where a card
+                  should be on a page whose banner says "Type: Group".
+
+                  Not an error, and deliberately not "ask to be added": submitting without a
+                  group is allowed. `create-submission` writes the attempt with no
+                  studentGroupId and counts it against this student alone, which is a
+                  reasonable thing for an instructor to have intended. What changes is that
+                  the work is theirs rather than a group's, and that is the part worth saying
+                  before they submit. */}
+              <p className="text-muted-foreground text-sm">
+                {subjectName && subjectName !== 'You'
+                  ? `${subjectName} is not in a group for this assignment, but can still submit on their own.`
+                  : 'You are not in a group for this assignment, but you can still submit on your own. If you feel like this is an error, contact your instructor.'}
+              </p>
+            </div>
+          ) : null}
+
+          {group ? (
+            <div className="bg-card flex min-w-0 flex-col gap-4 rounded-md border p-4">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <Users className="text-muted-foreground h-4 w-4" aria-hidden="true" />
+                  <h3 className="text-sm font-medium">
+                    {group.name} · {(groupMembers?.length ?? 0) + 1}{' '}
+                    {(groupMembers?.length ?? 0) + 1 === 1 ? 'member' : 'members'}
+                  </h3>
+                  {/* Collapsed by default: the count in the heading answers the usual
                       question, and the names are only needed when something looks wrong. */}
-                    <button
-                      type="button"
-                      onClick={() => setMembersOpen((open) => !open)}
-                      aria-expanded={membersOpen}
-                      aria-controls="group-members"
-                      className="text-muted-foreground hover:text-foreground ml-auto rounded p-1"
-                    >
-                      <ChevronUp
-                        className={`h-4 w-4 transition-transform ${membersOpen ? '' : 'rotate-180'}`}
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">
-                        {membersOpen ? 'Collapse members' : 'Expand members'}
-                      </span>
-                    </button>
-                  </div>
-                  {/* The whole group, the student under review included: a list that omitted
+                  <button
+                    type="button"
+                    onClick={() => setMembersOpen((open) => !open)}
+                    aria-expanded={membersOpen}
+                    aria-controls="group-members"
+                    className="text-muted-foreground hover:text-foreground ml-auto rounded p-1"
+                  >
+                    <ChevronUp
+                      className={`h-4 w-4 transition-transform ${membersOpen ? '' : 'rotate-180'}`}
+                      aria-hidden="true"
+                    />
+                    <span className="sr-only">
+                      {membersOpen ? 'Collapse members' : 'Expand members'}
+                    </span>
+                  </button>
+                </div>
+                {/* The whole group, the student under review included: a list that omitted
                     them would read as "everyone else", which is not who the grade and the
                     thread apply to. */}
-                  <p
-                    id="group-members"
-                    hidden={!membersOpen}
-                    className="text-muted-foreground text-xs"
-                  >
-                    {[
-                      subjectName ?? 'This student',
-                      ...(groupMembers ?? []).map(
-                        (m) => `${m.firstName ?? ''} ${m.lastName ?? ''}`.trim() || 'Student',
-                      ),
-                    ].join(', ')}
-                  </p>
-                </div>
-              ) : null}
+                <p
+                  id="group-members"
+                  hidden={!membersOpen}
+                  className="text-muted-foreground text-xs"
+                >
+                  {[
+                    subjectName ?? 'This student',
+                    ...(groupMembers ?? []).map(
+                      (m) => `${m.firstName ?? ''} ${m.lastName ?? ''}`.trim() || 'Student',
+                    ),
+                  ].join(', ')}
+                </p>
+              </div>
             </div>
           ) : null}
 

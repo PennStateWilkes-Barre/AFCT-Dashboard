@@ -137,7 +137,11 @@ const Navbar: React.FC = () => {
     // Two stops rather than a flat fill, dark at the rail end and a shade lighter across to
     // the right. Both are tokens, so the high-contrast theme sets them equal and the band goes
     // flat there without this file knowing about it. See --navbar in globals.css.
-    <header className="from-navbar to-navbar-end text-navbar-foreground border-navbar-border flex h-14 shrink-0 items-center justify-between border-b bg-gradient-to-r px-4">
+    <header
+      // Read by the sign-in entrance animation in globals.css; see DashboardEntryTransition.
+      data-entry="navbar"
+      className="from-navbar to-navbar-end text-navbar-foreground border-navbar-border flex h-14 shrink-0 items-center justify-between border-b bg-gradient-to-r px-4"
+    >
       <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-4">
         <EnhancedSidebarTrigger className={NAVBAR_CONTROL_CLASS} />
         {/* min-w-0 + flex-1: the trail gets whatever the header has left after the two

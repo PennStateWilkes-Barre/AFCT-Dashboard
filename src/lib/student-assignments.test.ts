@@ -12,6 +12,7 @@ const prismaMock = vi.hoisted(() => ({
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 
 import { getStudentCourseAssignments } from './student-assignments';
+import { assignedToStudentWhere } from '@/lib/assignment-visibility';
 
 const studentOverride = (over: Record<string, unknown>) => ({
   targetType: 'STUDENT',
@@ -233,5 +234,235 @@ describe('work nobody handed in', () => {
 
     expect(assignment.problems[0].grade).toBeNull();
     expect(assignment.problems[0].missing).toBe(false);
+  });
+});
+
+/**
+ * A grant aimed at a group, seen from the student's side.
+ *
+ * The number a student is shown and the number the submit path enforces have to be the same
+ * number. They are computed by the same resolver but from separately fetched group ids, and
+ * this is the side that decides what the page says: a cap shown too low costs an attempt the
+ * student had, one shown too high is the "told 5, blocked at 3" complaint.
+ */
+describe('extra attempts granted to a group', () => {
+  const groupAssignment = (over: Record<string, unknown> = {}) => ({
+    id: 'a1',
+    title: 'Group Lab',
+    description: 'desc',
+    unlockAt: null,
+    dueDate: new Date('2026-01-10T23:59:00.000Z'),
+    allowLateSubmissions: false,
+    lateCutoff: null,
+    groupSetId: 'gs1',
+    overrides: [],
+    ...over,
+  });
+
+  const groupGrant = (groupId: string, extraSubmissions = 2) => ({
+    assignmentId: 'a1',
+    problemId: 'p1',
+    targetType: 'GROUP' as const,
+    userId: null,
+    groupId,
+    extraSubmissions,
+  });
+
+  it('raises the cap for a member of the group it was granted to', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([groupAssignment()]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([{ groupSetId: 'gs1', groupId: 'g1' }]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([groupGrant('g1')]);
+
+    const result = await getStudentCourseAssignments('stu-1', 'c1');
+
+    expect(result[0].problems[0].maxSubmissions).toBe(3); // base 1 + granted 2
+  });
+
+  it('leaves a non-member on the base cap', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([groupAssignment()]);
+    // In the set, but in a different group from the one that was granted the extras.
+    prismaMock.groupMembership.findMany.mockResolvedValue([{ groupSetId: 'gs1', groupId: 'g2' }]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([groupGrant('g1')]);
+
+    const result = await getStudentCourseAssignments('stu-1', 'c1');
+
+    expect(result[0].problems[0].maxSubmissions).toBe(1);
+  });
+
+  it('ignores a grant to a group of theirs in some other set', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([groupAssignment()]);
+    // Their group in another course. The grant query is deliberately broad (it matches any
+    // group the student is in), so the set scoping has to happen when the cap is resolved.
+    prismaMock.groupMembership.findMany.mockResolvedValue([
+      { groupSetId: 'some-other-set', groupId: 'gOther' },
+    ]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([groupGrant('gOther')]);
+
+    const result = await getStudentCourseAssignments('stu-1', 'c1');
+
+    expect(result[0].problems[0].maxSubmissions).toBe(1);
+  });
+
+  it('does not apply a group grant to an individual assignment', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([groupAssignment({ groupSetId: null })]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([{ groupSetId: 'gs1', groupId: 'g1' }]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([groupGrant('g1')]);
+
+    const result = await getStudentCourseAssignments('stu-1', 'c1');
+
+    expect(result[0].problems[0].maxSubmissions).toBe(1);
+  });
+
+  it('adds a student grant and a group grant together, the way the submit path does', async () => {
+    prismaMock.assignment.findMany.mockResolvedValue([groupAssignment()]);
+    prismaMock.groupMembership.findMany.mockResolvedValue([{ groupSetId: 'gs1', groupId: 'g1' }]);
+    prismaMock.submissionGrant.findMany.mockResolvedValue([
+      groupGrant('g1', 2),
+      {
+        assignmentId: 'a1',
+        problemId: 'p1',
+        targetType: 'STUDENT' as const,
+        userId: 'stu-1',
+        groupId: null,
+        extraSubmissions: 3,
+      },
+    ]);
+
+    const result = await getStudentCourseAssignments('stu-1', 'c1');
+
+    expect(result[0].problems[0].maxSubmissions).toBe(6); // base 1 + 2 + 3
+  });
+});
+
+/**
+ * The query's own gate, asserted rather than assumed.
+ *
+ * The prisma mock answers whatever it is told to regardless of the `where`, so nothing about
+ * these fixtures notices if the gate goes: deleting the audience filter outright left the whole
+ * suite green while a student could read work assigned to other people. This feeds the grades
+ * page and the native client, so that is a disclosure, not a display bug.
+ */
+describe('what the assignment query is scoped to', () => {
+  const whereOf = () =>
+    (prismaMock.assignment.findMany.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+
+  it('asks only for published work assigned to this student', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+
+    const where = whereOf();
+    expect(where).toMatchObject({ courseId: 'c1', isPublished: true });
+    // Directly, by an assignee row, or through a group: the shared definition, not a copy.
+    expect(where).toMatchObject(assignedToStudentWhere('stu-1'));
+  });
+
+  it('drops both gates only when a privileged caller asks it to', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1', {
+      includeUnpublished: true,
+      includeUnassigned: true,
+    });
+
+    const where = whereOf();
+    expect(where).toEqual({ courseId: 'c1' });
+  });
+
+  it('keeps the audience gate when only the publish gate is widened', async () => {
+    // Staff previewing drafts still must not be handed somebody else's audience by accident.
+    await getStudentCourseAssignments('stu-1', 'c1', { includeUnpublished: true });
+
+    const where = whereOf();
+    expect(where).not.toHaveProperty('isPublished');
+    expect(where).toMatchObject(assignedToStudentWhere('stu-1'));
+  });
+});
+
+/**
+ * What the follow-up reads are scoped to.
+ *
+ * Once the assignment list is known, six more queries run off it: problems, grades, attempt
+ * counts, latest statuses, grants and memberships. Each is scoped to those assignment ids and,
+ * where it is the student's own record, to the student (their own rows plus their group's on
+ * group work, the same rule submit enforcement uses). The prisma mock returns its fixture
+ * whatever the `where` says, so a dropped key here would hand a student another student's
+ * attempt counts and grades with nothing in this file noticing.
+ */
+describe('what the follow-up student reads are scoped to', () => {
+  const groupScoped = {
+    OR: [{ studentId: 'stu-1' }, { studentGroup: { memberships: { some: { userId: 'stu-1' } } } }],
+  };
+
+  beforeEach(() => {
+    prismaMock.assignment.findMany.mockResolvedValue([
+      {
+        id: 'a1',
+        title: 'A1',
+        description: null,
+        unlockAt: null,
+        dueDate: null,
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        overrides: [],
+      },
+    ]);
+  });
+
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('reads problems for these assignments only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+    });
+  });
+
+  it('reads grades for these assignments and this student only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      studentId: 'stu-1',
+    });
+  });
+
+  it('counts attempts, and reads the latest status, for this student or their group only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.submission.groupBy)).toEqual({
+      assignmentId: { in: ['a1'] },
+      ...groupScoped,
+    });
+    expect(whereOf(prismaMock.submission.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      ...groupScoped,
+    });
+  });
+
+  it('reads grants for this student or their group, on these assignments only', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.submissionGrant.findMany)).toEqual({
+      assignmentId: { in: ['a1'] },
+      OR: [
+        { userId: 'stu-1' },
+        { studentGroup: { memberships: { some: { userId: 'stu-1' } } } },
+      ],
+    });
+  });
+
+  it('reads this student’s own group memberships', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    expect(whereOf(prismaMock.groupMembership.findMany)).toEqual({ userId: 'stu-1' });
+  });
+
+  it('asks only for the overrides that apply to this student', async () => {
+    await getStudentCourseAssignments('stu-1', 'c1');
+    const select = (
+      prismaMock.assignment.findMany.mock.calls[0][0] as {
+        select: { overrides: { where: unknown } };
+      }
+    ).select;
+    expect(select.overrides.where).toEqual({
+      OR: [
+        { userId: 'stu-1' },
+        { studentGroup: { memberships: { some: { userId: 'stu-1' } } } },
+      ],
+    });
   });
 });

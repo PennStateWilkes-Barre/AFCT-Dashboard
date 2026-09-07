@@ -289,6 +289,27 @@ describe('GET /api/courses/[id]/activity', () => {
       // No page query for the options request.
       expect(prismaMock.activityLog.findMany).not.toHaveBeenCalled();
     });
+
+    /**
+     * The two option lists are the only place this route names assignments and problems, and
+     * the prisma mock answers with its fixture whatever the `where` says. Without the
+     * `courseId` the filter dropdowns on one course's activity page would list every
+     * assignment and problem title in the installation, which is other courses' material.
+     */
+    it('lists only this course’s assignments and problems', async () => {
+      staff();
+      prismaMock.assignment.findMany.mockResolvedValue([]);
+      prismaMock.problem.findMany.mockResolvedValue([]);
+
+      await GET(req('?part=filters'), ctx);
+
+      expect(prismaMock.assignment.findMany.mock.calls[0][0]).toMatchObject({
+        where: { courseId: 'c1' },
+      });
+      expect(prismaMock.problem.findMany.mock.calls[0][0]).toMatchObject({
+        where: { courseId: 'c1' },
+      });
+    });
   });
 
   it('returns 500 when activity query fails', async () => {

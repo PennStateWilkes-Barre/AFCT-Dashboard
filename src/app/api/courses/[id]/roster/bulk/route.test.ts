@@ -280,3 +280,29 @@ describe('bulk enrolment audit', () => {
     expect(summary.metadata.alreadyEnrolledCount).toBe(1);
   });
 });
+
+/**
+ * Who counted as already enrolled.
+ *
+ * The before-picture decides which pasted names are logged as new enrolments. The prisma mock
+ * answers with its fixture whatever the `where` says, so without the `courseId` somebody
+ * enrolled in a different course would be treated as already here and their enrolment would
+ * go unlogged, and without the `userId` list the read covers the whole roster.
+ */
+describe('who the bulk enrolment counts as already here', () => {
+  it('reads the existing roster rows for this course and these people only', async () => {
+    authMock.mockResolvedValue({ user: { id: 'staff', isAdmin: true } });
+    prismaMock.roster.findMany.mockResolvedValue([]);
+
+    const req = new NextRequest('http://localhost/api/courses/c1/roster/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ userIds: ['u1', 'u2'] }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: 'c1' }) });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.roster.findMany.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1', userId: { in: ['u1', 'u2'] } },
+    });
+  });
+});

@@ -761,3 +761,70 @@ describe('findSubmissionMatches', () => {
     expect((attemptRead?.[0] as { where: { assignmentId: string } }).where.assignmentId).toBe('a1');
   });
 });
+
+/**
+ * What the similarity reads are scoped to.
+ *
+ * Similarity compares one assignment's attempts against each other. Every read is bounded by
+ * that assignment and by the problems it was asked about; the attempt-number read is bounded
+ * by the exact (problem, student) pairs it already matched. The prisma mock answers from its
+ * fixture whatever the `where` says, so a dropped key here would quietly compare a student's
+ * work against attempts from another assignment (or another course entirely) and report the
+ * overlap as if it meant something.
+ */
+describe('what the similarity reads are scoped to', () => {
+  const findManyWheres = () =>
+    prismaMock.submission.findMany.mock.calls.map((c) => (c[0] as { where: unknown }).where);
+
+  it('bounds the exact-match, attempt-number and provenance reads to this assignment', async () => {
+    prismaMock.submission.groupBy.mockResolvedValue([
+      { problemId: 'p1', shapeHash: 'shape-a', contentHash: 'hash-a', studentId: 's1' },
+      { problemId: 'p1', shapeHash: 'shape-a', contentHash: 'hash-a', studentId: 's2' },
+    ]);
+    prismaMock.submission.findMany.mockImplementation(
+      async (args: { where?: { provenanceFeatures?: unknown } }) =>
+        args?.where?.provenanceFeatures
+          ? [nearRow()]
+          : [
+              submission({ id: 'sub-1', studentId: 's1', student: student('s1') }),
+              submission({ id: 'sub-2', studentId: 's2', student: student('s2') }),
+            ],
+    );
+
+    await findSubmissionMatches('a1', ['p1'], problems);
+
+    const wheres = findManyWheres();
+    // Every read names the assignment, whichever of the three it is.
+    for (const w of wheres) expect(w).toMatchObject({ assignmentId: 'a1' });
+
+    const exact = wheres.find((w) => (w as { OR?: unknown }).OR && !isPairList(w));
+    expect(exact).toMatchObject({ assignmentId: 'a1', problemId: { in: ['p1'] } });
+
+    const provenance = wheres.find((w) => (w as { provenanceFeatures?: unknown }).provenanceFeatures);
+    expect(provenance).toMatchObject({ assignmentId: 'a1', problemId: { in: ['p1'] } });
+
+    // The attempt-number read is bounded by the exact (problem, student) pairs it matched,
+    // which is what makes "their third attempt" mean their third at this problem.
+    const attempts = wheres.find(isPairList);
+    expect(attempts).toEqual({
+      assignmentId: 'a1',
+      OR: [
+        { problemId: 'p1', studentId: 's1' },
+        { problemId: 'p1', studentId: 's2' },
+      ],
+    });
+  });
+});
+
+/** The attempt-number read is the one whose `OR` is a list of (problemId, studentId) pairs. */
+function isPairList(where: unknown): boolean {
+  const or = (where as { OR?: unknown[] } | undefined)?.OR;
+  return (
+    Array.isArray(or) &&
+    or.length > 0 &&
+    or.every((clause) => {
+      const c = clause as Record<string, unknown>;
+      return typeof c.problemId === 'string' && typeof c.studentId === 'string';
+    })
+  );
+}

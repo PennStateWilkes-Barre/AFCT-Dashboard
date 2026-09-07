@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toastMock, resetToastMock } from '@/test/mocks/toast';
 import { LtiTab } from './LtiTab';
+import { renderWithClient } from '@/test/query';
 
 /**
  * Registering an LMS: the values AFCT hands over, and the ones it takes back. Both halves have
@@ -30,7 +31,7 @@ const ok = (body: unknown) =>
 function show(platforms: (typeof platform)[] = [], siteUrl = 'https://afct.test') {
   const fetchMock = vi.fn().mockReturnValue(ok({ platforms }));
   vi.stubGlobal('fetch', fetchMock);
-  render(<LtiTab siteUrl={siteUrl} />);
+  renderWithClient(<LtiTab siteUrl={siteUrl} />);
   return fetchMock;
 }
 
@@ -152,7 +153,7 @@ describe('creating a registration link', () => {
         : ((await ok({ platforms: [] })) as Response),
     );
     vi.stubGlobal('fetch', fetchMock);
-    render(<LtiTab siteUrl="https://afct.test" />);
+    renderWithClient(<LtiTab siteUrl="https://afct.test" />);
     await user.click(await screen.findByRole('button', { name: /Create a registration link/ }));
     return fetchMock;
   };
@@ -231,7 +232,7 @@ describe('the registered list', () => {
 
   it('reports a failed load rather than showing an empty list as fact', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    render(<LtiTab siteUrl="https://afct.test" />);
+    renderWithClient(<LtiTab siteUrl="https://afct.test" />);
 
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
   });
@@ -282,7 +283,7 @@ describe('registering one', () => {
       } as Response),
     );
     vi.stubGlobal('fetch', fetchMock);
-    render(<LtiTab siteUrl="https://afct.test" />);
+    renderWithClient(<LtiTab siteUrl="https://afct.test" />);
     const user = userEvent.setup();
 
     await screen.findByRole('button', { name: /Add an LMS/ });

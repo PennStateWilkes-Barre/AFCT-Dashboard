@@ -6,6 +6,7 @@ import { effectiveMaxSubmissions } from '@/lib/submission-limits';
 import { discloseSubmissionFeedback, feedbackVisibilityMap } from '@/lib/feedback-visibility';
 import { isMissingZero, submittedKey } from '@/lib/missing-work';
 import { withCourseAuth } from '@/lib/api/with-auth';
+import { logStudentFeedbackViewed, logThrottledView } from '@/lib/api/activity';
 
 /**
  * Everything the caller needs to see their own work on an assignment, grouped by
@@ -40,8 +41,19 @@ import { withCourseAuth } from '@/lib/api/with-auth';
  *   404: { description: "Assignment not found in this course, or unpublished (for students)." }
  *   500: { description: Server error. }
  */
+/**
+ * "First Last" for a submission's author, matching the staff review route's wording so the
+ * two web views name the same person the same way. Falls back to "Unknown" rather than an
+ * empty cell, which would read as "nobody submitted this".
+ */
+function submitterName(
+  u: { firstName: string | null; lastName: string | null } | null | undefined,
+): string {
+  return `${u?.firstName ?? ''} ${u?.lastName ?? ''}`.trim() || 'Unknown';
+}
+
 export const GET = withCourseAuth(
-  async (_req, ctx, { user, courseId }) => {
+  async (req, ctx, { user, courseId }) => {
     const { aid: assignmentId } = await ctx.params;
     const userId = user.id;
 
@@ -134,6 +146,32 @@ export const GET = withCourseAuth(
           })
         : null;
       const myGroupId = myGroup?.groupId ?? null;
+      const isGroupAssignment = assignment.groupSetId != null;
+
+      // The group's name and the caller's groupmates, for the assignment page's group card.
+      // Their own group only, and only names: on a group assignment they already share every
+      // submission with these people, so who is in it is not a disclosure. Shaped exactly like
+      // the staff review-data route's, so ProblemWorkspace takes one prop shape from both.
+      const myGroupDetail = myGroupId
+        ? await prisma.studentGroup.findUnique({
+            where: { id: myGroupId },
+            select: {
+              id: true,
+              name: true,
+              memberships: {
+                select: {
+                  roster: {
+                    select: { user: { select: { id: true, firstName: true, lastName: true } } },
+                  },
+                },
+              },
+            },
+          })
+        : null;
+      // Everyone but the caller: the card names them separately as the person looking.
+      const myGroupMembers = (myGroupDetail?.memberships ?? [])
+        .map((m) => m.roster.user)
+        .filter((u) => u.id !== userId);
 
       const [submissions, comments, grades, grants] = await Promise.all([
         prisma.submission.findMany({
@@ -152,13 +190,27 @@ export const GET = withCourseAuth(
             originalFileName: true,
             problemId: true,
             status: true,
+            // Who made the attempt. Only disclosed on a group assignment (see below), where
+            // the caller is already looking at their groupmates' submissions and cannot
+            // otherwise tell whose is whose.
+            student: { select: { firstName: true, lastName: true } },
           },
         }),
         prisma.comment.findMany({
           where: {
             assignmentId,
             problemId: { in: problemIds },
-            OR: [{ aboutStudentId: userId }, { authorId: userId }],
+            OR: [
+              { aboutStudentId: userId },
+              { authorId: userId },
+              // Feedback written to their GROUP. The schema notes that on group work staff
+              // usually address the group rather than each member, so the shared submission
+              // gets one thread, and the staff review route has always read it that way. This
+              // side did not, so an instructor's feedback on group work reached nobody it was
+              // written for. Scoped to the caller's own group, which is the same id the cap
+              // and the submissions above are scoped to.
+              ...(myGroupId ? [{ aboutGroupId: myGroupId }] : []),
+            ],
           },
           include: {
             author: { select: { id: true, firstName: true, lastName: true } },
@@ -308,6 +360,88 @@ export const GET = withCourseAuth(
         ? gradesList.reduce((sum: number, grade) => sum + (grade ?? 0), 0)
         : null;
 
+      /**
+       * That this student was shown feedback somebody wrote to them.
+       *
+       * RQ1 and RQ2 are about what students do with feedback, and the log could not answer
+       * "did they ever look at it": a student reading their own record is not a disclosure,
+       * so nothing on this path was recorded (see the note on `withCourseAuth`, which has no
+       * success-logging option at all). This is instrumentation, deliberately narrow.
+       *
+       * Only when there is something of somebody else's to read. A student opening a problem
+       * nobody has written on has reviewed nothing, and a row saying otherwise would be noise
+       * in the one place the study has to trust.
+       *
+       * Throttled per assignment: this route is refetched on a 30-second stale time and again
+       * after the student posts a comment, so a row per request would measure polling rather
+       * than reading. `viewKey` is what separates two assignments in the same course.
+       *
+       * What it does NOT say: that they read the words. The panel is open by default, so this
+       * records "the page put staff comments in front of them", which is the strongest claim
+       * a server-side signal can make. Nor does it cover the evaluator's feedback, which the
+       * native client serves from `/api/client/v1/submissions` without ever asking this route.
+       */
+      // Three separate questions the study asks of the same page load, so three events rather
+      // than one with flags: did they open the assignment at all, was the evaluator's feedback
+      // in front of them, and had somebody written to them. Each throttles on its own action,
+      // and they run together so a hot read path pays one round trip rather than three.
+      const feedbackShown = Object.values(submissionsByProblem)
+        .flat()
+        .filter((sub) => sub.feedbackVisible && sub.feedback).length;
+      const commentsFromOthers = comments.filter((c) => c.author.id !== userId);
+      let commentEvent: Promise<void> | null = null;
+      if (commentsFromOthers.length > 0) {
+        // A system admin commenting has no roster row in the course, so their role is null and
+        // they count as "somebody else" but not as course staff. Both counts are recorded
+        // rather than one, so the analysis picks its own definition instead of inheriting this
+        // one.
+        const staffComments = commentsFromOthers.filter(
+          (c) => c.roster?.role === 'FACULTY' || c.roster?.role === 'TA',
+        );
+        commentEvent = logThrottledView(req, {
+          userId,
+          action: 'STUDENT_COMMENTS_VIEWED',
+          category: 'ASSIGNMENT',
+          courseId,
+          assignmentId,
+          key: assignmentId,
+          metadata: {
+            commentCount: commentsFromOthers.length,
+            staffCommentCount: staffComments.length,
+            problemsWithComments: new Set(commentsFromOthers.map((c) => c.problemId)).size,
+          },
+        });
+      }
+
+      await Promise.all([
+        // The engagement baseline, recorded whether or not there was anything to read. "They
+        // opened it and there was nothing there" is a finding, and only an unconditional event
+        // can distinguish it from not having looked.
+        //
+        // The assignment, not the problem: choosing a problem on this page is local state over
+        // one payload and never reaches the server, so problem-level engagement exists only in
+        // the native client, which fetches each problem's attempts as it goes.
+        logThrottledView(req, {
+          userId,
+          action: 'STUDENT_ASSIGNMENT_OPENED',
+          category: 'ASSIGNMENT',
+          courseId,
+          assignmentId,
+          key: assignmentId,
+          metadata: { problemCount: problemIds.length },
+        }),
+        feedbackShown > 0
+          ? logStudentFeedbackViewed(req, {
+              userId,
+              courseId,
+              assignmentId,
+              surface: 'web',
+              withFeedback: feedbackShown,
+            })
+          : null,
+        commentEvent,
+      ]);
+
       return NextResponse.json({
         assignmentGrade,
         problemGrades,
@@ -324,6 +458,10 @@ export const GET = withCourseAuth(
               submittedAt: submission.submittedAt.toISOString(),
               grade: gradeMap.get(submission.problemId) ?? null,
               feedback: submission.feedback,
+              // Group work only. On an individual assignment every attempt is the caller's
+              // own, so naming the submitter would add a column that says the same thing on
+              // every row; the field is simply absent and the table's column stays off.
+              ...(isGroupAssignment ? { submittedBy: submitterName(submission.student) } : {}),
               // Null feedback has two meanings and the screen has to tell them apart: the
               // evaluator had nothing to say, or this problem does not show what it said.
               feedbackVisible: submission.feedbackVisible,
@@ -335,6 +473,12 @@ export const GET = withCourseAuth(
             })),
           ]),
         ),
+        group: myGroupDetail ? { id: myGroupDetail.id, name: myGroupDetail.name } : null,
+        groupMembers: myGroupMembers.map((u) => ({
+          id: u.id,
+          firstName: u.firstName,
+          lastName: u.lastName,
+        })),
         commentsByProblem: Object.fromEntries(
           Object.entries(commentsByProblem).map(([problemId, problemComments]) => [
             problemId,

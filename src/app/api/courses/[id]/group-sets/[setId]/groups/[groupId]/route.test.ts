@@ -290,3 +290,26 @@ describe('DELETE /api/courses/[id]/group-sets/[setId]/groups/[groupId]', () => {
     expect(logErrorMock).toHaveBeenCalled();
   });
 });
+
+/**
+ * Which group this can rename or delete.
+ *
+ * The group id comes from the path, and the update and delete that follow go by id alone, so
+ * this lookup is the only thing confirming the group belongs to the set and the course in the
+ * URL. The prisma mock returns the same fixture whatever the `where` says, so without the
+ * nested `groupSet: { courseId }` a group in another course could be renamed or deleted from
+ * a URL scoped to your own.
+ */
+describe('which group this can reach', () => {
+  it('resolves the group through this set and this course', async () => {
+    staff();
+
+    const res = await PATCH(patchReq({ name: 'Team B' }), ctx);
+    expect(res.status).toBe(200);
+
+    // The first call is the group lookup; the later one filters on a name (the clash check).
+    expect(prismaMock.studentGroup.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'g1', groupSetId: 's1', groupSet: { courseId: 'c1' } },
+    });
+  });
+});

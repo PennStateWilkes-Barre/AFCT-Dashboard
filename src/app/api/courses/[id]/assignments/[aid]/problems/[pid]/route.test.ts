@@ -11,6 +11,10 @@ const prismaMock = vi.hoisted(() => ({
   roster: {
     findFirst: vi.fn(),
   },
+  // The settings dialog reads how many attempts already exist, so GET needs this delegate.
+  submission: {
+    count: vi.fn(),
+  },
 }));
 
 const authMock = vi.hoisted(() => vi.fn());
@@ -20,7 +24,7 @@ vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/auth', () => ({ auth: authMock }));
 vi.mock('@/lib/activity-log-utils', () => ({ createEnhancedActivityLog: activityLogMock }));
 
-import { PUT } from './route';
+import { GET, PUT } from './route';
 
 describe('PUT /api/courses/[id]/[aid]/problems/[pid]', () => {
   beforeEach(() => {
@@ -204,5 +208,41 @@ describe('PUT /api/courses/[id]/[aid]/problems/[pid]', () => {
         metadata: { error: 'unknown error' },
       }),
     );
+  });
+});
+
+/**
+ * What the attempt count on the settings dialog counts.
+ *
+ * The dialog shows how many attempts have been made at this problem on this assignment, and
+ * that number is what tells an instructor whether lowering the cap would strand somebody. The
+ * prisma mock answers with its fixture whatever the `where` says, so without either key the
+ * count is every attempt at the problem across every assignment, or every attempt on the
+ * assignment across every problem.
+ */
+describe('what the attempt count is scoped to', () => {
+  it('counts attempts at this problem on this assignment', async () => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ user: { id: 'admin-1', isAdmin: true } });
+    prismaMock.roster.findFirst.mockResolvedValue(null);
+    prismaMock.course.findUnique.mockResolvedValue({ isArchived: false });
+    prismaMock.assignmentProblem.findUnique.mockResolvedValue({
+      maxPoints: 20,
+      maxSubmissions: 3,
+      autograderEnabled: true,
+      showFeedback: true,
+    });
+    prismaMock.submission.count.mockResolvedValue(4);
+
+    const res = await GET(
+      new Request('http://localhost/api/courses/c1/assignments/a1/problems/p1'),
+      { params: Promise.resolve({ id: 'c1', aid: 'a1', pid: 'p1' }) },
+    );
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ submissionCount: 4 });
+
+    expect(prismaMock.submission.count).toHaveBeenCalledWith({
+      where: { assignmentId: 'a1', problemId: 'p1' },
+    });
   });
 });

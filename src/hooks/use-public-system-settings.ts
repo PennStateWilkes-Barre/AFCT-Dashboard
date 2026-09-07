@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiPaths } from '@/lib/api-paths';
 import { clampSessionTimeoutMinutes, DEFAULT_SESSION_TIMEOUT_MINUTES } from '@/lib/system-settings';
+import { queryKeys } from '@/lib/query-keys';
 
 export type PublicSystemSettings = {
   timezone?: string | null;
@@ -19,7 +20,7 @@ export type PublicSystemSettings = {
  */
 export function usePublicSystemSettings() {
   return useQuery({
-    queryKey: ['system-settings', 'public'],
+    queryKey: queryKeys.systemSettingsPublic(),
     queryFn: async () => {
       const res = await fetch(apiPaths.systemSettingsPublic(), { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load public settings');

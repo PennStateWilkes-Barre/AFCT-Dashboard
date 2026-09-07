@@ -550,6 +550,82 @@
   --primary: oklch(0.4882 0.2172 264.3763); /* #1D4ED8 */
 }
 
+/**
+ * Depth inside the sign-in page's decorative automaton.
+ *
+ * The drawings are SVG files inlined into the page (see RotatingAuthAutomaton and
+ * public/auth-automata/README.md). They are drawn flat: one colour, one stroke opacity, no
+ * classes. Flat is fine at a glance and muddy once the drawing is large, because every part
+ * shouts equally and the eye finds no subject. This gives it a reading order: states and
+ * their labels in the brighter blue, transitions and theirs in a darker one.
+ *
+ * **Two solid colours, never partial opacity.** That is the whole design of this block, and it
+ * is a correction. Dimming the pieces individually looked right until you noticed the
+ * arrowheads: a transition line runs *underneath* its own marker, so two translucent shapes
+ * overlapped and the arrowhead came out darker than the line feeding it, as though every arrow
+ * had been drawn twice. Opaque shapes cannot double up. The wrapper's own `opacity` is what
+ * makes the drawing recede, and it applies to the rendered result as a whole, so overlaps
+ * inside it are already resolved by the time it fades.
+ *
+ * It leans on the conventions the folder's README documents, which every drawing follows: a
+ * state is `circle r=28`, an accepting state adds `r=32` and `r=26`, a state label is
+ * `font-size=18` and a transition label is `font-size=15`. Every shape lives in a single
+ * top-level `<g>`, which is what lets `svg > g` mean "a transition" without also catching the
+ * arrowhead path inside `<defs>`. A drawing that ignores all this still renders, it simply
+ * renders flat, which is what it did before this existed.
+ */
+.auth-automaton :where(svg > g) circle {
+  stroke: #93c5fd;
+  stroke-opacity: 1;
+}
+
+/* The accepting state, drawn as two rings. Its emphasis is weight now rather than opacity,
+   which is the only lever left once everything here is opaque. */
+.auth-automaton :where(svg > g) circle[r='32'],
+.auth-automaton :where(svg > g) circle[r='26'] {
+  stroke-width: 2.5;
+}
+
+/* Transitions: straight ones, curved self-loops, and the arrowheads that finish them. The
+   arrowhead is a filled path inside <defs>, so it is matched separately and by fill; the
+   shared colour is what makes a line and its head read as one continuous stroke. */
+.auth-automaton :where(svg > g) line,
+.auth-automaton :where(svg > g) path {
+  stroke: #769bd6;
+  stroke-opacity: 1;
+}
+.auth-automaton :where(svg marker) path {
+  fill: #769bd6;
+  fill-opacity: 1;
+  stroke: none;
+}
+
+/* q0, q1, q2: the labels that make the picture legible at all. */
+.auth-automaton :where(svg) text[font-size='18'] {
+  fill: #93c5fd;
+  fill-opacity: 1;
+}
+
+/* The alphabet on the transitions. Same blue as the arrows they belong to. */
+.auth-automaton :where(svg) text[font-size='15'] {
+  fill: #769bd6;
+  fill-opacity: 1;
+}
+
+/**
+ * A haze behind the drawing, and it has to stay barely there.
+ *
+ * Painted by a ::before so it needs no extra element, and it lands behind the diagrams because
+ * it comes first in paint order among the wrapper's positioned children. It also inherits the
+ * wrapper's opacity, so the value below is already multiplied down by the time it is seen.
+ */
+.auth-automaton::before {
+  content: '';
+  position: absolute;
+  inset: -10% -6%;
+  background: radial-gradient(ellipse at center, rgba(147, 197, 253, 0.1), transparent 68%);
+}
+
 .dark {
   /* Slate/navy, chosen to sit under the charcoal sidebar rather than beside it. Dark
      surfaces climb an elevation ladder so layered states read apart:
@@ -1402,4 +1478,147 @@ input[type='week'] {
 .afct-rich-text :where(.katex-error) {
   color: var(--color-destructive);
   font-family: var(--font-mono, monospace);
+}
+
+/* ============================================================================
+   Sign-in transition
+
+   Signing in ends with a full page load, so the two halves of this are in two places and
+   have to agree. The login page (LoginForm) covers itself in navy and then navigates; the
+   dashboard (DashboardEntryTransition) lays the same navy back down and fades it away. The
+   colour is `--sidebar` on both sides, which is what hides the navigation between them.
+
+   **Read login-transition-tuning.css with this block.** That file is imported after this one
+   and it owns what the transition actually looks like now: a plain fade both ways. What is
+   below is the plumbing plus a first treatment (a circular wipe out of the Sign In button and
+   a staggered arrival for the dashboard's three regions) that was tried and judged too busy.
+   Its keyframes are still here because the tuning file overrides rather than replaces them.
+
+   All of it is CSS rather than framer-motion, for two reasons. The login overlay has to be
+   `position: fixed` while its nearest sensible parent carries a `translate` at xl and above,
+   and a transformed ancestor would make "fixed" mean "fixed to the card"; and the dashboard
+   half has to run before React exists on the page at all.
+
+   Reduced motion: the login page never starts the transition and the dashboard's script
+   returns early, so neither overlay is ever shown. The rules below are inside a
+   no-preference query as well, so a stale flag cannot animate anything either.
+   ============================================================================ */
+
+/* --- Leaving the login page --------------------------------------------------------- */
+
+.auth-exit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Sized and positioned inline: the circle is centred on the Sign In button and made wide
+   enough to reach the furthest corner of the viewport from there, which only the component
+   can know. --primary is the button's own cobalt on this surface, --sidebar the navy the
+   dashboard comes back on. */
+.auth-exit-overlay > span {
+  position: absolute;
+  border-radius: 9999px;
+  background: radial-gradient(circle, var(--primary) 0%, var(--sidebar) 72%);
+  transform: translate(-50%, -50%) scale(0);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .auth-exit-overlay > span {
+    animation: afct-login-wipe 260ms 60ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+}
+
+@keyframes afct-login-wipe {
+  from {
+    transform: translate(-50%, -50%) scale(0);
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* --- Arriving at the dashboard ------------------------------------------------------- */
+
+/* Present on every dashboard load and shown on almost none of them. Driving it from
+   `display` rather than from an attribute on the element itself is deliberate: the script
+   above runs before React hydrates, and the only thing it touches is <html>, which is the
+   one element the app already tells React not to reconcile. The overlay's own markup is
+   therefore always exactly what the server sent. */
+#afct-entry-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  background: var(--sidebar);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-afct-entering] #afct-entry-overlay {
+    display: block;
+    animation: afct-entry-fade 220ms ease-out forwards;
+  }
+
+  /* The rail, the header, then the page. Offsets of about 70ms, which is enough to read as
+     an order rather than as three things arriving late.
+
+     The sidebar's own container, not the wrapper around it. The wrapper holds a
+     `position: fixed` rail, and a transform on it would make that rail position itself
+     against the wrapper's empty box instead of the viewport. */
+  [data-afct-entering] [data-slot='sidebar-container'] {
+    animation: afct-entry-rail 200ms 40ms ease-out both;
+  }
+
+  [data-afct-entering] [data-entry='navbar'] {
+    animation: afct-entry-header 200ms 110ms ease-out both;
+  }
+
+  [data-afct-entering] [data-entry='main'] {
+    animation: afct-entry-page 220ms 180ms ease-out both;
+  }
+}
+
+@keyframes afct-entry-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes afct-entry-rail {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-header {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes afct-entry-page {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

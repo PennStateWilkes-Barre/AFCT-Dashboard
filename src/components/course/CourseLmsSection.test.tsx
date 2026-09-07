@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 
 import { CourseLmsSection } from './CourseLmsSection';
+import { renderWithClient } from '@/test/query';
 
 vi.mock('@/components/course/RosterSyncDialog', () => ({
   RosterSyncDialog: ({ open }: { open: boolean }) => (open ? <div>sync dialog</div> : null),
@@ -40,7 +41,7 @@ describe('the LMS connection card', () => {
   it('names the card so the rail is not two anonymous boxes', async () => {
     vi.stubGlobal('fetch', answering([link()]));
 
-    render(<CourseLmsSection courseId="c-1" />);
+    renderWithClient(<CourseLmsSection courseId="c-1" />);
 
     const card = await screen.findByRole('complementary', { name: 'Connected to your LMS' });
     expect(within(card).getByRole('heading', { level: 3 })).toBeVisible();
@@ -49,7 +50,7 @@ describe('the LMS connection card', () => {
   it('keeps the whole LMS course name, and says where it came from', async () => {
     vi.stubGlobal('fetch', answering([link()]));
 
-    render(<CourseLmsSection courseId="c-1" />);
+    renderWithClient(<CourseLmsSection courseId="c-1" />);
 
     expect(
       await screen.findByText('Introduction to the Theory of Computation, Section 002'),
@@ -63,7 +64,7 @@ describe('the LMS connection card', () => {
       answering([link(), link({ id: 'link-2', contextTitle: 'Section 003' })]),
     );
 
-    render(<CourseLmsSection courseId="c-1" />);
+    renderWithClient(<CourseLmsSection courseId="c-1" />);
 
     expect(await screen.findAllByRole('button', { name: /Disconnect/ })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: /Sync roster/ })).toHaveLength(1);
@@ -73,7 +74,7 @@ describe('the LMS connection card', () => {
   it('says when grades cannot be sent yet', async () => {
     vi.stubGlobal('fetch', answering([link({ canSendGrades: false })]));
 
-    render(<CourseLmsSection courseId="c-1" />);
+    renderWithClient(<CourseLmsSection courseId="c-1" />);
 
     expect(await screen.findByText(/Grades cannot be sent yet/)).toBeInTheDocument();
   });
@@ -82,7 +83,7 @@ describe('the LMS connection card', () => {
     const fetchMock = answering([]);
     vi.stubGlobal('fetch', fetchMock);
 
-    const { container } = render(<CourseLmsSection courseId="c-1" />);
+    const { container } = renderWithClient(<CourseLmsSection courseId="c-1" />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();

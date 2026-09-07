@@ -1,16 +1,8 @@
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import {
-  CircleCheck,
-  CircleSlash,
-  Gauge,
-  ListOrdered,
-  Share2,
-  Workflow,
-} from 'lucide-react';
+import { CircleCheck, CircleSlash, Gauge, ListOrdered, Share2, Workflow } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import type { BadgeVariant } from '@/lib/badge-presets';
-import { CardTitle } from '@/components/ui/card';
 import { RichDescription } from '@/components/rich-description/RichDescription';
 
 type ProblemHeaderProps = {
@@ -24,12 +16,6 @@ type ProblemHeaderProps = {
   maxSubmissions?: number;
   autograderEnabled?: boolean;
   className?: string;
-  /**
-   * Control shown on the title's row, such as the grade field. It sits here rather than as a
-   * sibling so the facts-and-description box below can span the full width instead of
-   * stopping where that control begins.
-   */
-  action?: React.ReactNode;
 };
 
 /**
@@ -68,7 +54,6 @@ export default function ProblemHeader({
   maxSubmissions,
   autograderEnabled,
   className,
-  action,
 }: ProblemHeaderProps) {
   const submissionsLabel =
     typeof maxSubmissions === 'number' ? (maxSubmissions < 0 ? 'Unlimited' : maxSubmissions) : null;
@@ -119,10 +104,13 @@ export default function ProblemHeader({
 
   return (
     <div className={className}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <CardTitle className="min-w-0 text-lg">{title}</CardTitle>
-        {action ? <div className="shrink-0">{action}</div> : null}
-      </div>
+      {/* The problem's name, for assistive tech only.
+          It is not drawn any more: the card it sits in is headed "Problem Attempts" and the
+          list beside it marks the selected problem, so the visible title repeated a word that
+          was already on screen twice. Removing it outright would have left nothing naming the
+          problem to somebody who cannot see which row of that list is highlighted, which is
+          why it stays in the accessibility tree. */}
+      <h3 className="sr-only">{title}</h3>
       {facts.length > 0 ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {facts.map(({ key, icon: Icon, label, variant }) => (
@@ -136,14 +124,20 @@ export default function ProblemHeader({
         </div>
       ) : null}
       {hasDescription ? (
-        <RichDescription
-          // Heading base: the CardTitle above is aria-level 3, so the description starts one level below it.
-          headingBaseLevel={4}
-          compact
-          description={description}
-          descriptionJson={descriptionJson}
-          className="text-muted-foreground mt-3 text-sm"
-        />
+        <>
+          {/* Labelled, because the assignment's own description sits on the same page. Without
+              a heading the two ran together as one block of prose and nothing said which was
+              which. */}
+          <h4 className="mt-3 text-sm font-semibold">Problem Description</h4>
+          <RichDescription
+            // Heading base: sits under the h4 label above, so the description starts below it.
+            headingBaseLevel={5}
+            compact
+            description={description}
+            descriptionJson={descriptionJson}
+            className="text-muted-foreground mt-1 text-sm"
+          />
+        </>
       ) : null}
     </div>
   );

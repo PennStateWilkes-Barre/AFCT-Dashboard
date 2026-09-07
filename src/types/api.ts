@@ -1676,10 +1676,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get my context for an assignment
-         * @description Everything the caller needs to see their own work on an assignment, grouped by  problem: their submissions, the comments addressed to them, and their per-problem  and overall grades. Requires enrollment in the course; students can't see it  until the assignment is published. Scoped entirely to the caller's own data.
-         *
-         *     [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/courses/[id]/assignments/[aid]/student-context/route.ts)
+         * GET /api/courses/{id}/assignments/{aid}/student-context
+         * @description [View source](https://github.com/PennStateCS/AFCT/blob/main/src/app/api/courses/[id]/assignments/[aid]/student-context/route.ts)
          */
         get: operations["getCoursesByIdAssignmentsByAidStudentContext"];
         put?: never;
@@ -8755,68 +8753,19 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Course id */
                 id: string;
-                /** @description Assignment id */
                 aid: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The caller's submissions, comments, and grades for the assignment. */
+            /** @description Success */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": {
-                        assignmentGrade?: number | null;
-                        problemGrades?: Record<string, never>;
-                        submissionCount?: number;
-                        /** @description Attempts per problem. Each carries feedbackVisible: false where the problem withholds the evaluator's feedback, so a null feedback can be told from one that is simply empty. */
-                        submissionsByProblem?: Record<string, never>;
-                        commentsByProblem?: Record<string, never>;
-                        /** @description Per-problem effective submission cap for the caller (base plus any grants); max null means unlimited. */
-                        problemLimits?: Record<string, never>;
-                    };
-                };
-            };
-            /** @description Not signed in. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Caller is not enrolled in the course. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Assignment not found in this course, or unpublished (for students). */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Server error. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
+                content?: never;
             };
         };
     };

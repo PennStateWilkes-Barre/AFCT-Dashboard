@@ -76,14 +76,33 @@ describe('CourseHeaderContent', () => {
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
   });
 
-  it('hides the staff/date line for students', () => {
-    render(<CourseHeaderContent course={mockCourse} isStudent />);
+  it('names the faculty and TAs to a student, but never the registration code', () => {
+    const withTa: FullCourse = {
+      ...mockCourse,
+      staff: [
+        ...(mockCourse.staff ?? []),
+        { id: 'ta-1', firstName: 'Alan', lastName: 'Turing', role: 'STUDENT', courseRole: 'TA' },
+      ],
+    };
+    render(<CourseHeaderContent course={withTa} isStudent />);
 
-    // Title and badges still render, but the faculty/TA line does not.
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(
       'CMPSC 431: Software Engineering',
     );
-    expect(screen.queryByText('Ada Lovelace')).not.toBeInTheDocument();
+    // Who teaches the course is the first thing a student looks for on it.
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('Alan Turing')).toBeInTheDocument();
+  });
+
+  it('withholds the registration code from a student even when the payload carries one', () => {
+    // A student is never sent a regCode, so this is the second of two guards: it fails if
+    // someone widens the payload without noticing the header renders whatever it is given.
+    render(<CourseHeaderContent course={mockCourse} isStudent />);
+
+    expect(screen.queryByText('ABCD-2345')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /copy registration code/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('omits the TAs label when the course has no TAs', () => {

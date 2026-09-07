@@ -123,3 +123,84 @@ describe('PUT assignees', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * The three "does this belong here" checks on the audience routes.
+ *
+ * `withCourseAuth` proves the caller may manage the course in the URL and nothing about the
+ * assignment id in the path or the ids in the body, so the queries carry those checks. Audience
+ * is who an assignment is for, so reaching across a course boundary here means assigning
+ * somebody else's work, or assigning yours to somebody else's students.
+ */
+describe('what an audience change is allowed to reach', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: Record<string, unknown> }).where;
+
+  it('looks the assignment up only within the course named in the URL', async () => {
+    await put({ assignedToEveryone: true, assignees: [] });
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toMatchObject({ id: 'a1', courseId: 'c1' });
+  });
+
+  it("looks groups up only within the assignment's own set", async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1', groupSetId: 'gs1' });
+    prismaMock.studentGroup.findMany.mockResolvedValue([{ id: 'g1' }]);
+
+    await put({ assignedToEveryone: false, assignees: [{ groupId: 'g1' }] });
+
+    expect(whereOf(prismaMock.studentGroup.findMany)).toMatchObject({ groupSetId: 'gs1' });
+  });
+
+  it('looks students up only on this course roster, and only the ones named', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1', groupSetId: null });
+    prismaMock.roster.findMany.mockResolvedValue([{ userId: 'u1' }]);
+
+    await put({ assignedToEveryone: false, assignees: [{ userId: 'u1' }] });
+
+    expect(whereOf(prismaMock.roster.findMany)).toMatchObject({
+      courseId: 'c1',
+      userId: { in: ['u1'] },
+    });
+  });
+
+  /**
+   * Reading the audience is scoped too. GET has its own lookup, and it is the one that
+   * decides whether this assignment belongs to the course in the URL at all.
+   */
+  it('reads the audience for this assignment, in this course', async () => {
+    prismaMock.assignmentAssignee.findMany.mockResolvedValue([]);
+
+    const res = await GET(new NextRequest('http://localhost/x'), ctx);
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({ id: 'a1', courseId: 'c1' });
+    expect(whereOf(prismaMock.assignmentAssignee.findMany)).toEqual({ assignmentId: 'a1' });
+  });
+
+  /**
+   * Trimming the now-unassigned overrides is a delete, so its scope matters more than most:
+   * without the `assignmentId` it clears date exceptions on every assignment in the
+   * installation, and without the target clause it clears the ones still assigned here.
+   */
+  it('drops date exceptions only for targets dropped from this assignment', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1', groupSetId: 'gs1' });
+    prismaMock.studentGroup.findMany.mockResolvedValue([{ id: 'g1' }]);
+
+    await put({ assignedToEveryone: false, assignees: [{ groupId: 'g1' }] });
+
+    expect(prismaMock.assignmentOverride.deleteMany).toHaveBeenCalledWith({
+      where: { assignmentId: 'a1', groupId: { notIn: ['g1'] } },
+    });
+  });
+
+  it('drops date exceptions only for students dropped from this assignment', async () => {
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1', groupSetId: null });
+    prismaMock.roster.findMany.mockResolvedValue([{ userId: 'u1' }]);
+
+    await put({ assignedToEveryone: false, assignees: [{ userId: 'u1' }] });
+
+    expect(prismaMock.assignmentOverride.deleteMany).toHaveBeenCalledWith({
+      where: { assignmentId: 'a1', userId: { notIn: ['u1'] } },
+    });
+  });
+});

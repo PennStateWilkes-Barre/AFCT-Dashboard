@@ -129,8 +129,10 @@ export function CourseHeaderContent({ course, isStudent }: CourseHeaderProps) {
     return { label: 'Open', theme: { variant: COURSE_LIFECYCLE_BADGE.open } };
   })();
 
-  // Staff only, and complete: the header names every faculty member and TA, and the course
-  // payload carries exactly those two roles.
+  // Everyone's, and complete: the header names every faculty member and TA. The course
+  // payload carries exactly those two roles, and a student's copy of it keeps their names
+  // while dropping their emails (`toStudentSafeEnrolled`), so this line is safe to show to
+  // a student. Who teaches the course is the first thing they look for on it.
   const staff: EnrolledUser[] = course.staff ?? [];
   const formatAllNames = (users: EnrolledUser[]) => {
     if (!Array.isArray(users) || users.length === 0) return 'None assigned';
@@ -215,22 +217,25 @@ export function CourseHeaderContent({ course, isStudent }: CourseHeaderProps) {
       {/* Faculty, TAs (only when there are any), then the registration code + copy.
             Indented to the title's text rather than the banner edge on wide screens, so the
             identity block reads as one column: the sm icon is 56px and the gap beside it 16.
-            No indent below sm, where the rows are stacked full width anyway. */}
-      {!isStudent && (
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm sm:pl-[4.5rem]">
+            No indent below sm, where the rows are stacked full width anyway.
+
+            The names are for everyone; the registration code is not. A student is never
+            sent one (`regCode` is null in their payload), so this guard is the second of
+            two rather than the only one, and it is here so that a change to the payload
+            cannot quietly put a join code on a student's screen. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm sm:pl-[4.5rem]">
+        <span>
+          <span className="text-course-banner-muted-foreground">Faculty: </span>
+          <span className="font-medium">{facultyNames}</span>
+        </span>
+        {tas.length > 0 && (
           <span>
-            <span className="text-course-banner-muted-foreground">Faculty: </span>
-            <span className="font-medium">{facultyNames}</span>
+            <span className="text-course-banner-muted-foreground">TAs: </span>
+            <span className="font-medium">{formatAllNames(tas)}</span>
           </span>
-          {tas.length > 0 && (
-            <span>
-              <span className="text-course-banner-muted-foreground">TAs: </span>
-              <span className="font-medium">{formatAllNames(tas)}</span>
-            </span>
-          )}
-          {registrationCode ? <RegistrationCode code={registrationCode} /> : null}
-        </div>
-      )}
+        )}
+        {!isStudent && registrationCode ? <RegistrationCode code={registrationCode} /> : null}
+      </div>
     </IdentityPanel>
   );
 }

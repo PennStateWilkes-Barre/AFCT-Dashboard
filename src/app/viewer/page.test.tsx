@@ -35,6 +35,9 @@ vi.mock('@/components/session/SessionWatcher', () => ({
 // Reaches the database and resolves permissions, neither of which this page's own tests are
 // about. Its behaviour is covered in lib/viewer-properties.test.ts.
 vi.mock('@/lib/viewer-properties', () => ({ loadViewerProperties: vi.fn(async () => null) }));
+// Course staff by default, which is who this page is for. The refusal has its own tests.
+const canOpenViewerFileMock = vi.hoisted(() => vi.fn(async (_kind: string, _file: string) => true));
+vi.mock('@/lib/viewer-access', () => ({ canOpenViewerFile: canOpenViewerFileMock }));
 vi.mock('./ViewerClient', () => ({ ViewerClient: () => null }));
 
 import ViewerPage from './page';
@@ -55,6 +58,8 @@ describe('the standalone viewer page', () => {
   beforeEach(() => {
     authMock.mockReset();
     redirectMock.mockClear();
+    canOpenViewerFileMock.mockReset();
+    canOpenViewerFileMock.mockResolvedValue(true);
   });
 
   it('sends a signed-out visitor to sign in', async () => {
@@ -76,10 +81,54 @@ describe('the standalone viewer page', () => {
     expect(html).not.toContain('Nothing to show');
   });
 
+  /**
+   * The window is a marking tool. Enforced here rather than by leaving the link off a
+   * student's page, because this URL is guessable, bookmarkable and shareable.
+   */
+  it('refuses somebody who is not staff on that file, and says where to go instead', async () => {
+    signedIn();
+    canOpenViewerFileMock.mockResolvedValue(false);
+
+    const html = await renderPage(GOOD);
+
+    expect(html).toContain('Nothing to show');
+    expect(html).toMatch(/course staff/i);
+    expect(html).toMatch(/assignment page/i);
+  });
+
+  it('drops only the files this reader may not open, and shows the rest', async () => {
+    // Staffness is per course: somebody can be faculty in one and a student in another, and
+    // one link can carry both.
+    signedIn();
+    canOpenViewerFileMock.mockImplementation(
+      async (_kind: string, file: string) => file === 'a.jff',
+    );
+
+    const html = await renderPage({
+      tabs: JSON.stringify([
+        { kind: 'submissions', file: 'a.jff', type: 'FA', name: 'a.jff', title: 'Mine to mark' },
+        {
+          kind: 'submissions',
+          file: 'b.jff',
+          type: 'FA',
+          name: 'b.jff',
+          title: 'Another course',
+        },
+      ]),
+    });
+
+    expect(html).toContain('Mine to mark');
+    expect(html).not.toContain('Another course');
+  });
+
   it.each([
     ['an unknown file store', { kind: 'pfps', file: 'a.jff', type: 'FA' }, /which kind of file/i],
     ['a traversal name', { kind: 'submissions', file: '../x', type: 'FA' }, /name a file/i],
-    ['an unknown machine type', { kind: 'submissions', file: 'a.jff', type: 'MEALY' }, /kind of machine/i],
+    [
+      'an unknown machine type',
+      { kind: 'submissions', file: 'a.jff', type: 'MEALY' },
+      /kind of machine/i,
+    ],
     ['nothing at all', {}, /which kind of file/i],
     ['a truncated tab list', { tabs: '[{"kind":"submi' }, /damaged/i],
   ])('refuses %s and says which part of the link is wrong', async (_l, search, expected) => {

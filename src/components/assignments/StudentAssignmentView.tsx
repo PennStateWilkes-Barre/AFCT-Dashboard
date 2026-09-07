@@ -647,8 +647,12 @@ export default function StudentAssignmentPage({
           onOpenChange={(open) => setOpenDialog({ open, submission: null })}
           // Preview only. The standalone viewer window is a staff tool: it exists for
           // comparing and arranging several machines while marking, and a student looking at
-          // one attempt of their own has nothing to do with it.
+          // one attempt of their own has nothing to do with it. The window refuses them at the
+          // server too, so this is about not offering a door rather than about locking it.
           allowOpenInWindow={false}
+          // Zoom, Fit, Center, a pan, and where the file came from. Enough to answer "is this
+          // the file I meant to send", which is what a student opens this for.
+          preview
           problemType={
             assignment.problems.find((u) => u.problem.id === openDialog?.submission?.problemId)
               ?.problem?.type

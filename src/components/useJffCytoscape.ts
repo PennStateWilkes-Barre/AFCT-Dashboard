@@ -281,6 +281,15 @@ export type UseJffCytoscapeOptions = {
    */
   canEditMachine?: boolean;
   /**
+   * Whether the states are pinned where the file has them.
+   *
+   * Separate from `canEditMachine`, which is about what the machine IS. Dragging a state moves
+   * the drawing rather than the machine, and a reader pulling a crowded diagram apart is the
+   * usual reason to want that. A preview is the case where even the arrangement should stay
+   * put: it exists to show the file as submitted, so the camera is the only thing that moves.
+   */
+  lockArrangement?: boolean;
+  /**
    * An element to keep in step with the graph's own transform.
    *
    * For anything drawn over the canvas in HTML rather than by cytoscape, which has to move and
@@ -942,6 +951,7 @@ export function useJffCytoscape({
   onLinkAnchor = null,
   graphOverlayRef = null,
   canEditMachine = true,
+  lockArrangement = false,
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
@@ -1860,14 +1870,16 @@ export function useJffCytoscape({
     const container = containerRef.current;
     const linking = onStateLink !== null;
     try {
-      cy?.autoungrabify?.(linking);
+      // Both reasons a state might not be draggable: a tool that means something else by a
+      // drag, and a view that does not move anything at all.
+      cy?.autoungrabify?.(linking || lockArrangement);
     } catch {
       // A graph mid-teardown.
     }
     // A crosshair, not a hand: this draws a line from here, it does not pick the state up.
     if (container) container.style.cursor = linking ? 'crosshair' : '';
     if (!linking) cancelLinkDraftRef.current();
-  }, [onStateLink, phase]);
+  }, [onStateLink, lockArrangement, phase]);
 
   /**
    * Take a state off the drawing, and every transition that touched it.

@@ -1006,10 +1006,12 @@ export function JffCytoscapeViewer({
   /**
    * The reader's own writing over this machine, and where it is kept between visits.
    *
-   * Keyed by the same identifier the remembered view uses, falling back to the file's URL when a
-   * caller has not given one, so two files opened side by side keep their own notes.
+   * Keyed by the file's own route, which is the one thing every way into this viewer agrees on:
+   * a note written in the dialog is still there after Open in Window, and the two panes of a
+   * split window keep their own. Not `viewStateKey`, which the standalone window supplies and
+   * the dialog does not, so the same file would have had two sets of notes.
    */
-  const textBoxes = useViewerTextBoxes(viewStateKey ?? src);
+  const textBoxes = useViewerTextBoxes(src);
   const selectTextBoxRaw = textBoxes.select;
   // The element the graph's transform is written to, so the boxes ride the pan and the zoom.
   const textOverlayRef = useRef<HTMLDivElement | null>(null);

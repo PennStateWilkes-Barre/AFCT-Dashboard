@@ -1850,7 +1850,7 @@ describe('the Text tool', () => {
     await waitFor(() => expect(document.activeElement).toBe(box));
   });
 
-  it('keeps what was typed, under a key of this file’s own', async () => {
+  it('keeps what was typed, under a key of its own for this file', async () => {
     const user = userEvent.setup();
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
@@ -1922,12 +1922,25 @@ describe('the Text tool', () => {
     expect(stored()).toHaveLength(1);
 
     fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
-    await screen.findByRole('button', { name: /^Resize size$/ });
+    await screen.findByTestId('viewer-text-resize-se');
 
     fireEvent.keyDown(window, { key: 'Delete' });
 
     await waitFor(() => expect(stored()).toEqual([]));
     expect(screen.queryByText('keep me')).toBeNull();
+  });
+
+  it('shows the same notes in the dialog and in the pop-out window', async () => {
+    // The window supplies a viewStateKey and the dialog does not, so keying on that would have
+    // given one file two sets of notes and lost them on Open in Window.
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([{ id: 'text-1', x: 0, y: 0, width: 200, height: 80, text: 'written here' }]),
+    );
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" viewStateKey="submissions:abc.jff" />);
+    await waitForEngine();
+
+    expect(await screen.findByText('written here')).toBeInTheDocument();
   });
 
   it('can be reached and opened from the keyboard', async () => {
@@ -1945,7 +1958,7 @@ describe('the Text tool', () => {
     expect(await screen.findByRole('textbox', { name: 'Text box' })).toHaveValue('from before');
   });
 
-  it('moves with the pointer, in the machine’s coordinates', async () => {
+  it('moves with the pointer, in the coordinates the machine uses', async () => {
     const user = userEvent.setup();
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
@@ -1972,7 +1985,7 @@ describe('the Text tool', () => {
     await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'note');
     fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
 
-    const handle = await screen.findByRole('button', { name: /^Resize size$/ });
+    const handle = await screen.findByTestId('viewer-text-resize-se');
     fireEvent.pointerDown(handle, { clientX: 0, clientY: 0 });
     fireEvent.pointerMove(handle, { clientX: -400, clientY: 60 });
     fireEvent.pointerUp(handle, { clientX: -400, clientY: 60 });

@@ -224,7 +224,9 @@ function TextBoxItem({
 
   return (
     <div
-      className="pointer-events-auto absolute"
+      // touch-none: without it a finger drag scrolls the page and cancels the gesture, and
+      // faculty are testing this on tablets.
+      className="pointer-events-auto absolute touch-none"
       style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       data-testid={`viewer-text-box-${box.id}`}
     >
@@ -279,15 +281,16 @@ function TextBoxItem({
 
       {selected && !editing
         ? HANDLES.map((handle) => (
-            <button
+            // Pointer only, deliberately, and hidden from assistive technology and from Tab.
+            // A focusable control that does nothing when it is activated is worse than no
+            // control: resizing from the keyboard does not exist yet, and offering three
+            // buttons that answer neither Enter nor an arrow key would say it does.
+            <div
               key={handle.key}
-              type="button"
-              aria-label={`Resize ${handle.label}`}
+              aria-hidden="true"
+              data-testid={`viewer-text-resize-${handle.key}`}
               onPointerDown={(event) => startGesture(event, handle.key)}
-              className={cn(
-                'bg-primary absolute rounded-[1px] focus-visible:outline-none',
-                handle.className,
-              )}
+              className={cn('bg-primary absolute rounded-[1px]', handle.className)}
               style={{ width: px(8), height: px(8) }}
             />
           ))

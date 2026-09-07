@@ -21,8 +21,9 @@ import {
  * a state count, a transition count, the "modified" indicator, an export or the description,
  * and nobody has to remember that it might.
  *
- * The other side of that decision: undo does not reach these. Deleting a box is its own
- * confirmed action, and the history belongs to the machine.
+ * The other side of that decision: undo does not reach these. The history belongs to the
+ * machine, and a deleted box does not come back, which is worth knowing before adding anything
+ * that deletes one without asking first.
  */
 export function useViewerTextBoxes(documentId: string | null | undefined) {
   const [boxes, setBoxes] = useState<ViewerTextBox[]>([]);
@@ -33,6 +34,8 @@ export function useViewerTextBoxes(documentId: string | null | undefined) {
   // the viewer does, and reading state through a ref keeps every one of them stable.
   const boxesRef = useRef(boxes);
   boxesRef.current = boxes;
+  const editingIdRef = useRef(editingId);
+  editingIdRef.current = editingId;
 
   // Read on the way in, and again if this pane is pointed at a different file. Storage is only
   // available in the browser, so this is an effect rather than an initial value: the server
@@ -135,15 +138,14 @@ export function useViewerTextBoxes(documentId: string | null | undefined) {
   const beginEdit = useCallback((id: string) => setEditingId(id), []);
 
   const endEdit = useCallback(() => {
-    setEditingId((current) => {
-      if (current === null) return null;
-      const box = boxesRef.current.find((b) => b.id === current);
-      if (box && box.text.trim() === '') {
-        commit(boxesRef.current.filter((b) => b.id !== current));
-        setSelectedId((s) => (s === current ? null : s));
-      }
-      return null;
-    });
+    const current = editingIdRef.current;
+    if (current === null) return;
+    const box = boxesRef.current.find((b) => b.id === current);
+    if (box && box.text.trim() === '') {
+      commit(boxesRef.current.filter((b) => b.id !== current));
+      setSelectedId((s) => (s === current ? null : s));
+    }
+    setEditingId(null);
   }, [commit]);
 
   return {

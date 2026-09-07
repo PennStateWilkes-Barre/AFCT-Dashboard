@@ -811,6 +811,7 @@ function TransitionProperties({
   onBeginEdit,
   onEdit,
   canEdit,
+  focusSignal,
   onDelete,
   onClose,
 }: {
@@ -823,10 +824,29 @@ function TransitionProperties({
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
   /** Whether this panel may change the machine. See the state panel's own. */
   canEdit: boolean;
+  /**
+   * Bumped when this panel opened because a transition was just drawn, rather than clicked.
+   *
+   * A number rather than a flag, because two lines drawn between the same two states open the
+   * same panel and it is not rebuilt in between: there would be nothing for a flag to change.
+   * Only for a drawing, never for a click: somebody who clicked a line to read it did not ask
+   * for a caret in it, and taking their focus would be rude on a page they are reading.
+   */
+  focusSignal: number;
   onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {
   const fieldIdPrefix = useId();
+  // The first box of the first transition on this line, which is what somebody who has just
+  // drawn one is about to type into.
+  const firstFieldRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!focusSignal || !canEdit) return;
+    // After the frame: the panel animates in, and focusing something on its way onto the screen
+    // scrolls the canvas about in some browsers.
+    const frame = window.requestAnimationFrame(() => firstFieldRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusSignal, canEdit]);
 
   return (
     <PropertiesPanel
@@ -889,6 +909,7 @@ function TransitionProperties({
                   </Label>
                   <Input
                     id={fieldId}
+                    ref={i === 0 && field === fields[0] ? firstFieldRef : undefined}
                     value={transition[field] ?? ''}
                     // Where this box's undo step begins; see the state panel's name field.
                     onFocus={onBeginEdit}
@@ -1094,6 +1115,8 @@ export function JffCytoscapeViewer({
    * and a selected comment all go the moment the next line begins.
    */
   const clearForDraftRef = useRef<() => void>(() => {});
+  /** How many lines have been drawn in this viewer. See `focusSignal` on the transition panel. */
+  const [drawnTransitions, setDrawnTransitions] = useState(0);
   const onLinkAnchor = useCallback(() => clearForDraftRef.current(), []);
   /**
    * What the reader has asked to delete, held until they say yes.
@@ -1217,7 +1240,11 @@ export function JffCytoscapeViewer({
 
   const textApi = { ...textBoxes, select: selectTextBox };
 
-  stateLinkRef.current = addTransition;
+  stateLinkRef.current = (from, to) => {
+    addTransition(from, to);
+    // So the reader can type the symbol straight away, which is the only reason to draw a line.
+    setDrawnTransitions((n) => n + 1);
+  };
   cancelLinkDraftRef.current = cancelLinkDraft;
   clearForDraftRef.current = () => {
     clearSelectedState();
@@ -1757,6 +1784,7 @@ export function JffCytoscapeViewer({
                 onBeginEdit={beginEdit}
                 onEdit={setTransitionField}
                 canEdit={capabilities.editMachine}
+                focusSignal={drawnTransitions}
                 onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />

@@ -658,6 +658,23 @@ function highlightElement(cy: any, ele: any): void {
 }
 
 /**
+ * Take the selection off the canvas.
+ *
+ * The other half of `highlightElement`, and it has to be called wherever the selection is
+ * dropped rather than moved. Dropping it used to mean setting three pieces of React state, so
+ * the panel closed while the state it had been describing was still lit up and the rest of the
+ * machine still dimmed behind it: closing the inspector left the drawing insisting something
+ * was selected.
+ */
+function clearHighlight(cy: any): void {
+  try {
+    cy?.elements?.()?.removeClass?.('faded highlighted');
+  } catch {
+    // A graph mid-teardown. There is nothing left to unlight.
+  }
+}
+
+/**
  * The machine with the reader's renamings applied.
  *
  * Renamings live beside the parsed file rather than in it, because every rebuild re-reads the
@@ -1874,7 +1891,9 @@ export function useJffCytoscape({
       removedRef.current = next;
       setRemoved(next);
       applyDerived(next, addedStatesRef.current);
-      // The panel was describing it, and it is not there any more.
+      // The panel was describing it, and it is not there any more. The dimming has to go with
+      // it: the state it belonged to is gone, so nothing would ever take it off the rest.
+      clearHighlight(cyRef.current);
       setSelectedStateId(null);
       setSelectedPosition(null);
       setSelectedEdge(null);
@@ -1901,6 +1920,8 @@ export function useJffCytoscape({
       removedRef.current = next;
       setRemoved(next);
       applyDerived(next, addedStatesRef.current);
+      // The line has gone, so the dimming it put on everything else has to go too.
+      clearHighlight(cyRef.current);
       setSelectedEdge(null);
     },
     [recordStep, applyDerived],
@@ -2604,6 +2625,11 @@ export function useJffCytoscape({
 
         // highlight on click
         cy.on('tap', (evt: any) => {
+          // A tool that draws lines has already dealt with this click, on the pointer event
+          // that precedes cytoscape's own. Selecting whatever was under it as well would open
+          // a panel about a state the reader was only using as an end of a line, and it would
+          // arrive after the line was made, so it would take the new transition's place.
+          if (onStateLinkRef.current) return;
           if (evt.target === cy) {
             // Whatever the viewer has made empty canvas mean: drawing a state, placing a text
             // box, or nothing. `evt.position` is in the graph's own coordinates, so the zoom
@@ -2611,7 +2637,7 @@ export function useJffCytoscape({
             // the branch below and can never reach this, so clicking an existing state cannot
             // leave something else underneath it.
             if (onBackgroundClickRef.current?.(evt.position)) return;
-            cy.elements().removeClass('faded highlighted');
+            clearHighlight(cy);
             // A click on empty canvas means "never mind", so the properties panel goes too.
             setSelectedStateId(null);
             setSelectedEdge(null);
@@ -2834,6 +2860,7 @@ export function useJffCytoscape({
       selectedStateIdRef.current &&
       !next.states.some((state) => state.id === selectedStateIdRef.current)
     ) {
+      clearHighlight(cyRef.current);
       setSelectedStateId(null);
       setSelectedPosition(null);
     }
@@ -3115,6 +3142,9 @@ export function useJffCytoscape({
     selectedState:
       parsed && selectedStateId ? describeState(parsed, selectedStateId, epsSymbol) : null,
     clearSelectedState: () => {
+      // The drawing as well as the panel. Closing the inspector, and choosing a tool that puts
+      // the selection down, both come through here.
+      clearHighlight(cyRef.current);
       setSelectedStateId(null);
       setSelectedEdge(null);
       setSelectedPosition(null);

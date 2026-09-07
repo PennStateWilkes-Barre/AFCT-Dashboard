@@ -2614,9 +2614,27 @@ describe('drawing a transition on the canvas', () => {
   const at = (id: string) => lastCy().byId(id)!.position();
   const canvas = () => screen.getByTestId('canvas');
 
-  /** A click on the canvas at a point in the graph's own coordinates. No button held. */
-  const clickAt = (to: { x: number; y: number }) =>
+  /**
+   * A click on the canvas at a point in the graph's own coordinates. No button held.
+   *
+   * Both halves of what a browser does: the pointer event this gesture listens for, and then
+   * cytoscape's own tap on whatever was under it, which arrives on release. Modelled because
+   * the order is the whole question: the tap comes second, so without it a test cannot see the
+   * tap selecting the state a line had just been joined to and closing the panel about the
+   * line itself.
+   */
+  const clickAt = (to: { x: number; y: number }) => {
     fireEvent.pointerDown(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
+    const cy = lastCy();
+    const under = cy.nodeList.find(
+      (n) =>
+        !n.hasClass('start') &&
+        !n.hasClass('note') &&
+        !n.hasClass('preview') &&
+        Math.hypot(n.position().x - to.x, n.position().y - to.y) <= 29,
+    );
+    cy.handlers.tap?.(under ? { target: under } : { target: cy, position: to });
+  };
   const hoverAt = (to: { x: number; y: number }) =>
     fireEvent.pointerMove(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
   const nowhere = { x: 5000, y: 5000 };
@@ -2631,7 +2649,7 @@ describe('drawing a transition on the canvas', () => {
   const transitionsOf = (api: () => ReturnType<typeof useJffCytoscape>) =>
     api().parsed?.transitions.map((t) => `${t.from}->${t.to}`) ?? [];
 
-  it('makes one where the drag landed, and opens its properties', async () => {
+  it('makes one where the second click landed, and opens its properties', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
 
@@ -2643,7 +2661,11 @@ describe('drawing a transition on the canvas', () => {
     const drawn = api().parsed?.transitions.find((t) => t.from === '1' && t.to === '0');
     expect(drawn?.read).toBe('');
     // And the panel is on it, so it can be labelled at once. By name, which is how the panel
-    // describes a transition.
+    // describes a transition. The state the line was joined to must NOT be what ends up
+    // selected: cytoscape's own tap on that state arrives after this, and it used to take the
+    // new transition's place and put a state's properties in front of somebody who was about
+    // to type a symbol.
+    expect(api().selectedState).toBeNull();
     expect(api().selectedTransition?.from).toBe('q1');
     expect(api().selectedTransition?.to).toBe('q0');
     expect(api().selectedTransition?.transitions.map((t) => t.index)).toEqual([drawn!.__idx]);
@@ -2977,5 +2999,65 @@ describe('drawing a transition on the canvas', () => {
     act(() => api().addTransition('0', 'nowhere'));
 
     expect(api().parsed?.transitions.length).toBe(before);
+  });
+});
+
+/**
+ * Putting the selection down.
+ *
+ * Selecting lights one element and dims the rest, so dropping the selection has to undo both.
+ * It used to set the three pieces of React state and nothing else, which closed the panel and
+ * left the drawing insisting something was still selected: the state lit up, the machine behind
+ * it faded, and no way back except clicking the canvas.
+ */
+describe('clearing a selection', () => {
+  const tapNode = (id: string) => {
+    const cy = lastCy();
+    act(() => cy.handlers.tap({ target: cy.byId(id) }));
+  };
+  const lit = () =>
+    lastCy()
+      .nodeList.filter((n) => n.hasClass('highlighted'))
+      .map((n) => n.id());
+  const dimmed = () =>
+    [...lastCy().nodeList, ...lastCy().edgeList].filter((e) => e.hasClass('faded')).length;
+
+  it('takes the light off the state and the dimming off everything else', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapNode('0');
+    expect(lit()).toEqual(['0']);
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().clearSelectedState());
+
+    expect(lit()).toEqual([]);
+    expect(dimmed()).toBe(0);
+    expect(api().selectedState).toBeNull();
+  });
+
+  it('takes it off when the selected state is deleted, since nothing else would', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    tapNode('0');
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().removeState('0'));
+
+    expect(dimmed()).toBe(0);
+  });
+
+  it('takes it off when the selected line is deleted', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => {
+      const cy = lastCy();
+      cy.handlers.tap({ target: cy.edgeList[0] });
+    });
+    expect(dimmed()).toBeGreaterThan(0);
+
+    act(() => api().removeTransitions([0]));
+
+    expect(dimmed()).toBe(0);
   });
 });

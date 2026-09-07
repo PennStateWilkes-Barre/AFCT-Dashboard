@@ -1239,6 +1239,20 @@ describe('clicking a transition', () => {
     );
   };
 
+  /**
+   * Somebody who has just drawn a line drew it in order to say what it reads. Only a drawing,
+   * never a click: taking the focus of somebody who clicked a line to read it would be rude.
+   */
+  it('leaves the focus alone when a transition is only clicked', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tapEdge('0', '1');
+
+    const reads = await screen.findByLabelText('Reads');
+    await waitFor(() => expect(document.activeElement).not.toBe(reads));
+  });
+
   it('names both ends and lists what the transition reads', async () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();

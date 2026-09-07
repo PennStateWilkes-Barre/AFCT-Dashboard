@@ -2444,6 +2444,62 @@ describe('picking out several states', () => {
   });
 });
 
+/**
+ * Reset puts the file back, and the comments written over it go with it.
+ *
+ * A comment is not part of the automaton, but it is something the reader added to this
+ * drawing. Leaving notes floating over a machine that has been put back is a half-reset.
+ */
+describe('resetting a machine and its comments', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+  const KEY = `afct-viewer-text-boxes:${SRC}`;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  /** Something has to have changed for the toolbar to offer a reset at all. */
+  const drag = () => {
+    const handler = (event: string) =>
+      h.cy.on.mock.calls.find(([name]) => name === event)?.[2] as (() => void) | undefined;
+    act(() => handler('grab')?.());
+    act(() => handler('dragfree')?.());
+  };
+
+  const openReset = async (user: ReturnType<typeof userEvent.setup>) => {
+    drag();
+    await user.click(await screen.findByRole('button', { name: /file changed/i }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /put it back/i }));
+  };
+
+  it('takes the comments off the drawing and out of storage', async () => {
+    window.localStorage.setItem(
+      KEY,
+      JSON.stringify([{ id: 'text-1', x: 0, y: 0, width: 200, height: 80, text: 'a note' }]),
+    );
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    expect(await screen.findByText('a note')).toBeInTheDocument();
+
+    await openReset(user);
+    fireEvent.click(await screen.findByRole('button', { name: /put it back/i }));
+
+    await waitFor(() => expect(screen.queryByText('a note')).toBeNull());
+    expect(window.localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('says so before it does it', async () => {
+    const user = userEvent.setup();
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    await openReset(user);
+
+    expect(await screen.findByText(/your comments are removed/i)).toBeInTheDocument();
+  });
+});
+
 describe('a preview', () => {
   const SRC = '/api/files/submissions/abc.jff';
 

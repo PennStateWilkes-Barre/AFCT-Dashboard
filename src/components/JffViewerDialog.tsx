@@ -1237,6 +1237,8 @@ export function JffCytoscapeViewer({
     selectTransition,
     addState,
     addTransition,
+    alignStates,
+    distributeStates,
     cancelLinkDraft,
     removeState,
     removeTransitions,
@@ -1401,6 +1403,20 @@ export function JffCytoscapeViewer({
   // toolbar is the only place they exist.
   const chromeHasViewControls = useViewerChromePresent();
 
+  /**
+   * Put everything back the way this file opened.
+   *
+   * The machine and the comments over it. The hook owns one and this component owns the other,
+   * and Reset means both: a comment is not part of the automaton, but it is something the
+   * reader added to this drawing, and leaving notes floating over a machine that has been put
+   * back is a half-reset. One function, so the menu's Reset and the toolbar's "Put it back"
+   * cannot come to mean different things.
+   */
+  const resetEverything = () => {
+    resetMachine();
+    textBoxes.clearAll();
+  };
+
   /** Choose a tool if this viewer has it, and do nothing at all if it does not. */
   const selectAvailableTool = (tool: CanvasTool) => {
     if (tools.includes(tool)) selectTool(tool);
@@ -1433,10 +1449,20 @@ export function JffCytoscapeViewer({
       setAutoArranged: () => {
         if (honorPositions) toggleHonorPositions();
       },
-      resetMachine,
+      resetMachine: resetEverything,
       // Through the same `selectTool` the palette buttons call, so a keyboard route has the
       // same consequences: the selection goes, a half-drawn line is given up, and a tool the
       // capabilities do not allow is refused here rather than corrected afterwards.
+      // Lining up and spreading out, one command each because `run` takes no arguments. The
+      // geometry is the hook's; these only say which of it is wanted.
+      alignLeft: () => alignStates('left'),
+      alignCenter: () => alignStates('center'),
+      alignRight: () => alignStates('right'),
+      alignTop: () => alignStates('top'),
+      alignMiddle: () => alignStates('middle'),
+      alignBottom: () => alignStates('bottom'),
+      distributeHorizontally: () => distributeStates('horizontal'),
+      distributeVertically: () => distributeStates('vertical'),
       selectSelectTool: () => selectAvailableTool('select'),
       selectStateTool: () => selectAvailableTool('state'),
       selectTransitionTool: () => selectAvailableTool('transition'),
@@ -1450,6 +1476,7 @@ export function JffCytoscapeViewer({
       canUndo,
       canRedo,
       tools,
+      selectedStates: selectedStateIds.length,
     },
   );
 
@@ -1745,10 +1772,10 @@ export function JffCytoscapeViewer({
       <ConfirmDialog
         open={resetOpen}
         title="Put the machine back?"
-        description="The states return to where the file has them, and the layout, the zoom and the undo history for this machine are forgotten. The submitted file is not changed."
+        description="The states return to where the file has them, your comments are removed, and the layout, the zoom and the undo history for this machine are forgotten. The submitted file is not changed."
         confirmText="Put it back"
         onConfirm={() => {
-          resetMachine();
+          resetEverything();
           setResetOpen(false);
         }}
         onCancel={() => setResetOpen(false)}

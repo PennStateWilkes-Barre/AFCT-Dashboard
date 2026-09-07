@@ -52,6 +52,21 @@ export type ViewerActions = {
    * for one caller. Each is a no-op when its tool is not available here, so a keyboard route
    * cannot reach a tool the palette would not offer.
    */
+  /**
+   * Line the selected states up, or spread them out evenly.
+   *
+   * Named one per command, like the tools above, because `run` calls these by name and takes
+   * no arguments. Each does nothing when too few states are selected to mean anything, which
+   * the menu also shows by greying them.
+   */
+  alignLeft: () => void;
+  alignCenter: () => void;
+  alignRight: () => void;
+  alignTop: () => void;
+  alignMiddle: () => void;
+  alignBottom: () => void;
+  distributeHorizontally: () => void;
+  distributeVertically: () => void;
   selectSelectTool: () => void;
   selectStateTool: () => void;
   selectTransitionTool: () => void;
@@ -79,6 +94,13 @@ export type ViewerViewState = {
    * this is `availableCanvasTools` as the viewer already computed it.
    */
   tools: readonly CanvasTool[];
+  /**
+   * How many states are picked out, so the chrome can grey a command that needs more.
+   *
+   * The count rather than the ids: nothing outside the viewer acts on which states they are,
+   * and a number does not re-render the menu every time the selection changes shape.
+   */
+  selectedStates: number;
 };
 
 /**
@@ -120,6 +142,7 @@ const ViewerViewContext = createContext<{
   canUndo: boolean;
   canRedo: boolean;
   tools: readonly CanvasTool[];
+  selectedStates: number;
 }>({
   ready: false,
   grid: false,
@@ -129,6 +152,7 @@ const ViewerViewContext = createContext<{
   canUndo: false,
   canRedo: false,
   tools: [],
+  selectedStates: 0,
 });
 
 export function ViewerActionsProvider({ children }: { children: React.ReactNode }) {
@@ -148,6 +172,7 @@ export function ViewerActionsProvider({ children }: { children: React.ReactNode 
   // A string, not the array: the viewer builds a fresh array on most renders, and comparing
   // the join is what stops this re-rendering the chrome every time it does.
   const [toolList, setToolList] = useState('');
+  const [selectedStates, setSelectedStates] = useState(0);
 
   // `useRef` and the `useState` setter are both stable, so this is built once.
   const view = useMemo(
@@ -160,8 +185,9 @@ export function ViewerActionsProvider({ children }: { children: React.ReactNode 
       canUndo,
       canRedo,
       tools: toolList ? (toolList.split(' ') as CanvasTool[]) : [],
+      selectedStates,
     }),
-    [ready, grid, notes, snapToGrid, layout, canUndo, canRedo, toolList],
+    [ready, grid, notes, snapToGrid, layout, canUndo, canRedo, toolList, selectedStates],
   );
 
   const registry = useMemo<Registry>(
@@ -178,6 +204,7 @@ export function ViewerActionsProvider({ children }: { children: React.ReactNode 
         setCanRedo(view?.canRedo ?? false);
         setLayout(view?.layout ?? 'as-drawn');
         setToolList((view?.tools ?? []).join(' '));
+        setSelectedStates(view?.selectedStates ?? 0);
       },
       // `void`: three of these are async, and their result is nothing the caller waits on.
       run: (name) => {
@@ -266,10 +293,11 @@ export function useViewerActions(): {
   canUndo: boolean;
   canRedo: boolean;
   tools: readonly CanvasTool[];
+  selectedStates: number;
   run: (name: keyof ViewerActions) => void;
 } {
   const registry = useContext(ViewerRegistryContext);
-  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools } =
+  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools, selectedStates } =
     useContext(ViewerViewContext);
   const run = registry?.run;
   return {
@@ -281,6 +309,7 @@ export function useViewerActions(): {
     canUndo,
     canRedo,
     tools,
+    selectedStates,
     run: (name) => run?.(name),
   };
 }

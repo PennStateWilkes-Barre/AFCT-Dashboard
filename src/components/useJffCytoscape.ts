@@ -21,6 +21,13 @@ import {
 } from '@/lib/jflap-layout';
 import { toJflapXml } from '@/lib/jflap-write';
 import {
+  alignPositions,
+  distributePositions,
+  type AlignMode,
+  type DistributeAxis,
+  type PlacedState,
+} from '@/lib/viewer-align';
+import {
   failureForContent,
   failureForNetwork,
   failureForStatus,
@@ -1946,6 +1953,48 @@ export function useJffCytoscape({
   }, [onStateLink, lockArrangement, phase]);
 
   /**
+   * Move several selected states at once, as one step.
+   *
+   * Handed a function that says where they should end up; everything else is the same for
+   * lining them up and for spreading them out. The step is recorded once, before anything
+   * moves, so one command is one undo however many states it touched, and states that were
+   * already in the right place are left alone so a command that changes nothing records
+   * nothing.
+   */
+  const arrangeSelected = useCallback(
+    (plan: (placed: PlacedState[]) => PlacedState[]) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+      try {
+        const placed: PlacedState[] = [];
+        for (const id of selectedStateIdsRef.current) {
+          const node = cy.getElementById(id);
+          if (!node || node.empty?.()) continue;
+          const at = node.position?.();
+          if (isFinitePoint(at)) placed.push({ id, x: at.x, y: at.y });
+        }
+
+        const moved = plan(placed).filter((target) => {
+          const was = placed.find((state) => state.id === target.id);
+          return was && (was.x !== target.x || was.y !== target.y);
+        });
+        if (moved.length === 0) return;
+
+        commitPendingMove();
+        recordStep();
+        for (const target of moved) {
+          cy.getElementById(target.id)?.position?.({ x: target.x, y: target.y });
+        }
+        refreshLabelGeometryRef.current?.();
+        rememberView();
+      } catch {
+        // A graph mid-teardown. Nothing to arrange.
+      }
+    },
+    [commitPendingMove, recordStep, rememberView],
+  );
+
+  /**
    * Take a state off the drawing, and every transition that touched it.
    *
    * On screen only, like everything else here: the submitted file is not changed, which is what
@@ -3337,6 +3386,22 @@ export function useJffCytoscape({
      * this arrangement" writes out, not the file's: those are where its author put it, and it
      * may have been dragged since.
      */
+    /**
+     * Line the selected states up, or spread them out evenly.
+     *
+     * The arrangement rather than the machine, like a drag: it moves the drawing and the file
+     * it came from is untouched. So it is one undo step, taken before anything moves, and it
+     * goes through the same positions a drag writes to.
+     *
+     * Where they end up is worked out in `lib/viewer-align`, from the coordinates the graph
+     * reports right now. Nothing here decides geometry, and nothing there knows about a graph.
+     */
+    alignStates: (mode: AlignMode) => {
+      arrangeSelected((placed) => alignPositions(placed, mode));
+    },
+    distributeStates: (axis: DistributeAxis) => {
+      arrangeSelected((placed) => distributePositions(placed, axis));
+    },
     moveState: (id: string, at: { x: number; y: number }) => {
       if (!isFinitePoint(at)) return;
       const cy = cyRef.current;

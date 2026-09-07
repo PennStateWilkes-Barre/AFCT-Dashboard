@@ -155,6 +155,9 @@ const call = (extra: Partial<Parameters<typeof createSubmission>[0]> = {}) =>
 
 /** The action names passed to the audit logger during this call. */
 const auditActions = () => auditMock.mock.calls.map((c) => c[2].action);
+/** The whole entries, for the cases that care what was recorded and not only that it was. */
+const auditEntries = () =>
+  auditMock.mock.calls.map((c) => c[2] as { action: string; metadata?: Record<string, unknown> });
 
 beforeEach(() => {
   // resetAllMocks, NOT clearAllMocks: clear only wipes recorded calls and leaves
@@ -321,6 +324,19 @@ describe('createSubmission', () => {
       const res = await call();
       expect(res).toMatchObject({ ok: false, status: 409 });
       expect((res as { error: string }).error).toMatch(/limit reached/i);
+    });
+
+    it('logs the racing refusal, which used to leave no trace at all', async () => {
+      // The cooldown's concurrent case has always been logged; the cap's was not, so a
+      // student stopped by a race looked in the record like someone who never tried. RQ5
+      // makes submission limits a study variable, so the log is the measurement.
+      setup({ priorCount: 2, countInTx: 3 });
+      await call();
+
+      expect(auditActions()).toContain('SUBMISSION_LIMIT_REACHED');
+      const entry = auditEntries().find((e) => e.action === 'SUBMISSION_LIMIT_REACHED');
+      // The same fields the pre-transaction check writes, plus the flag that tells them apart.
+      expect(entry?.metadata).toMatchObject({ priorCount: 3, concurrent: true });
     });
 
     it('maps a serialization failure (P2034) to a retryable conflict', async () => {
@@ -864,5 +880,59 @@ describe('partial file writes', () => {
 
     expect(res).toMatchObject({ ok: false, status: 500 });
     expect(fsMock.unlinkSync).toHaveBeenCalledWith(expect.stringContaining('stored-uuid.jff'));
+  });
+});
+
+/**
+ * What the grant read is scoped to.
+ *
+ * The extra attempts a submitter is working against are read here and nowhere else, so this
+ * `where` alone decides the cap. The prisma mock returns whatever grants a test installed
+ * regardless of the query, so nothing above notices a key going missing: without the
+ * `problemId` a grant for one problem raises the cap on every problem in the assignment, and
+ * without the group arm scoped to the submitter's own groups it would pick up grants written
+ * for somebody else's group.
+ */
+describe('what the grant read is scoped to', () => {
+  const whereOf = () =>
+    (prismaMock.submissionGrant.findMany.mock.calls[0][0] as { where: unknown }).where;
+
+  it('asks for this problem, on this assignment, for this student', async () => {
+    setup();
+
+    await call();
+
+    expect(whereOf()).toEqual({
+      assignmentId: 'a-1',
+      problemId: 'p-1',
+      OR: [{ userId: 'student-1' }, { groupId: { in: [] } }],
+    });
+  });
+
+  it('adds only the groups this submitter is actually in', async () => {
+    setup({
+      assignment: {
+        id: 'a-1',
+        courseId: 'course-1',
+        unlockAt: null,
+        dueDate: future(),
+        allowLateSubmissions: false,
+        lateCutoff: null,
+        isPublished: true,
+        assignedToEveryone: false,
+        groupSetId: 'gs-1',
+        assignees: [{ targetType: 'GROUP', userId: null, groupId: 'group-9' }],
+        overrides: [],
+        groupSet: { groups: [{ id: 'group-9' }] },
+      },
+    });
+
+    await call();
+
+    expect(whereOf()).toEqual({
+      assignmentId: 'a-1',
+      problemId: 'p-1',
+      OR: [{ userId: 'student-1' }, { groupId: { in: ['group-9'] } }],
+    });
   });
 });

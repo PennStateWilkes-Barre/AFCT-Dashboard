@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import type { CourseRole } from '@prisma/client';
+import { courseHasStarted } from '@/lib/course-status';
 
 /**
  * Authorization primitives for the user + admin-flag + per-course-role model.
@@ -47,10 +48,11 @@ export async function getCourseRole(
 
 /**
  * May the caller see this course at all? A system admin always may. Otherwise they
- * must be on the roster, AND, for a student, the course must be published; course
- * staff (FACULTY/TA) may access their course even while it is unpublished. This is
- * the single gate for course-scoped reads, so the "students only see published
- * courses" rule lives here rather than being re-checked in every route.
+ * must be on the roster, AND, for a student, the course must be published and started;
+ * course staff (FACULTY/TA) may access their course even while it is unpublished or before
+ * it opens. This is the single gate for course-scoped reads, so the "students only see
+ * published courses that have started" rule lives here rather than being re-checked in
+ * every route.
  *
  * One query (role + the course's published flag); admins short-circuit before it.
  */
@@ -69,17 +71,30 @@ export async function canAccessCourse(user: PermissionUser, courseId: string): P
   if (!user?.id) return false;
   const entry = await prisma.roster.findFirst({
     where: { courseId, userId: user.id },
-    select: { role: true, status: true, course: { select: { isPublished: true, deletedAt: true } } },
+    select: {
+      role: true,
+      status: true,
+      course: { select: { isPublished: true, deletedAt: true, startDate: true } },
+    },
   });
   if (!entry) return false;
   // A soft-deleted course is inaccessible to non-admins (retained only for recovery).
   if (entry.course?.deletedAt) return false;
   if (entry.role === 'FACULTY' || entry.role === 'TA') return true;
-  // Students only once the course is published AND while not DROPPED. A DROPPED student
-  // keeps their roster row and all their work, but is denied access here (the single
-  // gate), which cascades to every course-scoped route and the native client. (The
+  // Students only once the course is published, has STARTED, and while not DROPPED. A
+  // DROPPED student keeps their roster row and all their work, but is denied access here (the
+  // single gate), which cascades to every course-scoped route and the native client. (The
   // status column is NOT NULL DEFAULT ENROLLED, so "not dropped" means enrolled.)
-  return entry.course.isPublished && entry.status !== 'DROPPED';
+  //
+  // The start date is a gate on entering, not on seeing: a course still appears under
+  // Upcoming Courses, because those lists are built from their own queries rather than
+  // through here, and the course page turns this denial into "opens on <date>" rather than a
+  // 404. Staff returned above, so building a course before it opens is unaffected.
+  return (
+    entry.course.isPublished &&
+    entry.status !== 'DROPPED' &&
+    courseHasStarted(entry.course.startDate)
+  );
 }
 
 /**

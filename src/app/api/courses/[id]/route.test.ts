@@ -1319,3 +1319,134 @@ describe('DELETE /api/courses/[id]', () => {
     expect(res.status).toBe(500);
   });
 });
+
+/**
+ * What the reads and roster writes on this route are scoped to.
+ *
+ * The per-assignment totals and the linked-problem lookup are bounded by the ids this course
+ * produced, and the faculty roster edits are bounded by the course in the URL. The prisma
+ * mocks answer whatever the `where` says, so none of the tests above notice a missing key:
+ * `deleteMany({ where: { courseId: id, role: 'FACULTY', userId: { in: toRemove } } })` without
+ * its `courseId` removes those people as faculty from every course in the installation, and
+ * the assertion that it "was called" still passes.
+ */
+describe('what this route reads and writes are scoped to', () => {
+  const staffCourse = () => ({
+    id: 'course-1',
+    name: 'C1',
+    code: 'CS1',
+    semester: 'Fall 2026',
+    credits: 3,
+    isPublished: true,
+    isArchived: false,
+    deletedAt: null,
+    startDate: null,
+    endDate: null,
+    registrationOpenAt: null,
+    registrationCloseAt: null,
+    _count: { assignments: 1, problems: 1, roster: 1 },
+    roster: [],
+    problems: [{ id: 'p1', title: 'P1' }],
+    assignments: [
+      {
+        id: 'a1',
+        title: 'A1',
+        description: null,
+        dueDate: null,
+        isPublished: true,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        courseId: 'course-1',
+        problems: [{ maxPoints: 10 }],
+        _count: { problems: 1 },
+      },
+    ],
+  });
+
+  it('counts submissions and comments per assignment, and looks up links by problem', async () => {
+    authMock.mockResolvedValue({ user: { id: 'admin-1', role: 'ADMIN', isAdmin: true } });
+    prismaMock.course.findUnique.mockResolvedValue(staffCourse());
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+    prismaMock.submission.count.mockResolvedValue(0);
+    prismaMock.comment.count.mockResolvedValue(0);
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([]);
+
+    const res = await GET(new Request('http://localhost/api/courses/1'), {
+      params: Promise.resolve({ id: 'course-1' }),
+    });
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.submission.count).toHaveBeenCalledWith({ where: { assignmentId: 'a1' } });
+    expect(prismaMock.comment.count).toHaveBeenCalledWith({ where: { assignmentId: 'a1' } });
+    expect(prismaMock.assignmentProblem.findMany.mock.calls[0][0]).toMatchObject({
+      where: { problemId: { in: ['p1'] } },
+    });
+  });
+
+  it('removes and promotes faculty only on this course', async () => {
+    authMock.mockResolvedValue({ user: { id: 'admin-1', role: 'ADMIN', isAdmin: true } });
+    prismaMock.user.findUnique.mockResolvedValue({ timezone: 'America/New_York' });
+    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY' });
+    prismaMock.submission.count.mockResolvedValue(0);
+    prismaMock.comment.count.mockResolvedValue(0);
+
+    prismaMock.systemSettings.findUnique.mockResolvedValue({ timezone: 'America/New_York' });
+    const updated = () => ({
+      ...staffCourse(),
+      regCode: 'ABC123',
+      roster: [{ role: 'FACULTY', user: { id: 'u2', firstName: 'B', lastName: 'C' } }],
+    });
+    const txMock = {
+      course: {
+        update: vi.fn().mockResolvedValue({ id: 'course-1' }),
+        findUnique: vi.fn().mockResolvedValue(updated()),
+      },
+      roster: {
+        // u1 is faculty and is being dropped; u2 is a student being promoted.
+        findMany: vi.fn().mockResolvedValue([
+          { userId: 'u1', role: 'FACULTY' },
+          { userId: 'u2', role: 'STUDENT' },
+        ]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    prismaMock.$transaction.mockImplementation(async (cb: (tx: unknown) => unknown) => cb(txMock));
+
+    const req = new Request('http://localhost/api/courses/1', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Course 1',
+        code: 'CS101',
+        semester: 'Fall 2026',
+        credits: 3,
+        startDate: '2026-08-25T09:00',
+        endDate: '2026-12-15T17:00',
+        registrationOpenAt: '2026-07-01T09:00',
+        registrationCloseAt: '2026-09-01T09:00',
+        isPublished: true,
+        isArchived: false,
+        instructorIds: ['u2'],
+      }),
+    });
+
+    const res = await PUT(req, { params: Promise.resolve({ id: 'course-1' }) });
+    expect(res.status).toBe(200);
+
+    expect(txMock.roster.findMany.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'course-1' },
+    });
+    expect(txMock.roster.deleteMany).toHaveBeenCalledWith({
+      where: { courseId: 'course-1', role: 'FACULTY', userId: { in: ['u1'] } },
+    });
+    expect(txMock.roster.updateMany).toHaveBeenCalledWith({
+      where: { courseId: 'course-1', userId: { in: ['u2'] } },
+      data: { role: 'FACULTY' },
+    });
+    // The refreshed payload counts per assignment, the same way the GET view does.
+    expect(prismaMock.submission.count).toHaveBeenCalledWith({ where: { assignmentId: 'a1' } });
+    expect(prismaMock.comment.count).toHaveBeenCalledWith({ where: { assignmentId: 'a1' } });
+  });
+});

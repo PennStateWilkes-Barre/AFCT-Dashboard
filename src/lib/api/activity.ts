@@ -282,3 +282,54 @@ export function diffFields(
 
   return changes;
 }
+
+/**
+ * That a student was shown the evaluator's feedback on their own work.
+ *
+ * Instrumentation for RQ1 and RQ2, which ask what students do with feedback. It has to be
+ * recorded from two places, because students read this in two: the assignment page in the
+ * browser and the native client, which fetches its own attempts and never touches the web
+ * routes. One action with a `surface` in the metadata rather than two actions, so the study
+ * counts feedback-viewing once and splits by surface when it wants to, instead of having to
+ * know both names and remember to add them up.
+ *
+ * "Shown", not "read". The server can say the feedback was in the payload it sent; nothing
+ * short of an eye tracker says more, and a name that claimed otherwise would be a worse lie
+ * for being in the log.
+ *
+ * Only call this when feedback was actually disclosed. A problem whose feedback the
+ * instructor has turned off, or an attempt still waiting on the evaluator, is a page the
+ * student read and learned nothing from, and recording it as feedback-viewing would put
+ * exactly the wrong number in front of whoever analyses this.
+ */
+export async function logStudentFeedbackViewed(
+  req: Request,
+  data: {
+    userId: string;
+    courseId: string;
+    /** Optional only because a route param is typed that way; callers always have one here. */
+    assignmentId: string | undefined;
+    surface: 'web' | 'client';
+    /** Attempts in this payload that carried visible evaluator feedback. */
+    withFeedback: number;
+    /** Narrows the throttle when the caller reads one problem at a time, as the client does. */
+    problemId?: string | null;
+  },
+): Promise<void> {
+  await logThrottledView(req, {
+    userId: data.userId,
+    action: 'STUDENT_FEEDBACK_VIEWED',
+    category: 'SUBMISSION',
+    courseId: data.courseId,
+    assignmentId: data.assignmentId,
+    // Per assignment on the web, which sends every problem at once, and per problem in the
+    // client, which asks for one. Without the surface in the key the two would share a window
+    // and whichever arrived second would go unrecorded.
+    key: `${data.surface}:${data.assignmentId ?? 'none'}:${data.problemId ?? 'all'}`,
+    metadata: {
+      surface: data.surface,
+      withFeedback: data.withFeedback,
+      ...(data.problemId ? { problemId: data.problemId } : {}),
+    },
+  });
+}

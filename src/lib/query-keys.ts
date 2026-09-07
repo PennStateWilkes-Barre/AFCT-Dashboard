@@ -22,6 +22,8 @@ const sortedIds = (ids: readonly string[]): string[] => [...ids].sort();
 export const queryKeys = {
   // --- Course lists --------------------------------------------------------
   courses: {
+    /** Prefix for every course-list entry; use to invalidate the list and the nav together. */
+    all: () => ['courses'] as const,
     list: () => ['courses', 'list'] as const,
     nav: () => ['courses', 'nav'] as const,
   },
@@ -34,6 +36,14 @@ export const queryKeys = {
     all: (courseId: string) => ['course', courseId] as const,
     view: (courseId: string, view: string) => ['course', courseId, view] as const,
     students: (courseId: string) => ['course', courseId, 'students'] as const,
+    /**
+     * The student list including dropped members, for the submissions table. A separate
+     * entry from `students` on purpose: it is a different question (`includeDropped`) and
+     * a different answer, so sharing one key would serve whichever arrived first.
+     */
+    studentsAll: (courseId: string) => ['course', courseId, 'students', 'all'] as const,
+    /** Faculty and TAs eligible to run the copy, for the Duplicate Course dialog. */
+    duplicateStaff: (courseId: string) => ['course', courseId, 'duplicate-staff'] as const,
     roster: (courseId: string) => ['course', courseId, 'roster'] as const,
     rosterEntry: (courseId: string, userId: string) =>
       ['course', courseId, 'roster', userId] as const,
@@ -49,6 +59,8 @@ export const queryKeys = {
     groupSet: (courseId: string, setId: string) =>
       ['course', courseId, 'group-set', setId] as const,
     /** Prefix for the gradebook; use to invalidate both entries below. */
+    /** Which LMS courses open this one (the course-level placements). */
+    lmsLink: (courseId: string) => ['course', courseId, 'lms-link'] as const,
     grades: (courseId: string) => ['course', courseId, 'grades'] as const,
     /** The gradebook's assignment columns and student total (cached per course). */
     gradeColumns: (courseId: string) => ['course', courseId, 'grades', 'columns'] as const,
@@ -76,6 +88,9 @@ export const queryKeys = {
      * read. Nested under the course→assignment prefix (like every key below), so
      * `invalidateQueries(['course', courseId])` reaches it.
      */
+    /** Prefix for every entry scoped to one assignment; use to invalidate all of them. */
+    all: (courseId: string, assignmentId: string) =>
+      ['course', courseId, 'assignment', assignmentId] as const,
     shell: (courseId: string, assignmentId: string) =>
       ['course', courseId, 'assignment', assignmentId, 'shell'] as const,
     /**
@@ -87,6 +102,15 @@ export const queryKeys = {
       ['course', courseId, 'assignment', assignmentId, 'student-context'] as const,
     groupsAndMappings: (courseId: string, assignmentId: string) =>
       ['course', courseId, 'assignment', assignmentId, 'groups-and-mappings'] as const,
+    /** Who the assignment is aimed at (students or groups). */
+    assignees: (courseId: string, assignmentId: string) =>
+      ['course', courseId, 'assignment', assignmentId, 'assignees'] as const,
+    /** The assignment's date exceptions. */
+    overrides: (courseId: string, assignmentId: string) =>
+      ['course', courseId, 'assignment', assignmentId, 'overrides'] as const,
+    /** Which LMS placements open this assignment. */
+    lmsLinks: (courseId: string, assignmentId: string) =>
+      ['course', courseId, 'assignment', assignmentId, 'lms-links'] as const,
     gradeBreakdown: (courseId: string, assignmentId: string) =>
       ['course', courseId, 'assignment', assignmentId] as const,
     problemGradesSummary: (courseId: string, assignmentId: string) =>
@@ -116,6 +140,11 @@ export const queryKeys = {
     users: () => ['admin', 'users'] as const,
     usersAll: () => ['admin', 'users', 'all'] as const,
     usersFaculty: () => ['admin', 'users', 'faculty'] as const,
+    usersTa: () => ['admin', 'users', 'ta'] as const,
+    /** One page of the Users table; the key is the whole server-side query. */
+    usersPage: <T>(params: T) => ['admin', 'users', params] as const,
+    /** Prefix for the status dashboard; use to refresh every tab at once. */
+    status: () => ['admin', 'status'] as const,
     /** Per-domain status endpoints for the tabbed status dashboard. */
     statusSummary: () => ['admin', 'status', 'summary'] as const,
     statusServer: () => ['admin', 'status', 'server'] as const,
@@ -127,6 +156,11 @@ export const queryKeys = {
     statusRateLimits: () => ['admin', 'status', 'rate-limits'] as const,
     statusWorkers: () => ['admin', 'status', 'workers'] as const,
     settings: () => ['admin', 'settings'] as const,
+    /**
+     * Registered LTI platforms. Deliberately NOT under `settings`: it is a different resource
+     * with its own endpoint, and saving a system setting should not refetch the platform list.
+     */
+    ltiPlatforms: () => ['admin', 'lti-platforms'] as const,
     settingsBackups: () => ['admin', 'settings', 'backups'] as const,
     settingsTls: () => ['admin', 'settings', 'tls'] as const,
     logs: <T>(params: T) => ['admin', 'logs', params] as const,
@@ -148,5 +182,15 @@ export const queryKeys = {
 
   // --- Public / self -------------------------------------------------------
   systemSettingsPublic: () => ['system-settings', 'public'] as const,
+  /** The signed-in account's own record. Predates the `me` group below; left where it is
+   *  because many components already read it and the key is not worth churning. */
   profile: () => ['profile'] as const,
+
+  /** The signed-in account's own things, on the Account page. */
+  me: {
+    /** Prefix for everything below. */
+    all: () => ['me'] as const,
+    clientTokens: () => ['me', 'client-tokens'] as const,
+    identities: () => ['me', 'identities'] as const,
+  },
 } as const;

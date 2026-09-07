@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiPaths } from '@/lib/api-paths';
 import { usePublicSystemSettings } from '@/hooks/use-public-system-settings';
+import { queryKeys } from '@/lib/query-keys';
 
 /**
  * Resolves the timezone to display dates in: the user's own profile timezone,
@@ -15,7 +16,7 @@ export function useEffectiveTimezone() {
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   const profileQuery = useQuery({
-    queryKey: ['profile'],
+    queryKey: queryKeys.profile(),
     queryFn: async () => {
       const res = await fetch(apiPaths.me(), { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load profile');

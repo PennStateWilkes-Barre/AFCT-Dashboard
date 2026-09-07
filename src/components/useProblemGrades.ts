@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api/fetch-client';
 import { errMessage } from '@/lib/errors';
 import { ApiError } from '@/lib/api/fetch-client';
 import type { ReviewDataResponse } from './useReviewData';
+import { queryKeys } from '@/lib/query-keys';
 
 type GradeableProblem = { id: string; title?: string; maxPoints?: number };
 type Person = { id: string; firstName?: string | null; lastName?: string | null };
@@ -90,7 +91,7 @@ export function useProblemGrades({
 
   // Grade summary: cached read of which students have all problems graded.
   const gradeSummaryQuery = useQuery({
-    queryKey: ['course', courseId, 'assignment', assignmentId, 'problem-grades', 'summary'],
+    queryKey: queryKeys.assignment.problemGradesSummary(courseId, assignmentId),
     queryFn: async () => {
       const res = await fetch(apiPaths.assignmentProblemGradesSummary(courseId, assignmentId));
       if (!res.ok) {
@@ -213,7 +214,7 @@ export function useProblemGrades({
       for (const id of [selectedStudentId, ...(groupMembers ?? []).map((m) => m.id)]) {
         if (!id) continue;
         void queryClient.invalidateQueries({
-          queryKey: ['course', courseId, 'assignment', assignmentId, 'review-data', id],
+          queryKey: queryKeys.assignment.reviewData(courseId, assignmentId, id),
         });
       }
       return [];
@@ -258,7 +259,7 @@ export function useProblemGrades({
           { gradedManually: held },
         );
         void queryClient.invalidateQueries({
-          queryKey: ['course', courseId, 'assignment', assignmentId, 'review-data', selectedStudentId],
+          queryKey: queryKeys.assignment.reviewData(courseId, assignmentId, selectedStudentId),
         });
         showToast.success(held ? 'Grade held' : 'Grade released to the autograder');
       } catch (error) {
@@ -378,14 +379,7 @@ export function useProblemGrades({
         // NOTE: deliberately NOT invalidating the summary query, which would
         // clobber the optimistic studentGradeStatuses update above.
         void queryClient.invalidateQueries({
-          queryKey: [
-            'course',
-            courseId,
-            'assignment',
-            assignmentId,
-            'review-data',
-            selectedStudent.id,
-          ],
+          queryKey: queryKeys.assignment.reviewData(courseId, assignmentId, selectedStudent.id),
         });
         showToast.success(
           `Grade ${numericValue ?? 'cleared'} saved for ${selectedStudent.firstName} ${selectedStudent.lastName} on ${problem.title}`,

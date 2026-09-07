@@ -11,10 +11,15 @@
             markerWidth="5" markerHeight="5" orient="auto-start-reverse">
       <path d="M0 0 10 5 0 10Z" fill="currentColor" stroke="none" />
     </marker>
+    <!-- Self-loops only: tip lands on the endpoint, not past it. See README. -->
+    <marker id="afct-automaton-two-loop-arrow" viewBox="0 0 10 10" refX="10" refY="5"
+            markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10Z" fill="currentColor" stroke="none" />
+    </marker>
   </defs>
   <g transform="translate(222 117) scale(0.92) translate(-222 -119)">
       <line x1="20" y1="138" x2="26" y2="138" marker-end="url(#afct-automaton-two-arrow)" />
-      <path d="M150.2 98.2C132.2 44.2 207.8 44.2 189.8 98.2" stroke-linecap="round" marker-end="url(#afct-automaton-two-arrow)" />
+      <path d="M150.2 98.2C132.2 44.2 207.8 44.2 189.8 98.2" stroke-linecap="round" marker-end="url(#afct-automaton-two-loop-arrow)" />
       <text x="170" y="43.7" font-size="15" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">0</text>
       <line x1="85.6" y1="133.1" x2="139.5" y2="123.4" stroke-linecap="round" marker-end="url(#afct-automaton-two-arrow)" />
       <text x="109.5" y="111.5" font-size="15" fill="currentColor" stroke="none" text-anchor="middle" dominant-baseline="central">1</text>

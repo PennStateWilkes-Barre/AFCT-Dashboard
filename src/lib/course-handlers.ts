@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { showToast } from '@/lib/toast';
 import type { FullCourse, DeleteTarget } from '@/types/course';
 import type { Assignment, Problem, Course } from '@prisma/client';
+import { queryKeys } from '@/lib/query-keys';
 import {
   deleteItem,
   updateCourseAfterDelete,
@@ -146,7 +147,7 @@ export function useCourseHandlers(
         setCourse((prev) => (prev ? { ...prev, isPublished: updated.isPublished } : prev));
         // Published state drives the Courses list and the sidebar nav, so invalidate the
         // whole ['courses'] prefix; otherwise the list keeps its stale row until staleTime.
-        void queryClient.invalidateQueries({ queryKey: ['courses'] });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.courses.all() });
         showToast.success(isPublished ? 'Course published' : 'Course unpublished');
       } catch (error) {
         const msg =

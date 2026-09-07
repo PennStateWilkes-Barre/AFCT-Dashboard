@@ -152,7 +152,7 @@ export default function SystemStatusClient() {
   const railNav = useIsDesktopNav(1280);
 
   // Refresh both the summary and whichever tab is currently open.
-  const refreshAll = () => queryClient.invalidateQueries({ queryKey: ['admin', 'status'] });
+  const refreshAll = () => queryClient.invalidateQueries({ queryKey: queryKeys.admin.status() });
 
   return (
     <Tabs

@@ -25,6 +25,11 @@ export type AssignmentWithProblemCount = Assignment & {
   commentCount?: number;
   /** Per-student overrides (staff view only); empty/absent when there are none. */
   overrides?: AssignmentOverrideSummary[];
+  /**
+   * Student view only: the assignment exists but has not reached this student's effective
+   * unlock time, so the API masked its description. Never set for staff.
+   */
+  locked?: boolean;
 };
 
 export type FullCourse = Course & {

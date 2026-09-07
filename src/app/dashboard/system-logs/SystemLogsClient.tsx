@@ -43,6 +43,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { formatDateTimeInTimeZone } from '@/lib/date-format';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { ACTIVITY_SEVERITY_BADGE, ACTIVITY_SEVERITY_FALLBACK } from '@/lib/badge-presets';
+import { queryKeys } from '@/lib/query-keys';
 
 type Severity = 'INFO' | 'WARNING' | 'ERROR' | 'SECURITY';
 
@@ -142,7 +143,7 @@ export default function SystemLogsClient() {
   // Cached, server-paginated log list. keepPreviousData keeps the current page
   // visible while the next one loads, so the table doesn't flash empty.
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['admin', 'logs', queryParams],
+    queryKey: queryKeys.admin.logs(queryParams),
     queryFn: async () => {
       const params = new URLSearchParams({
         page: String(queryParams.page),

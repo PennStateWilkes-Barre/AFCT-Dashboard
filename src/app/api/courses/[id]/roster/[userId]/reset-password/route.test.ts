@@ -88,7 +88,10 @@ describe('POST /api/courses/[id]/roster/[userId]/reset-password', () => {
   });
 
   it('denies resetting a staff member (target is FACULTY)', async () => {
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'FACULTY', user: { isAdmin: false, email: 'faculty@example.edu' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'FACULTY',
+      user: { isAdmin: false, email: 'faculty@example.edu' },
+    });
     const res = await POST(postReq({ newPassword: 'Str0ng!pass' }), ctx);
     expect(res.status).toBe(403);
     expect(logDenialMock).toHaveBeenCalled();
@@ -96,14 +99,20 @@ describe('POST /api/courses/[id]/roster/[userId]/reset-password', () => {
   });
 
   it('denies resetting a global administrator even if enrolled as a student', async () => {
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', user: { isAdmin: true, email: 'admin@example.edu' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { isAdmin: true, email: 'admin@example.edu' },
+    });
     const res = await POST(postReq({ newPassword: 'Str0ng!pass' }), ctx);
     expect(res.status).toBe(403);
     expect(prismaMock.user.update).not.toHaveBeenCalled();
   });
 
   it('rejects a weak password with 400', async () => {
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', user: { isAdmin: false, email: 'student@example.edu' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { isAdmin: false, email: 'student@example.edu' },
+    });
     isStrongPasswordMock.mockReturnValue(false);
     const res = await POST(postReq({ newPassword: 'weak' }), ctx);
     expect(res.status).toBe(400);
@@ -111,7 +120,10 @@ describe('POST /api/courses/[id]/roster/[userId]/reset-password', () => {
   });
 
   it('resets a student password, invalidates sessions, and logs it', async () => {
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', user: { isAdmin: false, email: 'student@example.edu' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { isAdmin: false, email: 'student@example.edu' },
+    });
     const res = await POST(postReq({ newPassword: 'Str0ng!pass', isTemporary: true }), ctx);
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true });
@@ -144,10 +156,38 @@ describe('POST /api/courses/[id]/roster/[userId]/reset-password', () => {
   });
 
   it('returns 500 and logs an error when the update fails', async () => {
-    prismaMock.roster.findFirst.mockResolvedValue({ role: 'STUDENT', user: { isAdmin: false, email: 'student@example.edu' } });
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { isAdmin: false, email: 'student@example.edu' },
+    });
     prismaMock.user.update.mockRejectedValue(new Error('db down'));
     const res = await POST(postReq({ newPassword: 'Str0ng!pass' }), ctx);
     expect(res.status).toBe(500);
     expect(logErrorMock).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Whose password this resets.
+ *
+ * `withCourseAuth` proves the caller is staff of the course in the URL. The person whose
+ * password is about to change comes from the path, and the only thing tying them to that
+ * course is this lookup: without the `courseId` a staff member could reset the password of
+ * somebody they have no relationship with at all, since the update that follows goes by user
+ * id alone. The prisma mock returns its fixture either way, so nothing else here notices.
+ */
+describe('who this reset can reach', () => {
+  it('finds the target only on this course roster', async () => {
+    prismaMock.roster.findFirst.mockResolvedValue({
+      role: 'STUDENT',
+      user: { isAdmin: false, email: 'student@example.edu' },
+    });
+
+    const res = await POST(postReq({ newPassword: 'Str0ng!pass' }), ctx);
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.roster.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { courseId: 'c1', userId: 'stu1' },
+    });
   });
 });

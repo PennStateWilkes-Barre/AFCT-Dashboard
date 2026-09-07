@@ -144,7 +144,7 @@ export function useCourseData(
   // itself, and section tabs re-pull lazily on next visit (their entries are now
   // stale). Awaiting settles once the base refetch completes.
   const refetchCourse = useCallback(async () => {
-    if (courseId) await queryClient.invalidateQueries({ queryKey: ['course', courseId] });
+    if (courseId) await queryClient.invalidateQueries({ queryKey: queryKeys.course.all(courseId) });
   }, [courseId, queryClient]);
 
   // A student whose SSR payload was summary-shaped (no assignments) needs the full

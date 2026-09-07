@@ -234,3 +234,34 @@ it('refuses to grade a group when the course is archived', async () => {
   expect(res.status).toBe(409);
   archivedMock.current = false;
 });
+
+/**
+ * Whose rows a group grade can reach.
+ *
+ * The group id comes from the path, so the only thing tying it to this assignment is the
+ * `groupSetId` on the lookup, and the only thing tying the "already graded differently"
+ * warning to this piece of work is the assignment and problem on that read. The prisma mock
+ * answers from its fixture whatever the `where` says: without the `groupSetId` a group from
+ * an unrelated set is graded, and without the `assignmentId` or `problemId` the warning is
+ * computed from those students' grades on completely different work, so a real clash would
+ * be missed and a false one reported.
+ */
+describe('whose rows a group grade can reach', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('takes the group from this assignment’s set, and reads existing grades for this problem only', async () => {
+    const res = await post({ grade: 8 });
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.studentGroup.findFirst)).toEqual({
+      id: 'g1',
+      groupSetId: 'gs1',
+    });
+    expect(whereOf(prismaMock.assignmentProblemGrade.findMany)).toEqual({
+      assignmentId: 'a1',
+      problemId: 'p1',
+      studentId: { in: ['s1', 's2', 's3'] },
+    });
+  });
+});

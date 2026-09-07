@@ -653,3 +653,47 @@ describe('GET assignment submissions, feedback visibility', () => {
     });
   });
 });
+
+/**
+ * What this route reads.
+ *
+ * The assignment id comes from the path, so the lookup has to name the course the caller was
+ * proven to be in, and the problem read has to name the assignment. The prisma mock answers
+ * from its fixture whatever the `where` says: without the `courseId` an assignment id from
+ * another course resolves, and without the `assignmentId` the problem list is every linked
+ * problem in the installation.
+ */
+describe('what the submission view is scoped to', () => {
+  const whereOf = (fn: { mock: { calls: unknown[][] } }) =>
+    (fn.mock.calls[0][0] as { where: unknown }).where;
+
+  it('finds the assignment in this course and its problems only', async () => {
+    authMock.mockResolvedValue({ user: { id: 'u1', role: 'ADMIN', isAdmin: true } });
+    prismaMock.assignment.findFirst.mockResolvedValue({ id: 'a1', isPublished: true });
+    prismaMock.assignmentProblem.findMany.mockResolvedValue([
+      {
+        problem: {
+          id: 'p1',
+          title: 'P1',
+          description: null,
+          type: null,
+          maxStates: null,
+          isDeterministic: null,
+        },
+        problemId: 'p1',
+        maxSubmissions: 3,
+        showFeedback: true,
+      },
+    ]);
+    prismaMock.submission.findMany.mockResolvedValue([]);
+
+    const res = await GET(
+      new Request('http://localhost/api/courses/c1/assignments/a1/submissions/s1'),
+      { params: Promise.resolve({ id: 'c1', aid: 'a1', sid: 's1' }) },
+    );
+    expect(res.status).toBe(200);
+
+    expect(whereOf(prismaMock.assignment.findFirst)).toEqual({ id: 'a1', courseId: 'c1' });
+    expect(whereOf(prismaMock.assignmentProblem.findMany)).toEqual({ assignmentId: 'a1' });
+  });
+});

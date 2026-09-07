@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { isStudentAssigned } from '@/lib/assignment-visibility';
+import { loadStudentGroupIndex, type StudentGroupIndex } from '@/lib/assignment-groups';
 import { effectiveDeadline, type OverrideRow } from '@/lib/effective-deadline';
 import { isMissingZero, submittedKey } from '@/lib/missing-work';
 import {
@@ -142,23 +143,36 @@ export async function getCourseStatistics(
 
   // Memberships, once. They answer three questions: who is assigned group work, which team a
   // grade row belongs to, and which students are in no group at all.
+  //
+  // Scoped to this course's own group sets. The query had no `where` at all, so a course's
+  // statistics page read every membership row in the installation: wrong for the first
+  // question (a student's groups in another course are not their groups here) and, with five
+  // universities on one deployment, a table scan for the other two.
+  const courseGroupSetIds = [
+    ...new Set(assignmentRows.map((a) => a.groupSetId).filter((id): id is string => !!id)),
+  ];
   const memberships =
-    assignmentRows.length > 0
+    courseGroupSetIds.length > 0
       ? await prisma.groupMembership.findMany({
+          where: { groupSetId: { in: courseGroupSetIds } },
           select: { userId: true, groupId: true, group: { select: { groupSetId: true } } },
         })
       : [];
-  const groupIdsByStudent = new Map<string, string[]>();
   const membersByGroup = new Map<string, string[]>();
   const groupsBySet = new Map<string, string[]>();
   for (const m of memberships) {
-    groupIdsByStudent.set(m.userId, [...(groupIdsByStudent.get(m.userId) ?? []), m.groupId]);
     membersByGroup.set(m.groupId, [...(membersByGroup.get(m.groupId) ?? []), m.userId]);
     const setId = m.group?.groupSetId;
     if (setId && !(groupsBySet.get(setId) ?? []).includes(m.groupId)) {
       groupsBySet.set(setId, [...(groupsBySet.get(setId) ?? []), m.groupId]);
     }
   }
+  // The student-side question goes through the shared index, which makes naming the set
+  // unavoidable. "Which groups is this student in" is only answerable per set.
+  const studentGroups = await loadStudentGroupIndex(
+    assignmentRows.map((a) => a.groupSetId),
+    [...new Set(memberships.map((m) => m.userId))],
+  );
 
   const assignmentIds = assignmentRows.map((a) => a.id);
   // Every exception in the course, in one read. Which participant each one applies to is the
@@ -229,7 +243,7 @@ export async function getCourseStatistics(
         { assignedToEveryone: assignment.assignedToEveryone },
         assignment.assignees,
         userId,
-        groupIdsByStudent.get(userId) ?? [],
+        studentGroups.for(assignment.groupSetId, userId),
       ),
     );
     for (const userId of assignedStudents) {
@@ -329,7 +343,9 @@ export async function getCourseStatistics(
     if (!assignment) continue;
     const byStudent = grades.get(assignment.id) ?? new Map();
     const marked = byStudent.get(cell.participantId) ?? new Map();
-    const groupIds = groupIdsByStudent.get(cell.participantId) ?? [];
+    // This assignment's set. An over-broad list here is the missing-work exemption failing:
+    // empty means "in no group, so no way to submit", which is the case that must not be zeroed.
+    const groupIds = studentGroups.for(assignment.groupSetId, cell.participantId);
 
     let accountable = 0;
     for (const p of assignment.problems) {
@@ -425,7 +441,7 @@ export async function getCourseStatistics(
     assignments,
     buildTurnInInputs(assignmentRows, participantsByAssignment, submissionRows, {
       overridesByAssignment,
-      groupIdsByStudent,
+      studentGroups,
     }),
   );
 
@@ -586,7 +602,7 @@ function buildTurnInInputs(
   }[],
   lookups: {
     overridesByAssignment: Map<string, OverrideRow[]>;
-    groupIdsByStudent: Map<string, string[]>;
+    studentGroups: StudentGroupIndex;
   },
 ): TurnInInput[] {
   // The span of each participant's attempts at each assignment, in both units at once: a
@@ -621,10 +637,14 @@ function buildTurnInInputs(
     for (const participantId of participantsByAssignment.get(assignment.id) ?? []) {
       // A group is held to whatever a GROUP override says about it; a student to their own
       // override, else one aimed at a group they are in, else the class's date.
+      // On group work the participant IS the group, so it is its own id. Otherwise the index
+      // answers, and for an individual assignment (a null set) that is an empty list by
+      // definition. It used to hand over every group the student was in anywhere, which is not
+      // a thing an individual assignment has.
       const groupIds =
         assignment.groupSetId != null
           ? [participantId]
-          : (lookups.groupIdsByStudent.get(participantId) ?? []);
+          : lookups.studentGroups.for(assignment.groupSetId, participantId);
       const resolved = effectiveDeadline(base, overrides, participantId, groupIds);
       const dueAt = resolved.dueDate.getTime();
       inputs.push({

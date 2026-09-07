@@ -11,6 +11,7 @@ import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
 import { apiPaths } from '@/lib/api-paths';
 import type { CourseListItem } from '@/lib/courses-list';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
+import { queryKeys } from '@/lib/query-keys';
 
 /** Cache key for the archived-courses list; distinct from the active list. */
 export const archivedCoursesQueryKey = ['courses', 'archived'] as const;
@@ -51,7 +52,7 @@ export default function ArchivedCoursesClient({
   // Restoring or deleting moves a course between this list, the active list and the
   // sidebar nav, so invalidate the whole ['courses'] prefix rather than only this query.
   const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['courses'] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.courses.all() });
   }, [queryClient]);
 
   const columnsMemo = useMemo(() => {

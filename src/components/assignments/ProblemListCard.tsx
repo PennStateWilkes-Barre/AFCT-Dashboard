@@ -32,6 +32,11 @@ export type ProblemListCardProps = {
   /** Show the "submissions used / allowed" badge next to the grade. Default true; the staff
    * submissions view hides it since attempts aren't relevant when grading. */
   showSubmissionUsage?: boolean;
+  /** Show the "grade / max points" badge on each row. Default true. The student assignment
+   *  view turns it off: the grade for the problem being read is a card of its own there, and
+   *  repeating every problem's score in the picker made the list a scoreboard to scan rather
+   *  than a list to choose from. */
+  showGrade?: boolean;
   /** Show a footer badge totalling earned / max points across all problems. Default false. */
   showTotal?: boolean;
 };
@@ -47,6 +52,7 @@ export function ProblemListCard({
   scrollAreaClassName = 'h-[520px]',
   numberShortcuts = false,
   showSubmissionUsage = true,
+  showGrade = true,
   showTotal = false,
 }: ProblemListCardProps) {
   // Earned (ungraded counts as 0) and max points summed across every problem.
@@ -92,7 +98,7 @@ export function ProblemListCard({
               const isActive = selectedProblemId === problem.id;
               const badgeContent = getBadgeContent ? getBadgeContent(problem.id) : null;
               const gradeBadge =
-                problem.maxGrade !== undefined && problem.maxGrade !== null ? (
+                showGrade && problem.maxGrade !== undefined && problem.maxGrade !== null ? (
                   <Badge
                     key="grade"
                     variant="secondary"
@@ -144,13 +150,14 @@ export function ProblemListCard({
                   </Badge>
                 ) : null;
 
-              const content = badgeContent ?? (
-                <div className="flex items-center gap-1">
-                  {gradeBadge}
-                  {missingBadge}
-                  {usageBadge}
-                </div>
-              );
+              // Null rather than an empty flex box when every badge is switched off, so a
+              // row with nothing to show does not reserve a column for it.
+              const badges = [gradeBadge, missingBadge, usageBadge].filter(Boolean);
+              const content =
+                badgeContent ??
+                (badges.length > 0 ? (
+                  <div className="flex items-center gap-1">{badges}</div>
+                ) : null);
 
               const shortcut = numberShortcuts && index < 9 ? String(index + 1) : undefined;
 

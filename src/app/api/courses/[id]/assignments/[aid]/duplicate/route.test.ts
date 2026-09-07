@@ -280,3 +280,23 @@ describe('LMS grade sync', () => {
     );
   });
 });
+
+/**
+ * Which assignment gets duplicated.
+ *
+ * The assignment id comes from the path; the `courseId` on this lookup is the only thing
+ * tying it to the course the caller was proven staff of. The prisma mock returns its fixture
+ * either way, so without it a faculty member could copy another course's assignment, problem
+ * statements and all, into their own.
+ */
+describe('which assignment a duplicate copies', () => {
+  it('reads the source only from this course', async () => {
+    const res = await call({ title: 'Copy', problemMode: 'none' });
+    expect(res.status).toBe(201);
+
+    const wheres = prismaMock.assignment.findFirst.mock.calls.map(
+      (c) => (c[0] as { where: Record<string, unknown> }).where,
+    );
+    for (const w of wheres) expect(w).toMatchObject({ courseId: 'c1' });
+  });
+});

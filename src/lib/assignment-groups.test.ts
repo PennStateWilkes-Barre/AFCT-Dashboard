@@ -7,7 +7,7 @@ const prismaMock = vi.hoisted(() => ({
 
 vi.mock('@/lib/prisma', () => ({ prisma: prismaMock }));
 
-import { resolveStudentAssignmentGroupIds, resolveStudentSubmissionGroupId } from './assignment-groups';
+import { resolveStudentAssignmentGroupIds, resolveStudentSubmissionGroupId, loadStudentGroupIndex } from './assignment-groups';
 
 /**
  * The single definition of "which group is this student in, for this assignment".
@@ -85,5 +85,37 @@ describe('resolveStudentSubmissionGroupId', () => {
   it('is null for an ungrouped student', async () => {
     prismaMock.groupMembership.findMany.mockResolvedValue([]);
     await expect(resolveStudentSubmissionGroupId('a-1', 'u-1')).resolves.toBeNull();
+  });
+});
+
+/**
+ * What the group index asks for.
+ *
+ * `loadStudentGroupIndex` exists because the version before it asked for every membership
+ * these students hold anywhere, which is a different question and the wrong one (it cost the
+ * gradebook its missing-work exemption). The prisma mock answers from its fixture whatever
+ * the `where` says, so the only way to hold that fix in place is to assert the query.
+ */
+describe('loadStudentGroupIndex', () => {
+  it('asks only about these group sets and these students', async () => {
+    prismaMock.groupMembership.findMany.mockResolvedValue([
+      { groupSetId: 'gs1', userId: 'u1', groupId: 'g1' },
+    ]);
+
+    const index = await loadStudentGroupIndex(['gs1', null, 'gs1'], ['u1', 'u2']);
+
+    expect(prismaMock.groupMembership.findMany.mock.calls[0][0]).toMatchObject({
+      where: { groupSetId: { in: ['gs1'] }, userId: { in: ['u1', 'u2'] } },
+    });
+    expect(index.for('gs1', 'u1')).toEqual(['g1']);
+    expect(index.for('gs1', 'u2')).toEqual([]);
+    expect(index.all()).toEqual(['g1']);
+  });
+
+  it('asks nothing when there is no group set or nobody to ask about', async () => {
+    await loadStudentGroupIndex([null, undefined], ['u1']);
+    await loadStudentGroupIndex(['gs1'], []);
+
+    expect(prismaMock.groupMembership.findMany).not.toHaveBeenCalled();
   });
 });

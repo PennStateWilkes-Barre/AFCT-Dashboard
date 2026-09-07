@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { isMissingZero, submittedKey } from '@/lib/missing-work';
 import { isStudentAssigned } from '@/lib/assignment-visibility';
+import { loadStudentGroupIndex, type StudentGroupIndex } from '@/lib/assignment-groups';
 
 export type GradeMatrixStudent = {
   id: string;
@@ -44,12 +45,15 @@ export type CourseGradeStructure = {
   // group they belong to). Cells where this is false render as "not assigned".
   assigned: Record<string, Record<string, boolean>>;
   /**
-   * The groups each student belongs to, from the same lookup that built `assigned`.
+   * The groups each student belongs to, per group set, from the same lookup that built
+   * `assigned`.
    *
    * Carried rather than re-queried because the missing-work rule needs them too, and a group
-   * assignment's "did anybody hand this in" question is answered per group.
+   * assignment's "did anybody hand this in" question is answered per group. An index rather
+   * than a plain map so the set id has to be named at every use: see `loadStudentGroupIndex`
+   * for what asking without it cost.
    */
-  groups: Map<string, string[]>;
+  groups: StudentGroupIndex;
 };
 
 // The cell values only: grades[studentId][assignmentId] = summed points earned (problem
@@ -341,26 +345,23 @@ function toColumns(rows: AssignmentRow[]): GradeMatrixAssignment[] {
 async function buildAssignedMapWithGroups(
   assignmentRows: AssignmentRow[],
   studentIds: string[],
-): Promise<{ assigned: Record<string, Record<string, boolean>>; groups: Map<string, string[]> }> {
+): Promise<{ assigned: Record<string, Record<string, boolean>>; groups: StudentGroupIndex }> {
   const assigned: Record<string, Record<string, boolean>> = {};
   for (const s of studentIds) {
     assigned[s] = {};
     for (const a of assignmentRows) assigned[s][a.id] = true;
   }
   if (assignmentRows.length === 0 || studentIds.length === 0) {
-    return { assigned, groups: new Map() };
+    return { assigned, groups: await loadStudentGroupIndex([], []) };
   }
 
-  const memberships = await prisma.groupMembership.findMany({
-    where: { userId: { in: studentIds } },
-    select: { userId: true, groupId: true },
-  });
-  const groupIdsByStudent = new Map<string, string[]>();
-  for (const m of memberships) {
-    const list = groupIdsByStudent.get(m.userId);
-    if (list) list.push(m.groupId);
-    else groupIdsByStudent.set(m.userId, [m.groupId]);
-  }
+  // Scoped to each assignment's own group set. This used to ask for every membership these
+  // students hold anywhere, which made the missing-work exemption fail for anyone who happened
+  // to be in a group in another course. See loadStudentGroupIndex.
+  const groups = await loadStudentGroupIndex(
+    assignmentRows.map((a) => a.groupSetId),
+    studentIds,
+  );
 
   for (const a of assignmentRows) {
     for (const s of studentIds) {
@@ -370,12 +371,12 @@ async function buildAssignedMapWithGroups(
           { assignedToEveryone: a.assignedToEveryone },
           a.assignees ?? [],
           s,
-          groupIdsByStudent.get(s) ?? [],
+          groups.for(a.groupSetId, s),
         );
       }
     }
   }
-  return { assigned, groups: groupIdsByStudent };
+  return { assigned, groups };
 }
 
 /** The map alone, for the callers that do not need the groups. */
@@ -428,7 +429,7 @@ async function buildAccountability(
   studentIds: string[],
   assigned: Record<string, Record<string, boolean>>,
   activeById: Map<string, boolean>,
-  groupsByStudent: Map<string, string[]>,
+  groups: StudentGroupIndex,
   now = new Date(),
 ): Promise<{
   /** Points that count toward this student's denominator on this assignment. */
@@ -456,7 +457,7 @@ async function buildAccountability(
   }
 
   const assignmentIds = assignmentRows.map((a) => a.id);
-  const groupIds = [...new Set([...groupsByStudent.values()].flat())];
+  const groupIds = groups.all();
 
   const [gradeRows, submissionRows] = await Promise.all([
     prisma.assignmentProblemGrade.findMany({
@@ -506,7 +507,9 @@ async function buildAccountability(
         studentId,
         isAssigned: true,
         isActive: activeById.get(studentId) ?? true,
-        groupIds: groupsByStudent.get(studentId) ?? [],
+        // This assignment's set, not every group the student is in. The empty case is the
+        // exemption missing-work relies on, so an over-broad list scores a zero.
+        groupIds: groups.for(a.groupSetId, studentId),
       };
 
       let accountable = 0;
@@ -752,23 +755,21 @@ export async function getCourseGradePage(
       gradesAll = await loadGradeSums(assignmentIds, candidateIds);
       // Ordering by a number the page would not show is its own kind of wrong, so the sort key
       // is built from the same accountability the cells are.
-      const [rosterAll, membershipsAll] = await Promise.all([
+      const [rosterAll, groupsAll] = await Promise.all([
         prisma.roster.findMany({
           where: { courseId, userId: { in: candidateIds } },
           select: { userId: true, status: true, user: { select: { inactive: true } } },
         }),
-        prisma.groupMembership.findMany({
-          where: { courseId, userId: { in: candidateIds } },
-          select: { userId: true, groupId: true },
-        }),
+        // Course-scoped was closer than the gradebook's version but still not the rule: a
+        // course can hold several group sets, and only the assignment's own set decides this.
+        loadStudentGroupIndex(
+          assignmentRows.map((a) => a.groupSetId),
+          candidateIds,
+        ),
       ]);
       const activeAll = new Map(
         rosterAll.map((r) => [r.userId, r.status === 'ENROLLED' && !r.user?.inactive]),
       );
-      const groupsAll = new Map<string, string[]>();
-      for (const m of membershipsAll) {
-        groupsAll.set(m.userId, [...(groupsAll.get(m.userId) ?? []), m.groupId]);
-      }
       const accountableAll = await buildAccountability(
         assignmentRows,
         candidateIds,
@@ -816,23 +817,19 @@ export async function getCourseGradePage(
   // Who is still active, and which groups they are in: both decide whether unsubmitted work is
   // this student's to be missing. Dropped students stay in the gradebook by design, so their
   // standing has to be read rather than assumed.
-  const [rosterRows, memberships] = await Promise.all([
+  const [rosterRows, groupsByStudent] = await Promise.all([
     prisma.roster.findMany({
       where: { courseId, userId: { in: pageIds } },
       select: { userId: true, status: true, user: { select: { inactive: true } } },
     }),
-    prisma.groupMembership.findMany({
-      where: { courseId, userId: { in: pageIds } },
-      select: { userId: true, groupId: true },
-    }),
+    loadStudentGroupIndex(
+      assignmentRows.map((a) => a.groupSetId),
+      pageIds,
+    ),
   ]);
   const activeById = new Map(
     rosterRows.map((r) => [r.userId, r.status === 'ENROLLED' && !r.user?.inactive]),
   );
-  const groupsByStudent = new Map<string, string[]>();
-  for (const m of memberships) {
-    groupsByStudent.set(m.userId, [...(groupsByStudent.get(m.userId) ?? []), m.groupId]);
-  }
 
   const accountability = await buildAccountability(
     assignmentRows,

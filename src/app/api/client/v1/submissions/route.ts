@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { withClientAuth } from '@/lib/api/with-client-auth';
 import { apiError } from '@/lib/api/http';
-import { logError } from '@/lib/api/activity';
+import { logStudentFeedbackViewed, logError } from '@/lib/api/activity';
 import { readFormData } from '@/lib/api/request';
 import { SubmissionCreateApiSchema } from '@/schemas/submission';
 import { createSubmission } from '@/lib/create-submission';
@@ -93,19 +93,36 @@ export const GET = withClientAuth(async (req, _ctx, { user }) => {
     // member of staff reading a student's attempts does it through the web routes.
     const visibility = feedbackVisibilityMap([{ problemId, showFeedback: link.showFeedback }]);
 
+    const disclosed = submissions.map((s) => ({
+      id: s.id,
+      status: s.status,
+      correct: s.correct,
+      submittedAt: s.submittedAt.toISOString(),
+      // The name of the file the student uploaded, and the evaluator's witness /
+      // counterexample string once evaluation has finished (null while queued).
+      fileName: s.originalFileName,
+      ...discloseSubmissionFeedback({ ...s, problemId }, visibility, { isStaff: false }),
+      submittedBy:
+        [s.student?.firstName, s.student?.lastName].filter(Boolean).join(' ').trim() || null,
+    }));
+
+    // The client is where most students read their feedback, and it never calls the web
+    // routes, so without this the study would only ever see the browser. Counted after
+    // disclosure, so a problem with feedback turned off records nothing.
+    const withFeedback = disclosed.filter((s) => s.feedbackVisible && s.feedback).length;
+    if (withFeedback > 0) {
+      await logStudentFeedbackViewed(req, {
+        userId: user.id,
+        courseId: assignment.courseId,
+        assignmentId,
+        surface: 'client',
+        withFeedback,
+        problemId,
+      });
+    }
+
     return NextResponse.json({
-      submissions: submissions.map((s) => ({
-        id: s.id,
-        status: s.status,
-        correct: s.correct,
-        submittedAt: s.submittedAt.toISOString(),
-        // The name of the file the student uploaded, and the evaluator's witness /
-        // counterexample string once evaluation has finished (null while queued).
-        fileName: s.originalFileName,
-        ...discloseSubmissionFeedback({ ...s, problemId }, visibility, { isStaff: false }),
-        submittedBy:
-          [s.student?.firstName, s.student?.lastName].filter(Boolean).join(' ').trim() || null,
-      })),
+      submissions: disclosed,
     });
   } catch (error) {
     await logError(req, {
@@ -117,6 +134,7 @@ export const GET = withClientAuth(async (req, _ctx, { user }) => {
     return apiError(500, 'Server error');
   }
 });
+
 
 /**
  * Submit a solution file (client). Same multipart body, validation, caps, cooldown,

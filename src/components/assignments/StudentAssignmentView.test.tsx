@@ -153,6 +153,58 @@ describe('StudentAssignmentPage', () => {
     expect(calledUrls.some((u) => u.startsWith('/api/courses/c1/assignments/a1?'))).toBe(false);
   });
 
+  /**
+   * Before the release time the API withholds the description and sends no problems, so the
+   * page had nothing left to draw: a banner and then blank space, with no reason given.
+   */
+  describe('an assignment that has not opened yet', () => {
+    const locked = () =>
+      ({
+        ...buildAssignment(),
+        locked: true,
+        description: null,
+        descriptionJson: null,
+        problems: [],
+        unlockAt: new Date('2099-03-01T15:00:00.000Z'),
+      }) as unknown as AssignmentWithDetails;
+
+    it('says it is not open, rather than rendering an empty page', async () => {
+      vi.stubGlobal(
+        'fetch',
+        routeFetch({ 'student-context': () => ({ ok: true, json: async () => emptyContext }) }),
+      );
+
+      renderWithClient(<StudentAssignmentPage initialAssignment={locked()} />);
+
+      expect(
+        await screen.findByRole('heading', { name: /has not opened yet/i }),
+      ).toBeInTheDocument();
+    });
+
+    it('tells the student when it opens', async () => {
+      vi.stubGlobal(
+        'fetch',
+        routeFetch({ 'student-context': () => ({ ok: true, json: async () => emptyContext }) }),
+      );
+
+      renderWithClient(<StudentAssignmentPage initialAssignment={locked()} />);
+
+      await screen.findByRole('heading', { name: /has not opened yet/i });
+      expect(screen.getByText(/become available on/i)).toBeInTheDocument();
+    });
+
+    it('still names the assignment, which was never the part being withheld', async () => {
+      vi.stubGlobal(
+        'fetch',
+        routeFetch({ 'student-context': () => ({ ok: true, json: async () => emptyContext }) }),
+      );
+
+      renderWithClient(<StudentAssignmentPage initialAssignment={locked()} />);
+
+      expect(await screen.findByRole('heading', { level: 1 })).toHaveTextContent('Regex Basics');
+    });
+  });
+
   it('renders the problem from initialAssignment while student-context is empty', async () => {
     const fetchMock = routeFetch({
       'student-context': () => ({ ok: true, json: async () => emptyContext }),

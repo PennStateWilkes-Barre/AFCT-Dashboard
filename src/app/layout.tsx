@@ -1,4 +1,5 @@
 import './globals.css';
+import './login-transition-tuning.css';
 import type { Metadata } from 'next';
 import { geistSans, geistMono } from '@/app/fonts';
 import { RootProviders } from '@/components/providers/RootProviders';

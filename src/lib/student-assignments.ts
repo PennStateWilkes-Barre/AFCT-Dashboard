@@ -51,6 +51,14 @@ export type StudentAssignment = {
   lateCutoff: Date | null;
   /** True before unlockAt: the description and problems are withheld until it opens. */
   locked: boolean;
+  /**
+   * What the assignment is worth in total, summed over its problems.
+   *
+   * Carried separately because `problems` is emptied by the content lock, and a caller that
+   * summed the masked list reported a locked assignment as being worth zero. The total is not
+   * part of what the lock hides: the assignments table shows it for a locked assignment too.
+   */
+  maxPoints: number;
   problems: StudentAssignmentProblem[];
 };
 
@@ -324,6 +332,8 @@ export async function getStudentCourseAssignments(
       allowLateSubmissions: eff.allowLateSubmissions,
       lateCutoff: eff.lateCutoff,
       locked,
+      // Summed before the mask below, so it survives the lock.
+      maxPoints: (byAssignment[a.id] ?? []).reduce((sum, p) => sum + p.maxPoints, 0),
       problems: locked ? [] : (byAssignment[a.id] ?? []),
     };
   });

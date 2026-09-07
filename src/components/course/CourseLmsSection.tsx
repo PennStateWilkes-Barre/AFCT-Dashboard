@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw, Unlink } from 'lucide-react';
 import { RosterSyncDialog } from '@/components/course/RosterSyncDialog';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog';
 import { showToast } from '@/lib/toast';
 import { formatDateTimeInTimeZone } from '@/lib/date-format';
 import { useEffectiveTimezone } from '@/hooks/use-effective-timezone';
+import { queryKeys } from '@/lib/query-keys';
 
 type Link = {
   id: string;
@@ -40,23 +42,31 @@ type Link = {
  */
 export function CourseLmsSection({ courseId }: { courseId: string }) {
   const { timezone, hour12 } = useEffectiveTimezone();
-  const [links, setLinks] = useState<Link[] | null>(null);
   const [removing, setRemoving] = useState<Link | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
+  /**
+   * Cached under the course prefix, so it refetches with the rest of the course rather than on
+   * every visit to the Settings tab, and so `invalidateQueries(['course', courseId])` after a
+   * roster sync or an LMS change reaches it.
+   */
+  const queryClient = useQueryClient();
+  const linksQuery = useQuery({
+    queryKey: queryKeys.course.lmsLink(courseId),
+    queryFn: async () => {
       const res = await fetch(`/api/courses/${courseId}/lti-link`);
-      if (!res.ok) throw new Error();
-      setLinks(((await res.json()) as { links: Link[] }).links);
-    } catch {
-      setLinks([]);
-    }
-  }, [courseId]);
+      if (!res.ok) throw new Error('Failed to load LMS links');
+      return ((await res.json()) as { links: Link[] }).links;
+    },
+  });
+  // `null` while loading; a failed read resolves to none, so the card stays hidden rather
+  // than sitting on a spinner, which is what the old catch did.
+  const links: Link[] | null = linksQuery.isPending ? null : (linksQuery.data ?? []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const load = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: queryKeys.course.lmsLink(courseId) }),
+    [queryClient, courseId],
+  );
 
   const unlink = async () => {
     if (!removing) return;

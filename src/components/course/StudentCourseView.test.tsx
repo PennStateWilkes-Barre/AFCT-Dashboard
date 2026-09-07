@@ -7,11 +7,11 @@ import { StudentCourseView } from './StudentCourseView';
 import type { FullCourse } from '@/types/course';
 
 // The panels fetch and format on their own; this is about the page's shape.
-vi.mock('@/components/StudentGradesCard', () => ({
-  StudentGradesCard: () => <div data-testid="grades-panel" />,
+vi.mock('@/components/StudentGradesTable', () => ({
+  StudentGradesTable: () => <div data-testid="grades-panel" />,
 }));
-vi.mock('@/components/StudentAssignmentCard', () => ({
-  StudentAssignmentCard: () => <div data-testid="assignments-panel" />,
+vi.mock('@/components/StudentAssignmentsTable', () => ({
+  StudentAssignmentsTable: () => <div data-testid="assignments-panel" />,
 }));
 vi.mock('@/hooks/use-effective-timezone', () => ({
   useEffectiveTimezone: () => ({ timezone: 'UTC' }),
@@ -100,10 +100,11 @@ describe('StudentCourseView', () => {
     expect(h1s[0]).toHaveTextContent('Introduction to Digital Systems');
   });
 
-  it('keeps staff-only header detail out of the student view', () => {
+  it('names the faculty but keeps the registration code out of the student view', () => {
     renderView();
-    // Faculty names and the registration code are the two things the header gates.
-    expect(screen.queryByText(/Faculty:/)).toBeNull();
+    // Who teaches the course is for everyone. The join code is the one thing the header
+    // still gates, and a student is never sent one in the first place.
+    expect(screen.getByText(/Faculty:/)).toBeInTheDocument();
     expect(screen.queryByText(/Registration Code/i)).toBeNull();
   });
 

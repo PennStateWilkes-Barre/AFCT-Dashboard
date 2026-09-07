@@ -31,6 +31,7 @@ import { useFacultyTaOptions, getUserName, namesForReview } from './useFacultyTa
 import { CourseDateTimeField } from './CourseDateTimeField';
 import { shouldEnterAdvanceStep } from '@/lib/wizard-keyboard';
 import { formatDateTimeLocal, toDateTimeLocalInTimeZone } from '@/lib/date-convert';
+import { queryKeys } from '@/lib/query-keys';
 
 type FormValues = z.input<typeof DuplicateFormSchema>;
 
@@ -130,7 +131,7 @@ export default function DuplicateCourseDialog({
      * Only faculty and TAs are wanted here (the wizard copies course staff), which is
      * exactly what the course payload now carries.
      */
-    queryKey: ['course', course?.id, 'duplicate-staff'],
+    queryKey: queryKeys.course.duplicateStaff(course?.id ?? ''),
     queryFn: async () => {
       if (!course?.id) return [];
       const res = await fetch(apiPaths.course(course.id, { view: 'roster' }));

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { showToast } from '@/lib/toast';
 import type { User } from '@prisma/client';
 import { apiPaths } from '@/lib/api-paths';
+import { queryKeys } from '@/lib/query-keys';
 
 export type RosterUser = User & { role?: string };
 
@@ -49,7 +50,7 @@ export function useFacultyTaOptions(open: boolean): {
   taList: RosterUser[];
 } {
   const facultyQuery = useQuery({
-    queryKey: ['admin', 'users', 'faculty'],
+    queryKey: queryKeys.admin.usersFaculty(),
     queryFn: async () => {
       const res = await fetch(apiPaths.admin.users({ role: 'FACULTY' }));
       if (!res.ok) throw new Error('Failed to load faculty');
@@ -65,7 +66,7 @@ export function useFacultyTaOptions(open: boolean): {
   }, [facultyQuery.isError]);
 
   const taQuery = useQuery({
-    queryKey: ['admin', 'users', 'ta'],
+    queryKey: queryKeys.admin.usersTa(),
     queryFn: async () => {
       const res = await fetch(apiPaths.admin.users({ role: 'TA' }));
       if (!res.ok) throw new Error('Failed to load TAs');

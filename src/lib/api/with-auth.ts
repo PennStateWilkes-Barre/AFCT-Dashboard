@@ -4,6 +4,7 @@ import type { CourseRole } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { logThrottledView } from './activity';
 import { auth } from '@/lib/auth';
+import { courseHasStarted } from '@/lib/course-status';
 import {
   isAdmin,
   canManageCourse,
@@ -196,7 +197,7 @@ export function withCourseAuth<Ctx extends CourseParams, R extends Response = Re
       let membership: {
         role?: CourseRole | null;
         status?: string | null;
-        course?: { isPublished: boolean } | null;
+        course?: { isPublished: boolean; startDate: Date | null } | null;
       } | null = null;
       try {
         membership = await prisma.roster.findFirst({
@@ -204,7 +205,11 @@ export function withCourseAuth<Ctx extends CourseParams, R extends Response = Re
           // The course's own state comes too: a student enrolled in an unpublished course is
           // refused for a reason that has nothing to do with their enrolment, and reporting it
           // as "needs enrolled" sends whoever reads the log looking in the wrong place.
-          select: { role: true, status: true, course: { select: { isPublished: true } } },
+          select: {
+            role: true,
+            status: true,
+            course: { select: { isPublished: true, startDate: true } },
+          },
         });
       } catch {
         // A failed lookup must not turn the 403 into a 500; log the refusal without the role.
@@ -227,15 +232,30 @@ export function withCourseAuth<Ctx extends CourseParams, R extends Response = Re
         role === 'STUDENT' &&
         status === 'ENROLLED' &&
         membership?.course?.isPublished === false;
+      /**
+       * Enrolled in a published course and still refused: it has not reached its start date.
+       *
+       * The same shape as `unpublished` above and separated for the same reasons. Without it
+       * the refusal is logged as "student, needs enrolled", which is not true and sends
+       * whoever reads the log looking at the roster for a fault that is a date.
+       */
+      const notStarted =
+        opts.access === 'read' &&
+        role === 'STUDENT' &&
+        status === 'ENROLLED' &&
+        membership?.course?.isPublished === true &&
+        !courseHasStarted(membership?.course?.startDate);
       const reason = unpublished
         ? 'course not published'
-        : !membership
-          ? 'not enrolled in this course'
-          : status && status !== 'ENROLLED'
-            ? `${status.toLowerCase()} from this course`
-            : role
-              ? `${role.toLowerCase()}, needs ${required.toLowerCase()}`
-              : `needs ${required.toLowerCase()}`;
+        : notStarted
+          ? 'course not started'
+          : !membership
+            ? 'not enrolled in this course'
+            : status && status !== 'ENROLLED'
+              ? `${status.toLowerCase()} from this course`
+              : role
+                ? `${role.toLowerCase()}, needs ${required.toLowerCase()}`
+                : `needs ${required.toLowerCase()}`;
 
       await createEnhancedActivityLog(prisma, req, {
         userId: session.user.id,
@@ -249,9 +269,19 @@ export function withCourseAuth<Ctx extends CourseParams, R extends Response = Re
       // The only denial that says more than "Forbidden". Nothing is disclosed by it: they are
       // enrolled, so they already know the course exists, and the screen is otherwise left
       // telling them to refresh a page that will never load.
-      return unpublished
-        ? apiError(403, 'This course has not been published yet, so it is not open to students.')
-        : apiError(403, 'Forbidden');
+      if (unpublished) {
+        return apiError(
+          403,
+          'This course has not been published yet, so it is not open to students.',
+        );
+      }
+      // Same reasoning as the unpublished message: they are enrolled, so the course's
+      // existence is not news, and "Forbidden" would leave them refreshing a page that will
+      // not load until a date they were never told.
+      if (notStarted) {
+        return apiError(403, 'This course has not started yet, so it is not open to students.');
+      }
+      return apiError(403, 'Forbidden');
     }
 
     // Archive freeze: an archived course is read-only for everyone (admins too). This

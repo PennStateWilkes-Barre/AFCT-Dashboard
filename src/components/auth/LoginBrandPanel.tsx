@@ -45,8 +45,8 @@ function GithubMark({ className }: { className?: string }) {
  * Three rows rather than `justify-between`, which is the composition decision here. Pushing an
  * identity block to the top and a footer to the bottom leaves whatever is left as a hole in the
  * middle, and at 1080px that hole was most of the panel. The middle row is the flexible one and
- * the automaton lives in it, so the empty space is distributed around a subject instead of
- * being the subject.
+ * it is where the substance goes, so the empty space is distributed around a subject instead
+ * of being the subject.
  *
  * Everything decorative is `aria-hidden` and behind the copy. Hidden below the split
  * breakpoint entirely: a phone gets the compact brand header in `LoginForm` instead, because
@@ -64,38 +64,24 @@ export function LoginBrandPanel({
     <section
       aria-label="About AFCT"
       className={cn(
-        // No background of its own: `AuthPageBackground` owns the page ground, and a second
-        // one here is exactly the vertical seam this layout is meant not to have.
         'text-sidebar-foreground relative',
-        // Sticky rather than its own scroller. Signup is taller than the viewport, and two
-        // independently scrolling panes is the layout that always ends up trapping a scroll.
-        // minmax(0,1fr) on the column, not just the rows. Without it the single implicit
-        // column is sized by its widest content, and the automaton's fixed width pushed the
-        // column past the panel's own padding: the drawing sat right of centre at lg and was
-        // saved from showing outside the panel only by `overflow-hidden`.
         'grid h-dvh grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)_auto]',
-        // The lg step is set by a 1366x768 laptop, where the panel is under 500px wide and
-        // there is no spare height; xl and up get the more generous treatment.
         'p-8 xl:p-12 2xl:p-14',
+        // A shallower foot than the other three sides. The footer row is pinned to this
+        // padding, so trimming it is the only thing that moves that row down, and the row is
+        // four small links rather than a block of copy: it does not need the same margin the
+        // headline does. Tailwind emits the side utility after the shorthand, so this wins.
+        'pb-6 xl:pb-9 2xl:pb-10',
         className,
       )}
     >
-      <div className="relative mt-3 ml-4 max-w-xl">
-        {/* Identity: the lockup and the words it stands for. The tagline sits under the whole
-            row, not inside the text column beside the mark, so the block squares off on the
-            mark's left edge instead of stepping in by the width of the mark. */}
+      <div className="relative mt-3 ml-4 max-w-3xl">
         <div className="flex items-center gap-4">
-          {/* Cobalt, set here rather than in the mark: the same component is the compact
-              header on a phone, where it sits on a light card and takes the primary colour. */}
           <AuthBrandMark
             className="size-16 shrink-0 text-blue-400 xl:size-20"
-            // Near-white against the cobalt frame, which is the reference's navy-on-
-            // white two-tone inverted for a dark surface.
             accentClassName="text-sidebar-foreground"
           />
           <div>
-            {/* The wordmark carries the weight the accent rule used to, so it is a step up
-                at each size; the mark grows with it to keep the lockup's proportion. */}
             <p className="text-5xl leading-none font-semibold tracking-tight xl:text-6xl">AFCT</p>
             <p className="mt-2 text-xs font-medium tracking-[0.32em] text-blue-300 uppercase xl:text-sm 2xl:text-base">
               Dashboard
@@ -103,70 +89,44 @@ export function LoginBrandPanel({
           </div>
         </div>
 
-        {/* What the letters stand for, and therefore part of the identity rather than part of
-            the greeting: close enough to the lockup to read as one block, and muted, because
-            three coloured lines in a row would leave nothing looking primary. Tracked open a
-            little, which is the same trick DASHBOARD uses far harder; at 0.05em it reads as
-            a descriptor rather than as a second label competing with it. */}
-        <p className="text-sidebar-muted-foreground mt-3 text-sm tracking-wider xl:text-base">
+        <p className="text-sidebar-muted-foreground mt-4 text-xs font-medium tracking-[0.2em] uppercase xl:mt-5 xl:text-sm">
           Automated Feedback for Computing Theory
         </p>
 
-        {/* A separate block, and the gap is what says so. The tight case is not the narrow
-            pane but the short one: a 720px-high window at xl leaves 25px between this block
-            and the automaton below, which is what caps this gap rather than the width. */}
-        <div className="mt-10 space-y-3 2xl:mt-12">
-          {/* A step down from where it started. Blue, bold and the same size as a headline, it
-              was a second focal point in a column that should only have one: AFCT. */}
-          <p className="text-lg font-semibold tracking-tight text-blue-300 xl:text-xl 2xl:text-2xl">
-            Welcome to AFCT Dashboard
+        <div className="mt-12 2xl:mt-14">
+          <p className="text-[1.75rem] leading-[1.08] font-bold tracking-tight xl:text-[2rem] 2xl:text-[2.625rem]">
+            Stronger Learning
+            <span className="block w-fit bg-gradient-to-r from-[#7DD3FC] via-[#8EBBF5] to-[#7FA8EA] bg-clip-text text-transparent">
+              Through Automated Feedback
+            </span>
           </p>
-          <p className="text-sidebar-muted-foreground max-w-md text-sm leading-relaxed xl:text-base">
-            Deliver intelligent feedback, streamline grading, and support student learning in
-            computing theory.
+
+          <p className="text-sidebar-muted-foreground mt-3 max-w-lg text-base leading-normal font-normal 2xl:mt-4 2xl:text-lg">
+            Learn, teach, and assess computing theory with intelligent feedback and streamlined
+            tools.
           </p>
         </div>
       </div>
 
-      {/* The middle row, and the reason the panel is a grid. The automaton takes whatever
-          height is left between the copy and the footer and centres in it, so the same markup
-          is a comfortable composition on a 768px laptop and on a 1440px display.
-          Nudged up a notch off dead centre: there is more usable air above it than below,
-          where the wave is already occupying the bottom of the frame. The diagram itself
-          changes every few minutes; see RotatingAuthAutomaton. */}
       <div className="relative flex min-h-0 items-center justify-center">
         <RotatingAuthAutomaton
           automata={automata}
-          className="pointer-events-none aspect-[444/234] max-h-full w-[30rem] max-w-[96%] -translate-y-5 text-blue-300 opacity-[0.22] xl:w-[35rem] 2xl:w-[40rem]"
+          className="auth-automaton pointer-events-none aspect-[444/234] max-h-full w-[36rem] max-w-[96%] translate-x-2 -translate-y-3 text-blue-300 opacity-[0.42] xl:w-[44rem] xl:translate-x-6 2xl:w-[50rem]"
         />
       </div>
 
-      {/* A glass pill rather than bare text on the wave. The wave's lines run straight through
-          this row, and the two ways out are to move the text above them or to give it a
-          surface of its own; lifting it cost the automaton 120px of height and left a dead
-          band under the footer. So: a translucent film with a blur behind it, which softens
-          the lines it covers instead of hiding them.
+      {/* Plain text on the ground, no surface of its own. This was a glass pill: a translucent
+          film, a hairline border and a 1px backdrop blur, which existed because the wave's
+          lines ran straight through the row and the text had to sit on something. The wave now
+          masks its own left third away under this text, so the film was solving a problem that
+          had already been solved somewhere better, and one less surface on the page is worth
+          having. `ml-4` rather than the pill's horizontal padding, which lines the row up with
+          the copy block above instead of leaving it 4px out.
 
-          The film is deliberately barely there, under 4%, and the blur is 1px rather than the
-          4px `backdrop-blur-sm` would give. The wave is six 1.5px curves at 10% to 30%, and a
-          4px blur wipes them out: sampling a row through the pill, the wave went from a
-          21-level spread to 6, so the pill looked opaque even though almost nothing was
-          filling it. At 1px the spread is 12 and the lines still run through. What separates
-          the pill from the panel is the edge and that slight refraction, not the fill.
-
-          `w-fit` because a pill has to end where the content does. It wraps to two lines on a
-          narrow panel and stays a stadium, which is why the radius is `rounded-full` rather
-          than a fixed one that would look wrong at double height.
-
-          Medium weight, and a step brighter than the muted token this used to take. It was
-          already at 11:1, so this is not a contrast fix: light text on a dark ground blooms,
-          and a 400-weight 14px line sitting directly over the contour lines reads softer than
-          its ratio suggests. Weight does more for that than colour does.
-
-          Separators are drawn rules rather than a middle dot or a pipe character: a glyph sits
-          on the text baseline, so beside a row of 16px icons it rides low and picks up the
-          font's own weight. A 1px box centres with the row and stays 1px at any size. */}
-      <div className="text-sidebar-foreground/85 border-sidebar-foreground/[0.08] bg-sidebar-foreground/[0.035] relative flex w-fit flex-wrap items-center gap-x-3 gap-y-2 rounded-full border px-5 py-2.5 text-xs font-medium backdrop-blur-[1px] xl:gap-x-4 xl:text-sm">
+          `pb-0` is how this sits lower. The grid pins this row's bottom edge to the panel's
+          padding, so a margin above it moves nothing; dropping its own bottom padding is what
+          lets the text settle the last 10px toward the foot of the panel. */}
+      <div className="text-sidebar-foreground/85 relative ml-4 flex w-fit flex-wrap items-center gap-x-3 gap-y-2 pt-2.5 pb-0 text-xs font-medium xl:gap-x-4 xl:text-sm">
         <span className="inline-flex items-center gap-2">
           <Code2 className={FOOTER_ICON} aria-hidden="true" />
           Open source

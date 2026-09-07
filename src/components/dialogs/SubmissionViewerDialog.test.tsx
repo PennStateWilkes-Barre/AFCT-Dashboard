@@ -107,3 +107,34 @@ describe('the link to the standalone window', () => {
     expect(screen.getByTestId('jff-viewer').getAttribute('data-window-href')).toBe('');
   });
 });
+
+/**
+ * The standalone viewer window is a staff tool. A student is reading one attempt of their
+ * own, where the preview is the whole job.
+ *
+ * Asserted through the viewer's `windowTarget` prop, which is what each dialog turns into the
+ * button: a null target is already how "no button" is expressed everywhere else.
+ */
+describe('who is offered the standalone viewer window', () => {
+  const renderWith = (props: Record<string, unknown>) =>
+    render(
+      <SubmissionViewerDialog
+        open
+        onOpenChange={() => {}}
+        problemType="FA"
+        src="/api/files/submissions/a.jff"
+        title="Traffic Light"
+        {...props}
+      />,
+    );
+
+  it('offers it by default, which is the staff surfaces', () => {
+    renderWith({});
+    expect(screen.getByTestId('jff-viewer').getAttribute('data-window-href')).not.toBe('');
+  });
+
+  it('withholds it when the caller says not to', () => {
+    renderWith({ allowOpenInWindow: false });
+    expect(screen.getByTestId('jff-viewer').getAttribute('data-window-href')).toBe('');
+  });
+});

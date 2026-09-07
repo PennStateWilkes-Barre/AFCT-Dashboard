@@ -17,6 +17,7 @@
  */
 
 import { effectiveDeadline } from '@/lib/effective-deadline';
+import { groupIdsFromOverrides } from '@/lib/assignment-visibility';
 import { sumProblemPoints } from '@/lib/course-format';
 import { projectDescription } from './rich-description/projection';
 
@@ -95,7 +96,7 @@ export function serializeAssignment(assignment: AssignmentRow, ctx: SerializeAss
           },
           studentOverrides,
           viewerId,
-          studentOverrides.map((o) => o.groupId).filter((gid): gid is string => gid != null),
+          groupIdsFromOverrides(studentOverrides),
         );
   const locked = !!eff?.unlockAt && eff.unlockAt.getTime() > now.getTime();
 

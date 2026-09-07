@@ -63,6 +63,7 @@ import { CaptchaTab } from './CaptchaTab';
 import { TlsTab } from './TlsTab';
 import { UpdatesTab } from './UpdatesTab';
 import { PAGE_HEADER_ICON_CLASS } from '@/lib/page-header';
+import { queryKeys } from '@/lib/query-keys';
 
 export default function SystemSettingsClient() {
   const queryClient = useQueryClient();
@@ -75,7 +76,7 @@ export default function SystemSettingsClient() {
     isLoading: settingsLoading,
     isError: settingsError,
   } = useQuery({
-    queryKey: ['admin', 'settings'],
+    queryKey: queryKeys.admin.settings(),
     queryFn: async () => {
       const res = await fetch(apiPaths.admin.settings(), { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load system settings');

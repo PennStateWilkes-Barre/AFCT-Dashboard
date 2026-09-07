@@ -110,3 +110,23 @@ describe('GET student-group', () => {
     expect((await call()).status).toBe(404);
   });
 });
+
+/**
+ * Which assignment this reports a group for.
+ *
+ * The assignment id comes from the path, so the `courseId` on this lookup is what keeps a
+ * staff member of one course from reading a student's group and schedule on another course's
+ * assignment. The prisma mock answers with its fixture either way.
+ */
+describe('which assignment the student group is read from', () => {
+  it('looks the assignment up only within this course', async () => {
+    resolveGroupMock.mockResolvedValue(null);
+
+    const res = await call();
+    expect(res.status).toBe(200);
+
+    expect(prismaMock.assignment.findFirst.mock.calls[0][0]).toMatchObject({
+      where: { id: 'a1', courseId: 'c1' },
+    });
+  });
+});

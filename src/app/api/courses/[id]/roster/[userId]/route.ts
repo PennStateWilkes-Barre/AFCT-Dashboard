@@ -95,13 +95,22 @@ export const DELETE = withCourseAuth(
                 throw new RosterHasSubmissionsError();
               }
 
-              // Drop this user's per-assignment audience rows and due-date overrides in the
-              // course so they don't orphan (or silently reactivate if the user is
-              // re-enrolled later).
+              // Drop this user's per-assignment audience rows, due-date overrides and
+              // extra-attempt grants in the course so they don't orphan (or silently
+              // reactivate if the user is re-enrolled later).
+              //
+              // The grants were missed when this was written, and they reactivate the same
+              // way: a student granted extra attempts, removed before using them and later
+              // re-added, came back holding a raised cap nobody had decided to give them.
+              // `SubmissionGrant.user` cascades on deleting the USER, which is a different
+              // event from leaving one course.
               await tx.assignmentAssignee.deleteMany({
                 where: { userId, assignmentId: { in: assignmentIdList } },
               });
               await tx.assignmentOverride.deleteMany({
+                where: { userId, assignmentId: { in: assignmentIdList } },
+              });
+              await tx.submissionGrant.deleteMany({
                 where: { userId, assignmentId: { in: assignmentIdList } },
               });
             }

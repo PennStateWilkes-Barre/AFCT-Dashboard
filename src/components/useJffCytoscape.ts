@@ -1230,6 +1230,23 @@ export function useJffCytoscape({
    * the load fills in rather than something callable from out here.
    */
   const refreshLabelGeometryRef = useRef<(() => void) | null>(null);
+
+  /**
+   * Put the graph in step with the machine, labels and all.
+   *
+   * `syncGraph` adds and removes the lines and works out what each one reads; it does not place
+   * the words. The offsets that lift a label clear of its line are worked out from the label
+   * itself, so a line that has just appeared, or one whose text has just changed because a
+   * transition joined or left it, has no offsets until this runs and its label is drawn along
+   * the middle of the line. Every caller wants both, so neither is offered on its own.
+   */
+  const redrawGraph = useCallback(
+    (cy: any, next: Parsed) => {
+      syncGraph(cy, next, epsSymbol);
+      refreshLabelGeometryRef.current?.();
+    },
+    [epsSymbol],
+  );
   /**
    * The size the canvas had when it was last drawn.
    *
@@ -1567,9 +1584,9 @@ export function useJffCytoscape({
       });
       setParsed(next);
       const cy = cyRef.current;
-      if (cy) syncGraph(cy, next, epsSymbol);
+      if (cy) redrawGraph(cy, next);
     },
-    [epsSymbol, currentEdits],
+    [currentEdits, redrawGraph],
   );
 
   /**
@@ -1622,12 +1639,12 @@ export function useJffCytoscape({
       // Through the same redraw a deletion uses, so a second transition between the same two
       // states joins the label on the line that is already there rather than drawing a second
       // line over it.
-      syncGraph(cy, next, epsSymbol);
+      redrawGraph(cy, next);
       // Its properties open on it, so it can be labelled at once. The tool is the caller's
       // business and is left alone, so the next drag draws another one.
       restoreSelection(cy, { kind: 'transition', from: fromId, to: toId });
     },
-    [recordStep, restoreSelection, currentEdits, epsSymbol],
+    [recordStep, restoreSelection, currentEdits, redrawGraph],
   );
 
   /**
@@ -2400,9 +2417,15 @@ export function useJffCytoscape({
         onResizeRef.current = () => void fitAndResize();
         refreshLabelGeometryRef.current = () => {
           void (async () => {
-            await updateEdgeLabelMargins();
-            await selfLoopGeometry();
-            repositionStartNodes(cy);
+            try {
+              await updateEdgeLabelMargins();
+              await selfLoopGeometry();
+              repositionStartNodes(cy);
+            } catch {
+              // A graph mid-teardown, or one being replaced by the next load. Nothing here is
+              // the machine: it is where the words sit, and the load that follows places them
+              // again. Caught because this runs detached, where a rejection belongs to nobody.
+            }
           })();
         };
         setTimeout(() => {
@@ -2757,7 +2780,7 @@ export function useJffCytoscape({
       setSelectedPosition(null);
     }
     const cy = cyRef.current;
-    if (cy) syncGraph(cy, next, epsSymbol);
+    if (cy) redrawGraph(cy, next);
   };
 
   /** Move one step between the two stacks, applying whatever is on the other side. */

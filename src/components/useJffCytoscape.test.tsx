@@ -2647,6 +2647,23 @@ describe('drawing a transition on the canvas', () => {
     expect(api().viewModified).toBe(true);
   });
 
+  /**
+   * A label that has not been placed is drawn along the middle of its own line, which is what a
+   * newly drawn transition looked like: an epsilon sitting on the arrow it belonged to.
+   */
+  it('lifts the new label clear of the line it belongs to', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => drag('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    const line = lastCy().edgeList.find(
+      (e) => e.data('source') === '1' && e.data('target') === '0',
+    );
+    await waitFor(() => expect(line!.style()['text-margin-x']).toBeDefined());
+  });
+
   it('makes a self-loop when the drag ends where it began', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));

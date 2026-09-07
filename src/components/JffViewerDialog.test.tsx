@@ -1098,6 +1098,54 @@ describe('clicking a state', () => {
     expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
   });
 
+  it('shows each tool its key, without putting it in the name', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    // The button is still called Select, and the key is announced as a shortcut.
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'V',
+    );
+    expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-keyshortcuts', 'N');
+    expect(screen.getByRole('button', { name: 'Transition' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'T',
+    );
+    expect(screen.getByRole('button', { name: 'Comment' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'C',
+    );
+  });
+
+  /**
+   * Every tab a reader opens stays mounted, so Escape has to belong to the pane being worked
+   * in. Without this one press gives up a half-drawn line in a pane nobody is looking at.
+   */
+  it('answers Escape only in the pane being worked in', async () => {
+    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    fireEvent.click(screen.getByRole('button', { name: 'State' }));
+
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" focused={false} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // Still on State: this pane is not the one being worked in, so the key was not its
+    // business. The palette is gone with the focus, so the tool is read from the hook's own
+    // behaviour when focus returns.
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
   it('leaves the tool alone when Escape is pressed in a box being typed in', async () => {
     // Escape in the inspector's name box closes the panel, and in a comment it puts the caret
     // down. Taking the tool away as well would be two answers to one key.
@@ -2320,6 +2368,82 @@ describe('viewer capabilities', () => {
  * of a capability a student does not have, and the states stay where the file put them, because
  * a preview that invites rearranging invites a change nobody can save.
  */
+/**
+ * Several states at once, from the reader's side of it.
+ *
+ * The panel describes one state. Picking out a second closes it, which is the honest answer to
+ * "which state is this about", and leaves the dimming as the only sign of what is selected: the
+ * count in the toolbar is what says so in words.
+ */
+describe('picking out several states', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+
+  const tap = (id: string, modifier?: 'ctrlKey' | 'metaKey') => {
+    const handler = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown; originalEvent?: Record<string, boolean> }) => void) | undefined;
+    act(() =>
+      handler?.({
+        target: {
+          isNode: () => true,
+          hasClass: () => false,
+          id: () => id,
+          position: () => ({ x: 100, y: 200 }),
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+        ...(modifier ? { originalEvent: { [modifier]: true } } : {}),
+      }),
+    );
+  };
+
+  it('closes the inspector for two, and says how many are selected instead', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    tap('1', 'ctrlKey');
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+    expect(await screen.findByText('2 states selected')).toBeInTheDocument();
+  });
+
+  it('brings the inspector back when one is taken out again', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    tap('1', 'ctrlKey');
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+
+    tap('1', 'ctrlKey');
+
+    expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+    expect(screen.queryByText(/states selected/)).toBeNull();
+  });
+
+  it('says nothing about a count when only one state is selected', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tap('0');
+
+    expect(screen.queryByText(/states selected/)).toBeNull();
+  });
+
+  it('puts the selection down on Escape', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    tap('1', 'ctrlKey');
+    await screen.findByText('2 states selected');
+
+    // On the window: a click on a canvas focuses no element, so there is nowhere else for the
+    // key to arrive. The tool's own Escape and this are one handler, in order.
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByText(/states selected/)).toBeNull());
+  });
+});
+
 describe('a preview', () => {
   const SRC = '/api/files/submissions/abc.jff';
 

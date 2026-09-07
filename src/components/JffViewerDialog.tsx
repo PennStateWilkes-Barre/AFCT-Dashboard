@@ -57,7 +57,10 @@ import {
   useRegisterViewerActions,
   useViewerChromePresent,
 } from '@/components/viewer/viewer-actions';
-import { CanvasToolPalette } from '@/components/viewer/CanvasToolPalette';
+import {
+  CanvasToolPalette,
+  type CanvasTool,
+} from '@/components/viewer/CanvasToolPalette';
 import { useCanvasTools } from '@/components/viewer/useCanvasTools';
 import {
   resolveViewerCapabilities,
@@ -1130,8 +1133,19 @@ export function JffCytoscapeViewer({
    * above it. Returning true means Escape was spent on the line rather than on the tool.
    */
   const cancelLinkDraftRef = useRef<() => boolean>(() => false);
-  const onToolEscape = useCallback(() => cancelLinkDraftRef.current(), []);
-  const { activeTool, tools, selectTool } = useCanvasTools(capabilities, onToolEscape);
+  /** Put down whatever is selected, when Escape has nothing more urgent to give up. */
+  const clearSelectionRef = useRef<() => void>(() => {});
+  const escapeActions = useMemo(
+    () => ({
+      cancelGesture: () => cancelLinkDraftRef.current(),
+      clearSelection: () => clearSelectionRef.current(),
+      // Only the pane being worked in. Every opened tab stays mounted, so without this one
+      // press would give up a half-drawn line in a pane nobody is looking at.
+      enabled: focused,
+    }),
+    [focused],
+  );
+  const { activeTool, tools, selectTool } = useCanvasTools(capabilities, escapeActions);
   /**
    * The click handler itself, filled in below once the hook has handed back what it needs.
    *
@@ -1157,7 +1171,7 @@ export function JffCytoscapeViewer({
     [],
   );
   /**
-   * What a drag from one state to another means, and when it means anything.
+   * What a click on one state and then another means, and when it means anything.
    *
    * Null with any other tool up, which is what tells the graph to go on moving states when they
    * are dragged. The identity has to be stable while the tool is unchanged: the hook watches it
@@ -1213,6 +1227,7 @@ export function JffCytoscapeViewer({
     undo,
     redo,
     selectedState,
+    selectedStateIds,
     selectedTransition,
     clearSelectedState,
     renameState,
@@ -1311,6 +1326,10 @@ export function JffCytoscapeViewer({
     setDrawnTransitions((n) => n + 1);
   };
   cancelLinkDraftRef.current = cancelLinkDraft;
+  clearSelectionRef.current = () => {
+    clearSelectedState();
+    selectTextBoxRaw(null);
+  };
   clearForDraftRef.current = () => {
     clearSelectedState();
     selectTextBoxRaw(null);
@@ -1382,6 +1401,11 @@ export function JffCytoscapeViewer({
   // toolbar is the only place they exist.
   const chromeHasViewControls = useViewerChromePresent();
 
+  /** Choose a tool if this viewer has it, and do nothing at all if it does not. */
+  const selectAvailableTool = (tool: CanvasTool) => {
+    if (tools.includes(tool)) selectTool(tool);
+  };
+
   // Offered to any chrome around this viewer, which today means the standalone window's menu
   // bar. Registers nothing when there is no provider, so a dialog is unaffected. Declared
   // after the grid state because it publishes it: the menu shows the grid ticked or not, and
@@ -1410,6 +1434,13 @@ export function JffCytoscapeViewer({
         if (honorPositions) toggleHonorPositions();
       },
       resetMachine,
+      // Through the same `selectTool` the palette buttons call, so a keyboard route has the
+      // same consequences: the selection goes, a half-drawn line is given up, and a tool the
+      // capabilities do not allow is refused here rather than corrected afterwards.
+      selectSelectTool: () => selectAvailableTool('select'),
+      selectStateTool: () => selectAvailableTool('state'),
+      selectTransitionTool: () => selectAvailableTool('transition'),
+      selectCommentTool: () => selectAvailableTool('text'),
     },
     {
       grid,
@@ -1418,6 +1449,7 @@ export function JffCytoscapeViewer({
       layout: honorPositions ? 'as-drawn' : 'auto',
       canUndo,
       canRedo,
+      tools,
     },
   );
 
@@ -1474,6 +1506,15 @@ export function JffCytoscapeViewer({
             like editing, and a reader has no way of knowing from the screen that the file they
             were sent is untouched. It says so, and offers the two things they might want next.
           */}
+          {/* What is selected, when the inspector cannot say it. The panel describes one state,
+              so picking out a second closes it, and without this the only sign of a selection
+              that big is the dimming behind it. Beside the file's own labels rather than in a
+              panel of its own: it is a line of text about what is happening, not a surface. */}
+          {selectedStateIds.length > 1 ? (
+            <span className="text-muted-foreground text-xs" aria-live="polite">
+              {selectedStateIds.length} states selected
+            </span>
+          ) : null}
           {viewModified && !preview ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

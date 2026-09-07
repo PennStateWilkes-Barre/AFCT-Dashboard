@@ -12,22 +12,37 @@ import type { ViewerCapabilities } from './viewer-capabilities';
  * can both be true and a bug the first time they are, and the number of ways to get it wrong
  * grows with every tool. Here there is one answer and it is always exactly one.
  *
- * The extension point for a tool that takes more than one click: keep `activeTool` at that tool
- * for the whole gesture and hold the half-finished work beside this hook. Transition, when it
- * arrives, will want something like `{ sourceId } | null` living in the viewer: chosen on the
- * first click, spent on the second, dropped by Escape. It does not belong in the union and it
- * does not belong in useJffCytoscape, which knows only that a graph coordinate was clicked.
+ * How a tool that takes more than one click works, which Transition already does: `activeTool`
+ * stays at that tool for the whole gesture and the half-finished work is held beside this hook.
+ * Transition's is the state a line is being drawn from, chosen on the first click, spent on the
+ * second, dropped by Escape; it lives in the layer that owns the graph, because that is where
+ * the clicks are worked out. It is not in the union, and there is no value for "halfway
+ * through": stages are not tools.
  */
 export function useCanvasTools(
   capabilities: ViewerCapabilities,
   /**
-   * Something for Escape to do before it takes the tool away, if there is anything.
+   * What Escape means here, in order, before it means nothing.
    *
-   * Returning true means the key was spent on it and the tool stays. That is what makes Escape
-   * two-level for a tool that has a gesture in progress: the first press gives up the half-drawn
-   * thing, the second leaves the tool. Anything with a draft of its own can use it.
+   * One handler for the key rather than one per feature, because Escape is a single word for
+   * "never mind" and what it should give up is whatever is most recent: a half-drawn line
+   * first, then the tool that was drawing it, then whatever is selected. Two listeners would
+   * each answer at once and the reader would lose two things to one press.
+   *
+   * `cancelGesture` returns whether there was anything to cancel.
    */
-  onEscape?: () => boolean,
+  escape: {
+    cancelGesture?: () => boolean;
+    clearSelection?: () => void;
+    /**
+     * Whether this viewer is the one Escape is for.
+     *
+     * The standalone window keeps every opened tab mounted, so without this each of them
+     * listens and one press gives up a half-drawn line in a pane nobody is looking at. False
+     * only ever means "not the focused pane"; a viewer on its own is always its own.
+     */
+    enabled?: boolean;
+  } = {},
 ) {
   const [requested, setRequested] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
 
@@ -64,22 +79,36 @@ export function useCanvasTools(
    * well would be two answers to one key. A comment editor stops the event before it reaches
    * here, and this checks the target as well for everything that does not.
    */
-  const escapeRef = useRef(onEscape);
-  escapeRef.current = onEscape;
+  const escapeRef = useRef(escape);
+  escapeRef.current = escape;
+  const escapeEnabled = escape.enabled ?? true;
   useEffect(() => {
-    if (activeTool === DEFAULT_CANVAS_TOOL) return;
+    if (!escapeEnabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
-      // Half-finished work first, the tool second. Somebody who drew a line to the wrong state
-      // wants that line gone, not the tool they are still using.
-      if (escapeRef.current?.()) return;
-      resetTool();
+      if (
+        target instanceof HTMLElement &&
+        // Not while typing, and not inside anything that closes on this key itself. A dialog,
+        // a menu and a confirmation all answer Escape on their own, and taking the reader's
+        // selection away as they dismiss one would be a second answer they did not ask for.
+        target.closest('input, textarea, select, [role="dialog"], [role="menu"], [role="menubar"]')
+      ) {
+        return;
+      }
+      // Half-finished work first, the tool second, the selection last. Somebody who drew a line
+      // to the wrong state wants that line gone, not the tool they are still using, and
+      // somebody with no line half-drawn and no tool up means the states they picked out.
+      if (escapeRef.current.cancelGesture?.()) return;
+      if (activeTool !== DEFAULT_CANVAS_TOOL) {
+        resetTool();
+        return;
+      }
+      escapeRef.current.clearSelection?.();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeTool, resetTool]);
+  }, [activeTool, resetTool, escapeEnabled]);
 
   return { activeTool, tools, selectTool: setRequested, resetTool };
 }

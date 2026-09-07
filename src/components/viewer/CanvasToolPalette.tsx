@@ -4,6 +4,7 @@ import { Circle, MousePointer, MoveRight, Type, type LucideIcon } from 'lucide-r
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ViewerCapabilities } from './viewer-capabilities';
+import { viewerShortcut, type ViewerShortcutId } from '@/lib/viewer-shortcuts';
 
 /**
  * What clicking the canvas means.
@@ -12,12 +13,13 @@ import type { ViewerCapabilities } from './viewer-capabilities';
  * the mode switches on this one value, so adding the next tool is a case in TOOLS below plus a
  * case wherever the canvas acts on it.
  *
- * One value, never a set of flags. Transition takes a whole gesture to finish rather than a
- * click, and it is still one value: `activeTool` stays `'transition'` from the first press to
- * the release, and how far the gesture has got is held beside it, in the layer that owns the
- * graph. Stages are not tools. `transition-source-picked` as a fifth value would multiply with
- * every tool added after it, and every switch on this union would have to know about a stage it
- * does not care about. See useCanvasTools and `onStateLink` in useJffCytoscape.
+ * One value, never a set of flags. Transition takes two clicks to finish rather than one, and
+ * it is still one value: `activeTool` stays `'transition'` from the click that anchors a source
+ * to the one that picks a target, and how far the gesture has got is held beside it, in the
+ * layer that owns the graph. Stages are not tools. `transition-source-picked` as a fifth value
+ * would multiply with every tool added after it, and every switch on this union would have to
+ * know about a stage it does not care about. See useCanvasTools and `onStateLink` in
+ * useJffCytoscape.
  */
 export type CanvasTool = 'select' | 'state' | 'transition' | 'text';
 
@@ -38,12 +40,18 @@ const TOOLS: ReadonlyArray<{
    * gives it a name.
    */
   requires?: keyof ViewerCapabilities;
+  /**
+   * The key that chooses this tool, named rather than spelled out: the shortcut's own
+   * definition says what it is and what it looks like, and this only says which one.
+   */
+  shortcut: ViewerShortcutId;
 }> = [
   {
     tool: 'select',
     label: 'Select',
     icon: MousePointer,
     description: 'Select and move elements',
+    shortcut: 'selectTool',
   },
   {
     tool: 'state',
@@ -51,6 +59,7 @@ const TOOLS: ReadonlyArray<{
     icon: Circle,
     description: 'Add a state',
     requires: 'editMachine',
+    shortcut: 'stateTool',
   },
   // The same arrow the transition inspector wears in its header, so the tool that draws one and
   // the panel that describes one are plainly about the same thing.
@@ -60,6 +69,7 @@ const TOOLS: ReadonlyArray<{
     icon: MoveRight,
     description: 'Add a transition',
     requires: 'editMachine',
+    shortcut: 'transitionTool',
   },
   // A comment is not part of the machine: it writes a note over the drawing and changes nothing
   // about the automaton. Called Comment here and ViewerTextBox in the code, because renaming the
@@ -70,6 +80,7 @@ const TOOLS: ReadonlyArray<{
     icon: Type,
     description: 'Add a comment',
     requires: 'annotate',
+    shortcut: 'commentTool',
   },
 ];
 
@@ -123,7 +134,7 @@ export function CanvasToolPalette({
       aria-label="Canvas tools"
       data-testid="viewer-tool-palette"
     >
-      {shown.map(({ tool, label, icon: Icon, description }) => {
+      {shown.map(({ tool, label, icon: Icon, description, shortcut }) => {
         const active = tool === activeTool;
         return (
           <Tooltip key={tool}>
@@ -133,6 +144,9 @@ export function CanvasToolPalette({
                 // The tooltip is the explanation, not the name: a tooltip is not read out
                 // everywhere, and the visible word under the icon is the accessible name.
                 aria-pressed={active}
+                // The key is announced as a shortcut rather than folded into the name, so the
+                // button is still called "Select".
+                aria-keyshortcuts={viewerShortcut(shortcut).aria}
                 onClick={() => onSelectTool(tool)}
                 className={cn(
                   'focus-visible:ring-ring/70 flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-md text-[11px] font-medium focus-visible:ring-[3px] focus-visible:outline-none',
@@ -146,7 +160,14 @@ export function CanvasToolPalette({
                 {label}
               </button>
             </TooltipTrigger>
-            <TooltipContent side="right">{description}</TooltipContent>
+            {/* The key beside what the tool does, from the shortcut's own definition. Not part
+                of the accessible name: `aria-keyshortcuts` above says it properly. */}
+            <TooltipContent side="right">
+              <span>{description}</span>
+              <kbd className="bg-background/20 ml-2 rounded px-1 py-0.5 font-mono text-[10px] leading-none">
+                {viewerShortcut(shortcut).keys}
+              </kbd>
+            </TooltipContent>
           </Tooltip>
         );
       })}

@@ -500,6 +500,9 @@ export function ViewerWindow({
       <main className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         <ViewerMenubar
           downloadHref={`${viewerFileSrc(focused.kind, focused.file)}?download=1`}
+          // Also on each pane's own toolbar, beside the file it describes. Both on purpose:
+          // the menu is where somebody looks for it by convention, and the toolbar button is
+          // the one-click way to it while reading a machine.
           properties={properties[tabKey(focused)] ?? null}
           onMoveToOtherSide={moveToOtherSide}
           canMoveToOtherSide={canMoveToOtherSide}
@@ -656,6 +659,10 @@ export function ViewerWindow({
                       title={tab.title}
                       epsSymbol={tab.eps}
                       viewStateKey={tabKey(tab)}
+                      // Each pane's own file, not the focused one's: in a split window the two
+                      // panes are two different submissions, and one Properties button showing
+                      // the other side's course is the worst kind of wrong.
+                      properties={properties[tabKey(tab)] ?? null}
                       // One inspector and one tool palette, on the side being worked in. Two
                       // inspectors took a third of a split window between them for a panel the
                       // reader had finished with on one of the sides, and two palettes would be

@@ -15,11 +15,13 @@ const mounts = new Map<string, number>();
 vi.mock('./ViewerClient', () => ({
   ViewerClient: ({
     src,
+    properties,
     focused,
     onViewportChange,
     linkedViewport,
   }: {
     src: string;
+    properties?: { rows: { label: string; value: string }[] } | null;
     focused?: boolean;
     onViewportChange?: ((v: { zoom: number; pan: { x: number; y: number } }) => void) | null;
     linkedViewport?: { zoom: number; pan: { x: number; y: number } } | null;
@@ -31,6 +33,8 @@ vi.mock('./ViewerClient', () => ({
       <div
         data-testid="viewer"
         data-src={src}
+        // What its own toolbar's Properties button would show, which is this pane's file.
+        data-properties={properties?.rows[0]?.value ?? ''}
         // Which end of a link this machine is on, and what it has been told to follow.
         data-role={onViewportChange ? 'driving' : linkedViewport ? 'following' : 'alone'}
         // Whether this is the pane being worked in, which is what decides whether its
@@ -311,7 +315,7 @@ describe('what a tab keeps while another one is on screen', () => {
 
 describe('the menu bar belongs to the tab on screen', () => {
   // Two of the menu's entries do not go through the viewer at all: the Download link and the
-  // Properties panel are handed down from here. They have to follow the selected tab like
+  // Properties dialog are handed down from here. They have to follow the selected tab like
   // everything else, or a reader downloads one student's file while looking at another's.
 
   it('offers the showing tab as the download, marked as a download', () => {
@@ -326,7 +330,7 @@ describe('the menu bar belongs to the tab on screen', () => {
     );
   });
 
-  it("shows the showing tab's properties", () => {
+  it("hands the menu bar the showing tab's properties", () => {
     renderWindow([tab('a.jff'), tab('b.jff')], 0, {
       'submissions:a.jff': { rows: [{ label: 'Student', value: 'Ada' }] },
       'submissions:b.jff': { rows: [{ label: 'Student', value: 'Grace' }] },
@@ -335,6 +339,31 @@ describe('the menu bar belongs to the tab on screen', () => {
 
     fireEvent.click(screen.getAllByRole('tab')[1]);
     expect(screen.getByTestId('menubar').getAttribute('data-properties')).toBe('Grace');
+  });
+
+  /**
+   * The pane's own toolbar button asks the same question of a different file. The menu bar
+   * follows whichever tab is on screen; a pane describes the file in it, and in a split window
+   * those are two different submissions at once.
+   */
+  it("gives each pane its own file's properties", () => {
+    renderWindow([tab('a.jff'), tab('b.jff')], 0, {
+      'submissions:a.jff': { rows: [{ label: 'Student', value: 'Ada' }] },
+      'submissions:b.jff': { rows: [{ label: 'Student', value: 'Grace' }] },
+    });
+    // By file, not by which is on screen: a tab that has been opened stays mounted, so there
+    // can be two viewers here and each has to be describing its own.
+    const propertiesOf = (file: string) =>
+      screen
+        .getAllByTestId('viewer')
+        .find((el) => el.getAttribute('data-src')?.endsWith(file))
+        ?.getAttribute('data-properties');
+
+    expect(propertiesOf('a.jff')).toBe('Ada');
+
+    fireEvent.click(screen.getAllByRole('tab')[1]);
+    expect(propertiesOf('b.jff')).toBe('Grace');
+    expect(propertiesOf('a.jff')).toBe('Ada');
   });
 });
 

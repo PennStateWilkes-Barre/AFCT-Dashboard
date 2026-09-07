@@ -49,7 +49,10 @@ import {
 import { useJffCytoscape, DEFAULT_EPS } from './useJffCytoscape';
 import { OpenInWindowButton } from '@/components/dialogs/OpenInWindowButton';
 import type { ViewerWindowTarget } from '@/lib/viewer-tabs';
+import { parseViewerSrc } from '@/lib/viewer-link';
+import { VIEWER_FILE_KIND_BADGE, VIEWER_FILE_KIND_LABEL } from '@/lib/badge-presets';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import type { ViewerProperties } from '@/lib/viewer-properties';
 import {
   useRegisterViewerActions,
   useViewerChromePresent,
@@ -61,6 +64,7 @@ import {
   type ViewerCapabilities,
 } from '@/components/viewer/viewer-capabilities';
 import { CanvasTextLayer } from '@/components/viewer/CanvasTextLayer';
+import { ViewerFileProperties } from '@/components/viewer/ViewerFileProperties';
 import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
 import {
   Grid,
@@ -954,6 +958,29 @@ function TransitionProperties({
  * replaced rather than updated. Harmless to look at and quietly wasteful, and it made any
  * test that held a reference to the badge fail the moment anything else re-rendered.
  */
+/**
+ * Which of the three stores this file came out of.
+ *
+ * Beside the machine type, because the two answer the pair of questions somebody arriving at a
+ * diagram has: what kind of machine is this, and whose file am I looking at. A student's
+ * attempt and the instructor's answer draw the identical picture, so without this the canvas
+ * cannot tell them apart and the reader has to remember which link they followed.
+ *
+ * Read out of the file's own route rather than passed in, so it is right in every context that
+ * shows a machine: the dialogs, the comparison panes and the standalone window all fetch from
+ * `/api/files/<kind>/<name>` and there is nowhere else to fetch from. Anything else, and there
+ * is no badge rather than a guess.
+ */
+function FileKindBadge({ src }: { src: string }) {
+  const parsed = parseViewerSrc(src);
+  if (!parsed) return null;
+  return (
+    <Badge variant={VIEWER_FILE_KIND_BADGE[parsed.kind]}>
+      {VIEWER_FILE_KIND_LABEL[parsed.kind]}
+    </Badge>
+  );
+}
+
 function TypeBadge({ t }: { t: MachineType }) {
   const label = MACHINE_TYPE_LABEL[t];
   const cls =
@@ -984,6 +1011,7 @@ export function JffCytoscapeViewer({
   honorPositionsDefault = false,
   initialZoom = 'fit',
   viewStateKey = null,
+  properties,
   focused = true,
   capabilities: capabilityOverrides,
   windowTarget,
@@ -1011,6 +1039,15 @@ export function JffCytoscapeViewer({
   initialZoom?: 'fit' | 'actual';
   /** Remember the zoom, pan and arrangement under this key. See useJffCytoscape. */
   viewStateKey?: string | null;
+  /**
+   * Where this file came from: its course, what it belongs to, when it arrived.
+   *
+   * Loaded by the page that opens the viewer, because answering it means reading the database
+   * and resolving who may see what. Absent, rather than null, in a context that has no notion
+   * of it: a viewer inside a dialog is looking at a file the surrounding page has already named,
+   * and there is no button. Null is a context that does have the notion and nothing to show.
+   */
+  properties?: ViewerProperties | null;
   /**
    * Whether this is the pane being worked in.
    *
@@ -1391,6 +1428,13 @@ export function JffCytoscapeViewer({
         <div className="flex min-w-0 items-center gap-2">
           {/* Title is shown in the dialog header above; only the type label lives here. */}
           <TypeBadge t={type} />
+          <FileKindBadge src={src} />
+          {/* Beside the type badge and the note below, because all three are about the file
+              rather than about the view of it. Only where a caller has the answer to give, so
+              a viewer inside a dialog has no button: the page around it has already said whose
+              file this is. The menu bar offers the same thing for the tab on screen; this one
+              belongs to the pane, which in a split window is a different file. */}
+          {properties === undefined ? null : <ViewerFileProperties properties={properties} />}
           {/*
             Whether the drawing has been changed, and what to do about it.
 

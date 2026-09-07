@@ -113,3 +113,28 @@ export const ENROLLMENT_STATUS_BADGE = {
   ENROLLED: 'success',
   DROPPED: 'warning',
 } as const satisfies Record<string, BadgeVariant>;
+
+/**
+ * What a file in the viewer is, as opposed to what machine it draws.
+ *
+ * Three stores, and telling them apart matters more here than anywhere else in the app: a
+ * student's attempt and the instructor's answer are the same picture on the canvas, and reading
+ * one as the other is the expensive mistake. The words carry the distinction; the hues only
+ * keep the three apart at a glance, the way the role badges do.
+ *
+ * Fuchsia for the solution on purpose. It is the loudest of the three because it is the one
+ * nobody should mistake for a student's work, and it is the furthest from the colours the
+ * machine-type badge beside it uses.
+ */
+export const VIEWER_FILE_KIND_BADGE = {
+  submissions: 'category-blue',
+  solutions: 'category-fuchsia',
+  problems: 'category-slate',
+} as const satisfies Record<string, BadgeVariant>;
+
+/** What each one is called on screen. Singular: the badge is about the one file on screen. */
+export const VIEWER_FILE_KIND_LABEL = {
+  submissions: 'Submission',
+  solutions: 'Solution',
+  problems: 'Problem file',
+} as const satisfies Record<string, string>;

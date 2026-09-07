@@ -4,6 +4,7 @@ import { JffCytoscapeViewer } from '@/components/JffViewerDialog';
 import { CfgViewerContent } from '@/components/dialogs/CfgViewerDialog';
 import { RegexViewerContent } from '@/components/dialogs/RegexViewerDialog';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import type { ViewerProperties } from '@/lib/viewer-properties';
 import type { ViewerCapabilities } from '@/components/viewer/viewer-capabilities';
 
 /** Problem types drawn by the JFLAP (cytoscape) viewer; the rest have their own. */
@@ -23,6 +24,7 @@ export function ViewerClient({
   title,
   epsSymbol,
   viewStateKey,
+  properties,
   focused = true,
   capabilities,
   onViewportChange,
@@ -37,6 +39,8 @@ export function ViewerClient({
    * where the reader was. Only the drawn machines have anything to remember.
    */
   viewStateKey?: string | null;
+  /** Where this file came from, for the toolbar's Properties button. See JffCytoscapeViewer. */
+  properties?: ViewerProperties | null;
   /** Whether this is the pane being worked in, which is about room. See JffCytoscapeViewer. */
   focused?: boolean;
   /** What this pane may do, which is a separate question. See viewer-capabilities. */
@@ -65,6 +69,7 @@ export function ViewerClient({
         // at, because the remembered view wins over this.
         initialZoom="fit"
         viewStateKey={viewStateKey}
+        properties={properties}
         focused={focused}
         capabilities={capabilities}
         onViewportChange={onViewportChange}

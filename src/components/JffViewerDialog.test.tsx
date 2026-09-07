@@ -344,8 +344,77 @@ describe('the graph canvas says it can be dragged', () => {
   });
 });
 
+/**
+ * Whose file this is, beside what kind of machine it draws.
+ *
+ * A student's attempt and the instructor's answer are the same picture on the canvas. The
+ * badge is the only thing on screen that tells them apart without opening Properties.
+ */
+describe('the file kind badge', () => {
+  it('says Submission for a student attempt', async () => {
+    render(<JffCytoscapeViewer src="/api/files/submissions/abc.jff" title="abc.jff" />);
+    await waitForEngine();
+    expect(screen.getByText('Submission')).toBeInTheDocument();
+    expect(screen.queryByText('Solution')).toBeNull();
+  });
+
+  it('says Solution for the answer posted with a problem', async () => {
+    render(<JffCytoscapeViewer src="/api/files/solutions/answer.jff" title="answer.jff" />);
+    await waitForEngine();
+    expect(screen.getByText('Solution')).toBeInTheDocument();
+    expect(screen.queryByText('Submission')).toBeNull();
+  });
+
+  it('says Problem file for the third store, rather than calling it a solution', async () => {
+    // Three stores, not two. Reading a problem's own file as the answer to it would be the
+    // same mistake this badge exists to prevent, one door along.
+    render(<JffCytoscapeViewer src="/api/files/problems/start.jff" title="start.jff" />);
+    await waitForEngine();
+    expect(screen.getByText('Problem file')).toBeInTheDocument();
+  });
+
+  it('says nothing about a file that did not come from one of them', async () => {
+    // A guess here is worse than a gap: this badge is trusted precisely because it can only
+    // ever be read off the route the file was actually fetched from.
+    render(<JffCytoscapeViewer src="/somewhere/else.jff" title="else.jff" />);
+    await waitForEngine();
+    expect(screen.queryByText('Submission')).toBeNull();
+    expect(screen.queryByText('Solution')).toBeNull();
+    expect(screen.queryByText('Problem file')).toBeNull();
+  });
+
+  it('sits beside the machine type, not instead of it', async () => {
+    render(<JffCytoscapeViewer src="/api/files/solutions/answer.jff" title="answer.jff" />);
+    await waitForEngine();
+    expect(screen.getByText('Finite Automaton')).toBeInTheDocument();
+    expect(screen.getByText('Solution')).toBeInTheDocument();
+  });
+});
+
 describe('the toolbar does not repeat what a menu already offers', () => {
   const SRC = '/api/files/submissions/abc.jff';
+
+  /**
+   * Properties is the deliberate exception, and it is here so the exception is written down
+   * rather than discovered. It is on the toolbar AND in the File menu: the menu is where
+   * somebody looks for it by convention, and the button is the way to it without leaving the
+   * machine. It also describes a different file in each pane of a split window, which the
+   * menu bar cannot do.
+   */
+  it('offers Properties even though the menu bar has it too', () => {
+    render(
+      <ViewerActionsProvider>
+        <JffCytoscapeViewer src={SRC} title="abc.jff" properties={{ rows: [] }} />
+      </ViewerActionsProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'File properties' })).toBeInTheDocument();
+  });
+
+  it('shows no Properties button where a caller has no answer to give', () => {
+    // A viewer inside a dialog: the page around it has already said whose file this is.
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    expect(screen.queryByRole('button', { name: 'File properties' })).toBeNull();
+  });
 
   it('keeps Grid in a dialog, where the toolbar is the only place it exists', () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);

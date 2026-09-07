@@ -1098,6 +1098,54 @@ describe('clicking a state', () => {
     expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
   });
 
+  it('shows each tool its key, without putting it in the name', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    // The button is still called Select, and the key is announced as a shortcut.
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'V',
+    );
+    expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-keyshortcuts', 'N');
+    expect(screen.getByRole('button', { name: 'Transition' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'T',
+    );
+    expect(screen.getByRole('button', { name: 'Comment' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'C',
+    );
+  });
+
+  /**
+   * Every tab a reader opens stays mounted, so Escape has to belong to the pane being worked
+   * in. Without this one press gives up a half-drawn line in a pane nobody is looking at.
+   */
+  it('answers Escape only in the pane being worked in', async () => {
+    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    fireEvent.click(screen.getByRole('button', { name: 'State' }));
+
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" focused={false} />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    // Still on State: this pane is not the one being worked in, so the key was not its
+    // business. The palette is gone with the focus, so the tool is read from the hook's own
+    // behaviour when focus returns.
+    rerender(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
   it('leaves the tool alone when Escape is pressed in a box being typed in', async () => {
     // Escape in the inspector's name box closes the panel, and in a comment it puts the caret
     // down. Taking the tool away as well would be two answers to one key.

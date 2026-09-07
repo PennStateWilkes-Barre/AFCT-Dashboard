@@ -12,6 +12,7 @@ import {
   ListTree,
   BookOpen,
   Info,
+  Keyboard,
   Share,
   Undo2,
   Redo2,
@@ -27,6 +28,7 @@ import {
   MenubarItem,
   MenubarMenu,
   MenubarSeparator,
+  MenubarShortcut,
   MenubarSub,
   MenubarSubContent,
   MenubarSubTrigger,
@@ -35,6 +37,9 @@ import {
 import { useViewerActions } from '@/components/viewer/viewer-actions';
 import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog';
 import { VIEWER_DOCS_URL } from '@/lib/viewer-link';
+import { viewerShortcut, shortcutKeys, type ViewerShortcutId } from '@/lib/viewer-shortcuts';
+import { useViewerShortcuts } from './useViewerShortcuts';
+import { ViewerShortcutsDialog, useMacKeys } from './ViewerShortcutsDialog';
 import type { ViewerProperties } from '@/lib/viewer-properties';
 import {
   Dialog,
@@ -95,7 +100,24 @@ export function ViewerMenubar({
   // False for a grammar or a regular expression, which have nothing to export: those viewers
   // register no actions, so the items disable themselves rather than being hidden. A missing
   // menu item reads as a bug; a greyed one reads as "not for this kind of file".
-  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, run } = useViewerActions();
+  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools, run } =
+    useViewerActions();
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  /**
+   * The window's one keyboard listener, here because this is the chrome: rendered once, and
+   * already reaching the focused pane through the same registry the menu items use.
+   */
+  useViewerShortcuts({ run, tools, canUndo, canRedo, onHelp: () => setShortcutsOpen(true) });
+  const mac = useMacKeys();
+  /**
+   * The hint beside a menu item, from the same definition the handler matches against.
+   *
+   * Hidden from the accessibility tree: a screen reader reading "Grid G" is worse than one
+   * reading "Grid", and `aria-keyshortcuts` on the item says the key properly.
+   */
+  const hint = (id: ViewerShortcutId) => (
+    <MenubarShortcut aria-hidden="true">{shortcutKeys(id, mac)}</MenubarShortcut>
+  );
 
   return (
     <Menubar className="bg-card h-auto rounded-none border-x-0 border-t-0 px-2 py-1 shadow-none">
@@ -166,13 +188,23 @@ export function ViewerMenubar({
           {/* At the top of Edit, where every application puts them. They step back through
               changes to the arrangement: a state dragged, or the layout switched. Not zoom or
               pan, which move the camera rather than the machine. */}
-          <MenubarItem disabled={!canUndo} onSelect={() => run('undo')}>
+          <MenubarItem
+            disabled={!canUndo}
+            onSelect={() => run('undo')}
+            aria-keyshortcuts={viewerShortcut('undo').aria}
+          >
             <Undo2 aria-hidden="true" />
             Undo
+            {hint('undo')}
           </MenubarItem>
-          <MenubarItem disabled={!canRedo} onSelect={() => run('redo')}>
+          <MenubarItem
+            disabled={!canRedo}
+            onSelect={() => run('redo')}
+            aria-keyshortcuts={viewerShortcut('redo').aria}
+          >
             <Redo2 aria-hidden="true" />
             Redo
+            {hint('redo')}
           </MenubarItem>
           <MenubarSeparator />
           {/* Under Edit with the clipboard. What these copy is a picture of the automaton
@@ -203,15 +235,25 @@ export function ViewerMenubar({
           {/* How to get the whole automaton back on screen after zooming or panning about.
               The same icon the toolbar's Fit button uses: one action, one icon, wherever it is
               offered from. */}
-          <MenubarItem disabled={!ready} onSelect={() => run('fitToWindow')}>
+          <MenubarItem
+            disabled={!ready}
+            onSelect={() => run('fitToWindow')}
+            aria-keyshortcuts={viewerShortcut('fit').aria}
+          >
             <Scan aria-hidden="true" />
             Fit to window
+            {hint('fit')}
           </MenubarItem>
           {/* Under Fit, and different from it: this moves the camera and leaves the scale
               alone. */}
-          <MenubarItem disabled={!ready} onSelect={() => run('centerInWindow')}>
+          <MenubarItem
+            disabled={!ready}
+            onSelect={() => run('centerInWindow')}
+            aria-keyshortcuts={viewerShortcut('center').aria}
+          >
             <Crosshair aria-hidden="true" />
             Center in window
+            {hint('center')}
           </MenubarItem>
           <MenubarSeparator />
           {/* A checkbox item rather than a plain one, so the menu says what the grid is
@@ -221,8 +263,10 @@ export function ViewerMenubar({
             checked={grid}
             disabled={!ready}
             onCheckedChange={() => run('toggleGrid')}
+            aria-keyshortcuts={viewerShortcut('grid').aria}
           >
             Grid
+            {hint('grid')}
           </MenubarCheckboxItem>
           {/* On by default: a note is the author's own words, part of the answer rather than
               decoration. Only drawn in the "As drawn" arrangement, so this does nothing once
@@ -301,8 +345,10 @@ export function ViewerMenubar({
             checked={snapToGrid}
             disabled={!ready}
             onCheckedChange={() => run('toggleSnapToGrid')}
+            aria-keyshortcuts={viewerShortcut('snapToGrid').aria}
           >
             Snap to grid
+            {hint('snapToGrid')}
           </MenubarCheckboxItem>
         </MenubarContent>
       </MenubarMenu>
@@ -310,6 +356,16 @@ export function ViewerMenubar({
       <MenubarMenu>
         <MenubarTrigger>Help</MenubarTrigger>
         <MenubarContent>
+          {/* The same dialog `?` opens: one piece of state, two ways to it. */}
+          <MenubarItem
+            onSelect={() => setShortcutsOpen(true)}
+            aria-keyshortcuts={viewerShortcut('help').aria}
+          >
+            <Keyboard aria-hidden="true" />
+            Keyboard shortcuts
+            {hint('help')}
+          </MenubarItem>
+          <MenubarSeparator />
           {/* A plain link, so it behaves like one: middle-click, copy the address, open in a
               background tab. `noopener` because it leaves the application. */}
           <MenubarItem asChild>
@@ -320,6 +376,8 @@ export function ViewerMenubar({
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
+
+      <ViewerShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
 
       {properties ? (
         <Dialog open={propertiesOpen} onOpenChange={setPropertiesOpen}>

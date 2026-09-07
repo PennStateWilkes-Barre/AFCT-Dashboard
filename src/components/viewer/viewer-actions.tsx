@@ -2,6 +2,8 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { CanvasTool } from './CanvasToolPalette';
+
 /**
  * The actions a rendered machine can perform on itself, published to whatever chrome is
  * around it.
@@ -42,6 +44,18 @@ export type ViewerActions = {
   setAutoArranged: () => void;
   /** Put this machine back the way it opened, discarding the reader's rearranging of it. */
   resetMachine: () => void;
+  /**
+   * Choose a canvas tool, exactly as clicking its palette button does.
+   *
+   * Four commands rather than one that takes the tool, because `run` calls these by name and
+   * takes no arguments, and four names is a smaller thing to carry than an argument channel
+   * for one caller. Each is a no-op when its tool is not available here, so a keyboard route
+   * cannot reach a tool the palette would not offer.
+   */
+  selectSelectTool: () => void;
+  selectStateTool: () => void;
+  selectTransitionTool: () => void;
+  selectCommentTool: () => void;
 };
 
 /** View state the chrome needs to render, as opposed to actions it can invoke. */
@@ -57,6 +71,14 @@ export type ViewerViewState = {
   canRedo: boolean;
   /** Which layout is showing, so a menu can mark one of the two. */
   layout: 'as-drawn' | 'auto';
+  /**
+   * The tools this viewer can offer, from its own capabilities.
+   *
+   * Published so the chrome can tell a shortcut it will not act on from one it will, and leave
+   * the key press to the browser in the first case. The capability rules stay in one place:
+   * this is `availableCanvasTools` as the viewer already computed it.
+   */
+  tools: readonly CanvasTool[];
 };
 
 /**
@@ -97,6 +119,7 @@ const ViewerViewContext = createContext<{
   layout: ViewerViewState['layout'];
   canUndo: boolean;
   canRedo: boolean;
+  tools: readonly CanvasTool[];
 }>({
   ready: false,
   grid: false,
@@ -105,6 +128,7 @@ const ViewerViewContext = createContext<{
   layout: 'as-drawn',
   canUndo: false,
   canRedo: false,
+  tools: [],
 });
 
 export function ViewerActionsProvider({ children }: { children: React.ReactNode }) {
@@ -121,11 +145,23 @@ export function ViewerActionsProvider({ children }: { children: React.ReactNode 
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [layout, setLayout] = useState<ViewerViewState['layout']>('as-drawn');
+  // A string, not the array: the viewer builds a fresh array on most renders, and comparing
+  // the join is what stops this re-rendering the chrome every time it does.
+  const [toolList, setToolList] = useState('');
 
   // `useRef` and the `useState` setter are both stable, so this is built once.
   const view = useMemo(
-    () => ({ ready, grid, notes, snapToGrid, layout, canUndo, canRedo }),
-    [ready, grid, notes, snapToGrid, layout, canUndo, canRedo],
+    () => ({
+      ready,
+      grid,
+      notes,
+      snapToGrid,
+      layout,
+      canUndo,
+      canRedo,
+      tools: toolList ? (toolList.split(' ') as CanvasTool[]) : [],
+    }),
+    [ready, grid, notes, snapToGrid, layout, canUndo, canRedo, toolList],
   );
 
   const registry = useMemo<Registry>(
@@ -141,6 +177,7 @@ export function ViewerActionsProvider({ children }: { children: React.ReactNode 
         setCanUndo(view?.canUndo ?? false);
         setCanRedo(view?.canRedo ?? false);
         setLayout(view?.layout ?? 'as-drawn');
+        setToolList((view?.tools ?? []).join(' '));
       },
       // `void`: three of these are async, and their result is nothing the caller waits on.
       run: (name) => {
@@ -228,11 +265,22 @@ export function useViewerActions(): {
   layout: ViewerViewState['layout'];
   canUndo: boolean;
   canRedo: boolean;
+  tools: readonly CanvasTool[];
   run: (name: keyof ViewerActions) => void;
 } {
   const registry = useContext(ViewerRegistryContext);
-  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo } =
+  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools } =
     useContext(ViewerViewContext);
   const run = registry?.run;
-  return { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, run: (name) => run?.(name) };
+  return {
+    ready,
+    grid,
+    notes,
+    snapToGrid,
+    layout,
+    canUndo,
+    canRedo,
+    tools,
+    run: (name) => run?.(name),
+  };
 }

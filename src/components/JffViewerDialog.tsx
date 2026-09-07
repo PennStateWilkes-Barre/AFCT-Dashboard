@@ -57,7 +57,10 @@ import {
   useRegisterViewerActions,
   useViewerChromePresent,
 } from '@/components/viewer/viewer-actions';
-import { CanvasToolPalette } from '@/components/viewer/CanvasToolPalette';
+import {
+  CanvasToolPalette,
+  type CanvasTool,
+} from '@/components/viewer/CanvasToolPalette';
 import { useCanvasTools } from '@/components/viewer/useCanvasTools';
 import {
   resolveViewerCapabilities,
@@ -1136,8 +1139,11 @@ export function JffCytoscapeViewer({
     () => ({
       cancelGesture: () => cancelLinkDraftRef.current(),
       clearSelection: () => clearSelectionRef.current(),
+      // Only the pane being worked in. Every opened tab stays mounted, so without this one
+      // press would give up a half-drawn line in a pane nobody is looking at.
+      enabled: focused,
     }),
-    [],
+    [focused],
   );
   const { activeTool, tools, selectTool } = useCanvasTools(capabilities, escapeActions);
   /**
@@ -1395,6 +1401,11 @@ export function JffCytoscapeViewer({
   // toolbar is the only place they exist.
   const chromeHasViewControls = useViewerChromePresent();
 
+  /** Choose a tool if this viewer has it, and do nothing at all if it does not. */
+  const selectAvailableTool = (tool: CanvasTool) => {
+    if (tools.includes(tool)) selectTool(tool);
+  };
+
   // Offered to any chrome around this viewer, which today means the standalone window's menu
   // bar. Registers nothing when there is no provider, so a dialog is unaffected. Declared
   // after the grid state because it publishes it: the menu shows the grid ticked or not, and
@@ -1423,6 +1434,13 @@ export function JffCytoscapeViewer({
         if (honorPositions) toggleHonorPositions();
       },
       resetMachine,
+      // Through the same `selectTool` the palette buttons call, so a keyboard route has the
+      // same consequences: the selection goes, a half-drawn line is given up, and a tool the
+      // capabilities do not allow is refused here rather than corrected afterwards.
+      selectSelectTool: () => selectAvailableTool('select'),
+      selectStateTool: () => selectAvailableTool('state'),
+      selectTransitionTool: () => selectAvailableTool('transition'),
+      selectCommentTool: () => selectAvailableTool('text'),
     },
     {
       grid,
@@ -1431,6 +1449,7 @@ export function JffCytoscapeViewer({
       layout: honorPositions ? 'as-drawn' : 'auto',
       canUndo,
       canRedo,
+      tools,
     },
   );
 

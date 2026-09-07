@@ -3,7 +3,7 @@ import React from 'react';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ViewerMenubar } from './ViewerMenubar';
@@ -30,7 +30,14 @@ const actions = {
   setAutoArranged: vi.fn(),
   resetMachine: vi.fn(),
   centerInWindow: vi.fn(),
+  selectSelectTool: vi.fn(),
+  selectStateTool: vi.fn(),
+  selectTransitionTool: vi.fn(),
+  selectCommentTool: vi.fn(),
 };
+
+/** Every tool a fully capable viewer offers, which is the usual case in these tests. */
+const ALL_TOOLS = ['select', 'state', 'transition', 'text'] as const;
 
 /** Stands in for a rendered machine that publishes its actions and its view state. */
 function FakeViewer({
@@ -40,6 +47,7 @@ function FakeViewer({
   layout = 'as-drawn',
   canUndo = false,
   canRedo = false,
+  tools = ALL_TOOLS,
 }: {
   grid?: boolean;
   notes?: boolean;
@@ -47,8 +55,17 @@ function FakeViewer({
   layout?: 'as-drawn' | 'auto';
   canUndo?: boolean;
   canRedo?: boolean;
+  tools?: readonly ('select' | 'state' | 'transition' | 'text')[];
 }) {
-  useRegisterViewerActions(actions, { grid, notes, snapToGrid, layout, canUndo, canRedo });
+  useRegisterViewerActions(actions, {
+    grid,
+    notes,
+    snapToGrid,
+    layout,
+    canUndo,
+    canRedo,
+    tools,
+  });
   return null;
 }
 
@@ -767,6 +784,7 @@ describe('several viewers mounted at once', () => {
       layout: 'as-drawn',
       canUndo,
       canRedo: true,
+      tools: ALL_TOOLS,
     });
     return null;
   }
@@ -1061,5 +1079,220 @@ describe('linking the two views', () => {
     renderMenu({});
     await openView(user);
     expect(screen.queryByRole('menuitemcheckbox', { name: /link views/i })).toBeNull();
+  });
+});
+
+/**
+ * The keyboard, and where its presses land.
+ *
+ * One listener, owned by this menu bar, reaching the machine through the same registry the
+ * menu items use. That is what makes a shortcut go to the focused pane: only the focused pane
+ * is allowed to register, so both are the same question with one answer.
+ */
+describe('keyboard shortcuts', () => {
+  const mountWithViewer = (props: Parameters<typeof FakeViewer>[0] = {}) =>
+    render(
+      <ViewerActionsProvider>
+        <FakeViewer {...props} />
+        <ViewerMenubar downloadHref="/x?download=1" />
+      </ViewerActionsProvider>,
+    );
+
+  const press = (
+    key: string,
+    mods: Record<string, boolean> = {},
+    target: Element | Window = window,
+  ) => fireEvent.keyDown(target, { key, ...mods });
+
+  beforeEach(() => {
+    for (const fn of Object.values(actions)) fn.mockClear();
+  });
+
+  it.each([
+    ['f', {}, 'fitToWindow'],
+    ['F', { shiftKey: true }, 'centerInWindow'],
+    ['g', {}, 'toggleGrid'],
+    ['G', { shiftKey: true }, 'toggleSnapToGrid'],
+    ['v', {}, 'selectSelectTool'],
+    ['n', {}, 'selectStateTool'],
+    ['t', {}, 'selectTransitionTool'],
+    ['c', {}, 'selectCommentTool'],
+  ] as const)('runs %s through the registry', (key, mods, action) => {
+    mountWithViewer();
+
+    press(key, mods);
+
+    expect(actions[action]).toHaveBeenCalledTimes(1);
+  });
+
+  it('steps back and forward only when there is somewhere to go', () => {
+    const { unmount } = mountWithViewer({ canUndo: false, canRedo: false });
+
+    press('z', { ctrlKey: true });
+    press('z', { ctrlKey: true, shiftKey: true });
+
+    expect(actions.undo).not.toHaveBeenCalled();
+    expect(actions.redo).not.toHaveBeenCalled();
+
+    unmount();
+    mountWithViewer({ canUndo: true, canRedo: true });
+
+    press('z', { metaKey: true });
+    press('z', { metaKey: true, shiftKey: true });
+    press('y', { ctrlKey: true });
+
+    expect(actions.undo).toHaveBeenCalledTimes(1);
+    expect(actions.redo).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers no tool the viewer does not have', () => {
+    // The capability rules stay where they are: the viewer publishes what it can offer, and a
+    // key press is refused for the same reason the palette button is absent.
+    mountWithViewer({ tools: ['select'] });
+
+    press('n');
+    press('t');
+    press('c');
+    press('v');
+
+    expect(actions.selectStateTool).not.toHaveBeenCalled();
+    expect(actions.selectTransitionTool).not.toHaveBeenCalled();
+    expect(actions.selectCommentTool).not.toHaveBeenCalled();
+    expect(actions.selectSelectTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing while somebody is typing', () => {
+    mountWithViewer({ canUndo: true });
+    const box = document.createElement('input');
+    document.body.appendChild(box);
+
+    press('n', {}, box);
+    press('t', {}, box);
+    press('c', {}, box);
+    press('f', {}, box);
+    press('z', { ctrlKey: true }, box);
+
+    expect(actions.selectStateTool).not.toHaveBeenCalled();
+    expect(actions.selectTransitionTool).not.toHaveBeenCalled();
+    expect(actions.selectCommentTool).not.toHaveBeenCalled();
+    expect(actions.fitToWindow).not.toHaveBeenCalled();
+    expect(actions.undo).not.toHaveBeenCalled();
+    box.remove();
+  });
+
+  it('leaves a held key as one press', () => {
+    mountWithViewer();
+
+    fireEvent.keyDown(window, { key: 'f' });
+    fireEvent.keyDown(window, { key: 'f', repeat: true });
+    fireEvent.keyDown(window, { key: 'f', repeat: true });
+
+    expect(actions.fitToWindow).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the browser its own shortcuts', () => {
+    mountWithViewer({ canUndo: true });
+
+    press('n', { ctrlKey: true });
+    press('t', { ctrlKey: true });
+    press('c', { metaKey: true });
+    press('s', { ctrlKey: true });
+    press('f', { altKey: true });
+
+    for (const fn of Object.values(actions)) expect(fn).not.toHaveBeenCalled();
+  });
+
+  /** Only one pane registers, so only one pane hears a key press. */
+  it('reaches the focused pane and not the other one', () => {
+    const other = { ...actions, fitToWindow: vi.fn(), selectStateTool: vi.fn() };
+    function OtherViewer() {
+      useRegisterViewerActions(other, {
+        grid: false,
+        notes: true,
+        snapToGrid: false,
+        layout: 'as-drawn',
+        canUndo: false,
+        canRedo: false,
+        tools: ALL_TOOLS,
+      });
+      return null;
+    }
+    render(
+      <ViewerActionsProvider>
+        <ViewerActionsGate active>
+          <FakeViewer />
+        </ViewerActionsGate>
+        <ViewerActionsGate active={false}>
+          <OtherViewer />
+        </ViewerActionsGate>
+        <ViewerMenubar downloadHref="/x?download=1" />
+      </ViewerActionsProvider>,
+    );
+
+    press('f');
+    press('n');
+
+    expect(actions.fitToWindow).toHaveBeenCalledTimes(1);
+    expect(actions.selectStateTool).toHaveBeenCalledTimes(1);
+    expect(other.fitToWindow).not.toHaveBeenCalled();
+    expect(other.selectStateTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('the keyboard shortcuts dialog', () => {
+  const mount = () =>
+    render(
+      <ViewerActionsProvider>
+        <FakeViewer />
+        <ViewerMenubar downloadHref="/x?download=1" />
+      </ViewerActionsProvider>,
+    );
+
+  it('opens from Help, above Documentation', async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await user.click(screen.getByRole('menuitem', { name: 'Help' }));
+    const items = (await screen.findAllByRole('menuitem')).map((item) => item.textContent);
+    expect(items.indexOf('Keyboard shortcuts?')).toBeLessThan(items.indexOf('Documentation'));
+
+    fireEvent.click(screen.getByRole('menuitem', { name: /keyboard shortcuts/i }));
+
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+
+  it('opens from ? as well, which is the same dialog', async () => {
+    mount();
+
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
+
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument();
+  });
+
+  it('lists every shortcut, with the keys the handler matches', async () => {
+    mount();
+    fireEvent.keyDown(window, { key: '?', shiftKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+
+    for (const label of [
+      'Select tool',
+      'State tool',
+      'Transition tool',
+      'Comment tool',
+      'Undo',
+      'Redo',
+      'Fit to window',
+      'Center in window',
+      'Toggle grid',
+      'Toggle snap to grid',
+    ]) {
+      expect(within(dialog).getByText(label)).toBeInTheDocument();
+    }
+    // Its own row as well as the dialog's title, so `?` is discoverable from inside it.
+    expect(within(dialog).getAllByText('Keyboard shortcuts')).toHaveLength(2);
+    // Straight from the definitions, so a key cannot be listed here and matched differently.
+    expect(within(dialog).getByText('N')).toBeInTheDocument();
+    expect(within(dialog).getByText('Shift+G')).toBeInTheDocument();
+    expect(within(dialog).getByText('Ctrl+Shift+Z')).toBeInTheDocument();
   });
 });

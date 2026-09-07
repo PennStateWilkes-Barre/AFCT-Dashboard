@@ -31,7 +31,18 @@ export function useCanvasTools(
    *
    * `cancelGesture` returns whether there was anything to cancel.
    */
-  escape: { cancelGesture?: () => boolean; clearSelection?: () => void } = {},
+  escape: {
+    cancelGesture?: () => boolean;
+    clearSelection?: () => void;
+    /**
+     * Whether this viewer is the one Escape is for.
+     *
+     * The standalone window keeps every opened tab mounted, so without this each of them
+     * listens and one press gives up a half-drawn line in a pane nobody is looking at. False
+     * only ever means "not the focused pane"; a viewer on its own is always its own.
+     */
+    enabled?: boolean;
+  } = {},
 ) {
   const [requested, setRequested] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
 
@@ -70,7 +81,9 @@ export function useCanvasTools(
    */
   const escapeRef = useRef(escape);
   escapeRef.current = escape;
+  const escapeEnabled = escape.enabled ?? true;
   useEffect(() => {
+    if (!escapeEnabled) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target;
@@ -95,7 +108,7 @@ export function useCanvasTools(
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeTool, resetTool]);
+  }, [activeTool, resetTool, escapeEnabled]);
 
   return { activeTool, tools, selectTool: setRequested, resetTool };
 }

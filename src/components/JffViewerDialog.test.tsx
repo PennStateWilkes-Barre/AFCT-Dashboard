@@ -186,6 +186,15 @@ function renderWithMenu(props: React.ComponentProps<typeof JffCytoscapeViewer>) 
 
 /* ────────────────────────────────  tests  ───────────────────────────────── */
 
+/**
+ * A viewer in the standalone window, which is where the canvas tools live.
+ *
+ * A viewer in a dialog is for looking at a machine: it drops the exports, the layout choice and
+ * the tool palette, all for the same reason. Presence of the provider IS that signal, so a test
+ * about the tools has to say which surface it is on.
+ */
+const renderInWindow = (ui: React.ReactElement) => render(ui, { wrapper: ViewerActionsProvider });
+
 describe('JffCytoscapeViewer — load & error', () => {
   it('shows an error message when the source fetch fails', async () => {
     fetchImpl = async () => ({
@@ -406,6 +415,26 @@ describe('the file kind badge', () => {
 
 describe('the toolbar does not repeat what a menu already offers', () => {
   const SRC = '/api/files/submissions/abc.jff';
+
+  /**
+   * The canvas tools are the standalone window's, on the same line as the exports and the
+   * layout choice. A panel over a page is for looking at a machine: it has no menus, no undo
+   * and no room, and offering a way to redraw the automaton in it was the one editing surface
+   * that had leaked across that line.
+   */
+  it('keeps the canvas tools out of a dialog', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    expect(screen.queryByTestId('viewer-tool-palette')).toBeNull();
+  });
+
+  it('offers them in the standalone window', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    expect(screen.getByTestId('viewer-tool-palette')).toBeInTheDocument();
+  });
 
   /**
    * Properties is the deliberate exception, and it is here so the exception is written down
@@ -1018,7 +1047,7 @@ describe('clicking a state', () => {
    * these check is that the button, the mode and that flag agree.
    */
   it('opens with Select active, and switches to State when asked', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     const select = screen.getByRole('button', { name: 'Select' });
@@ -1036,7 +1065,7 @@ describe('clicking a state', () => {
   });
 
   it('leaves the State tool on Escape, so placement mode is never a trap', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     fireEvent.click(screen.getByRole('button', { name: 'State' }));
 
@@ -1052,7 +1081,7 @@ describe('clicking a state', () => {
   });
 
   it('offers Transition between State and Comment, and Escape leaves it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     fireEvent.click(screen.getByRole('button', { name: 'Transition' }));
@@ -1077,7 +1106,7 @@ describe('clicking a state', () => {
    * line is about to start from.
    */
   it('puts down whatever was open when Transition is chosen', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -1088,7 +1117,7 @@ describe('clicking a state', () => {
   });
 
   it('leaves the selection alone when Select is chosen, which is how you go back to it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -1099,7 +1128,7 @@ describe('clicking a state', () => {
   });
 
   it('shows each tool its key, without putting it in the name', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     // The button is still called Select, and the key is announced as a shortcut.
@@ -1123,7 +1152,7 @@ describe('clicking a state', () => {
    * in. Without this one press gives up a half-drawn line in a pane nobody is looking at.
    */
   it('answers Escape only in the pane being worked in', async () => {
-    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    const { rerender } = renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     fireEvent.click(screen.getByRole('button', { name: 'State' }));
 
@@ -1149,7 +1178,7 @@ describe('clicking a state', () => {
   it('leaves the tool alone when Escape is pressed in a box being typed in', async () => {
     // Escape in the inspector's name box closes the panel, and in a comment it puts the caret
     // down. Taking the tool away as well would be two answers to one key.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     fireEvent.click(screen.getByRole('button', { name: 'State' }));
     tapNode('0');
@@ -1163,7 +1192,7 @@ describe('clicking a state', () => {
   });
 
   it('keeps the tools to the side being worked in', async () => {
-    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    const { rerender } = renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     expect(screen.getByTestId('viewer-tool-palette')).toBeInTheDocument();
 
@@ -2038,14 +2067,14 @@ describe('the Text tool', () => {
   const stored = () => JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '[]');
 
   it('sits under State in the palette', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
     expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State', 'Transition', 'Comment']);
   });
 
   it('puts a box where the canvas was clicked, with the caret already in it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
 
@@ -2059,7 +2088,7 @@ describe('the Text tool', () => {
 
   it('keeps what was typed, under a key of its own for this file', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
     tapBackground({ x: 300, y: 200 });
@@ -2091,7 +2120,7 @@ describe('the Text tool', () => {
   });
 
   it('drops a box nobody typed into, so a stray click leaves nothing behind', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
     tapBackground();
@@ -2105,7 +2134,7 @@ describe('the Text tool', () => {
 
   it('stays up, so a reader can label three things without going back to the palette', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
 
@@ -2121,7 +2150,7 @@ describe('the Text tool', () => {
 
   it('is deleted by the Delete key when it is selected, and not while it is being typed in', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
     tapBackground();
@@ -2170,7 +2199,7 @@ describe('the Text tool', () => {
 
   it('moves with the pointer, in the coordinates the machine uses', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
     tapBackground({ x: 100, y: 100 });
@@ -2188,7 +2217,7 @@ describe('the Text tool', () => {
 
   it('resizes from a handle, and never below the minimum', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     chooseText();
     tapBackground();
@@ -2209,7 +2238,7 @@ describe('the Text tool', () => {
    */
   it('changes nothing about the machine', async () => {
     const user = userEvent.setup();
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     const drawnBefore = h.cy.add.mock.calls.length;
     chooseText();
@@ -2268,7 +2297,9 @@ describe('viewer capabilities', () => {
   });
 
   it('hides the State tool when the machine may not be edited, and keeps Comment', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />);
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
     await waitForEngine();
 
     const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
@@ -2276,7 +2307,9 @@ describe('viewer capabilities', () => {
   });
 
   it('hides the Comment tool when annotation is off, and keeps State', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ annotate: false }} />);
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ annotate: false }} />,
+    );
     await waitForEngine();
 
     const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
@@ -2302,7 +2335,9 @@ describe('viewer capabilities', () => {
   });
 
   it('leaves the palette alone when only the inspector is withheld', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ inspect: false }} />);
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ inspect: false }} />,
+    );
     await waitForEngine();
 
     expect(screen.getByTestId('viewer-tool-palette')).toBeInTheDocument();
@@ -2312,7 +2347,7 @@ describe('viewer capabilities', () => {
   });
 
   it('puts the tool back to Select when the capability behind it is taken away', async () => {
-    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    const { rerender } = renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     fireEvent.click(screen.getByRole('button', { name: 'State' }));
     expect(screen.getByRole('button', { name: 'State' })).toHaveAttribute('aria-pressed', 'true');

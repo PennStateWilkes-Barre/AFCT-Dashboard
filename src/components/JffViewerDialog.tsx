@@ -1887,15 +1887,19 @@ export function JffCytoscapeViewer({
         </div>
 
         {/* The canvas's own tools, opposite the inspector and treated the same way: floating over
-            the drawing, never taking width from it. Only on the pane being worked in, because
-            two palettes would be two answers to "which machine does this draw on", and only the
-            tools this viewer's capabilities allow. Those are two separate conditions on purpose:
-            room on the screen is not permission, and this used to be one flag doing both.
+            the drawing, never taking width from it.
+
+            Three conditions, each about something different. Only in the standalone window,
+            which is the same line the exports and the layout choice are on: a panel over a page
+            is for a look, and it has no room, no menus and no undo to work with. Only on the
+            pane being worked in, because two palettes would be two answers to "which machine
+            does this draw on". And only the tools this viewer's capabilities allow, because
+            room on the screen is not permission.
 
             A click on it never reaches cytoscape, so it cannot draw a state under itself. That
             is true of the toolbar, the tabs and the menus for the same reason: only the canvas
             fires the tap that places one. */}
-        {focused ? (
+        {focused && chromeHasViewControls ? (
           <CanvasToolPalette activeTool={activeTool} onSelectTool={selectTool} tools={tools} />
         ) : null}
 

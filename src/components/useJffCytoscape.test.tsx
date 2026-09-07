@@ -2596,8 +2596,8 @@ describe('drawing a transition on the canvas', () => {
   /**
    * A viewer with the Transition tool up.
    *
-   * The hook is told only what a drag between two states means; the viewer decides that it
-   * means a transition. Same circle as the State tool, broken the same way.
+   * The hook is told only what two clicks, one state and then another, mean; the viewer decides
+   * that they mean a transition. Same circle as the State tool, broken the same way.
    */
   const withTransitionTool = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) => {
     const handle: { api?: () => ReturnType<typeof useJffCytoscape> } = {};
@@ -2759,6 +2759,67 @@ describe('drawing a transition on the canvas', () => {
     expect(classesOn('1')).not.toContain('link-source');
     expect(classesOn('0')).not.toContain('link-target');
     expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+  });
+
+  /**
+   * The state a line has just been joined to must not be dressed as "click here to start a
+   * line" in the same instant. That put two meanings on one circle, next to a transition that
+   * was selected and had its properties open, and the pointer had not moved to say either.
+   */
+  it('leaves nothing dressed up on the state it was just joined to', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    expect(classesOn('0')).not.toContain('link-candidate');
+    expect(classesOn('0')).not.toContain('link-target');
+    expect(classesOn('0')).not.toContain('link-source');
+    // What IS true: the new transition is what is selected, and the tool is still up.
+    expect(api().selectedTransition?.from).toBe('q1');
+    expect(api().selectedState).toBeNull();
+  });
+
+  it('says "start here" again the moment the pointer moves', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    act(() => hoverAt(at('0')));
+
+    expect(classesOn('0')).toContain('link-candidate');
+  });
+
+  /**
+   * A click asks where the states are, not what is dressed up. So the state just joined to,
+   * wearing nothing after the fix above, still starts the next line from a standing pointer.
+   */
+  it('starts the next line from the state just joined to, with no pointer movement', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(api().selectedTransition).not.toBeNull());
+
+    act(() => clickAt(at('0')));
+
+    expect(classesOn('0')).toContain('link-source');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(true);
+    // And it is a draft, not a transition: nothing has been made by that click.
+    expect(transitionsOf(api).filter((t) => t === '0->0')).toHaveLength(0);
+  });
+
+  it('starts the next line from a third state, with no pointer movement', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    // Straight into the next one: the tool is still up and no click on it was needed.
+    act(() => link('0', at('1')));
+
+    await waitFor(() => expect(transitionsOf(api).filter((t) => t === '0->1')).toHaveLength(2));
   });
 
   /**

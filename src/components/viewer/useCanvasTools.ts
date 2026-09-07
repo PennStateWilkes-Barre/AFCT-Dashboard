@@ -12,11 +12,12 @@ import type { ViewerCapabilities } from './viewer-capabilities';
  * can both be true and a bug the first time they are, and the number of ways to get it wrong
  * grows with every tool. Here there is one answer and it is always exactly one.
  *
- * The extension point for a tool that takes more than one click: keep `activeTool` at that tool
- * for the whole gesture and hold the half-finished work beside this hook. Transition, when it
- * arrives, will want something like `{ sourceId } | null` living in the viewer: chosen on the
- * first click, spent on the second, dropped by Escape. It does not belong in the union and it
- * does not belong in useJffCytoscape, which knows only that a graph coordinate was clicked.
+ * How a tool that takes more than one click works, which Transition already does: `activeTool`
+ * stays at that tool for the whole gesture and the half-finished work is held beside this hook.
+ * Transition's is the state a line is being drawn from, chosen on the first click, spent on the
+ * second, dropped by Escape; it lives in the layer that owns the graph, because that is where
+ * the clicks are worked out. It is not in the union, and there is no value for "halfway
+ * through": stages are not tools.
  */
 export function useCanvasTools(
   capabilities: ViewerCapabilities,

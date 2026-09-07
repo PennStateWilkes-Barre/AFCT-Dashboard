@@ -12,12 +12,13 @@ import type { ViewerCapabilities } from './viewer-capabilities';
  * the mode switches on this one value, so adding the next tool is a case in TOOLS below plus a
  * case wherever the canvas acts on it.
  *
- * One value, never a set of flags. Transition takes a whole gesture to finish rather than a
- * click, and it is still one value: `activeTool` stays `'transition'` from the first press to
- * the release, and how far the gesture has got is held beside it, in the layer that owns the
- * graph. Stages are not tools. `transition-source-picked` as a fifth value would multiply with
- * every tool added after it, and every switch on this union would have to know about a stage it
- * does not care about. See useCanvasTools and `onStateLink` in useJffCytoscape.
+ * One value, never a set of flags. Transition takes two clicks to finish rather than one, and
+ * it is still one value: `activeTool` stays `'transition'` from the click that anchors a source
+ * to the one that picks a target, and how far the gesture has got is held beside it, in the
+ * layer that owns the graph. Stages are not tools. `transition-source-picked` as a fifth value
+ * would multiply with every tool added after it, and every switch on this union would have to
+ * know about a stage it does not care about. See useCanvasTools and `onStateLink` in
+ * useJffCytoscape.
  */
 export type CanvasTool = 'select' | 'state' | 'transition' | 'text';
 

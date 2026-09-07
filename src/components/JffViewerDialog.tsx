@@ -1165,7 +1165,7 @@ export function JffCytoscapeViewer({
     [],
   );
   /**
-   * What a drag from one state to another means, and when it means anything.
+   * What a click on one state and then another means, and when it means anything.
    *
    * Null with any other tool up, which is what tells the graph to go on moving states when they
    * are dragged. The identity has to be stable while the tool is unchanged: the hook watches it

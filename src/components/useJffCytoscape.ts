@@ -251,12 +251,12 @@ export type UseJffCytoscapeOptions = {
    */
   onBackgroundClick?: ((at: { x: number; y: number }) => boolean) | null;
   /**
-   * What a drag from one state onto another means, when it means anything.
+   * What two clicks, one state and then another, mean.
    *
    * The same bargain `onBackgroundClick` makes, one gesture further on: this hook reports what
-   * happened on the graph (a drag started on this state and ended on that one) and the viewer
-   * decides what it is for. Present is also the switch: with a handler here, dragging a state
-   * draws a line out of it instead of moving it, and with none the graph behaves as it always
+   * happened on the graph (a line was drawn from this state to that one) and the viewer decides
+   * what it is for. Present is also the switch: with a handler here a click on a state belongs
+   * to that gesture and states are held still, and with none the graph behaves as it always
    * has. One option rather than a flag and a callback that could disagree.
    */
   onStateLink?: ((sourceId: string, targetId: string) => void) | null;
@@ -889,7 +889,7 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     // time by the loop below.
     const stale: any[] = [];
     cy.edges().forEach((edge: any) => {
-      // The line being dragged out of a state is not a transition and is nobody's business
+      // The line being drawn out of a state is not a transition and is nobody's business
       // here: it is removed by the gesture that made it.
       if (edge.hasClass?.(PREVIEW_CLASS)) return;
       const key = `${edge.data('source')}\u0000${edge.data('target')}`;
@@ -1708,7 +1708,7 @@ export function useJffCytoscape({
    * symbol and no move. The reader names it in the panel that opens on it.
    *
    * Either end may be a state the file came with or one the reader drew, and a self-loop (both
-   * ends the same state) is allowed and is what dragging from a state back onto itself makes.
+   * ends the same state) is allowed and is what clicking one state twice makes.
    */
   const addTransition = useCallback(
     (fromId: string, toId: string) => {
@@ -1886,8 +1886,14 @@ export function useJffCytoscape({
       const targetId = node?.id?.() ?? null;
       // Everything the gesture put on the canvas comes off BEFORE anything is made: what
       // follows redraws the graph and takes a snapshot of it, and neither should ever see it.
+      //
+      // And nothing is dressed up again here. The state under the pointer has just been joined
+      // to; saying "click here to start a line" about it in the same instant the line appears
+      // puts two meanings on one circle, next to a transition that is selected and has its
+      // properties open. The pointer has not moved, so there is nothing new to report about it:
+      // the next move works the hover out again, and a click works its target out by asking
+      // where the states are rather than by reading what is dressed up.
       clearDraft(cy);
-      setHover(cy, node);
       // Empty canvas is how somebody changes their mind without leaving the tool.
       if (targetId) onStateLinkRef.current?.(sourceId, targetId);
     };
@@ -1929,7 +1935,7 @@ export function useJffCytoscape({
     const linking = onStateLink !== null;
     try {
       // Both reasons a state might not be draggable: a tool that means something else by a
-      // drag, and a view that does not move anything at all.
+      // click on a state, and a view that does not move anything at all.
       cy?.autoungrabify?.(linking || lockArrangement);
     } catch {
       // A graph mid-teardown.
@@ -2317,7 +2323,7 @@ export function useJffCytoscape({
             },
             { selector: '.faded', style: { opacity: 0.25 } },
 
-            /* the line being dragged out of a state, before it is a transition */
+            /* the line being drawn out of a state, before it is a transition */
             {
               selector: `edge.${PREVIEW_CLASS}`,
               style: {

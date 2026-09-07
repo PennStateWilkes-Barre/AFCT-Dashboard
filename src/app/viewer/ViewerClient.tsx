@@ -4,6 +4,7 @@ import { JffCytoscapeViewer } from '@/components/JffViewerDialog';
 import { CfgViewerContent } from '@/components/dialogs/CfgViewerDialog';
 import { RegexViewerContent } from '@/components/dialogs/RegexViewerDialog';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import type { ViewerCapabilities } from '@/components/viewer/viewer-capabilities';
 
 /** Problem types drawn by the JFLAP (cytoscape) viewer; the rest have their own. */
 const JFF_PROBLEM_TYPES = ['FA', 'PDA', 'TM'];
@@ -22,7 +23,8 @@ export function ViewerClient({
   title,
   epsSymbol,
   viewStateKey,
-  showInspector = true,
+  focused = true,
+  capabilities,
   onViewportChange,
   linkedViewport,
 }: {
@@ -35,8 +37,10 @@ export function ViewerClient({
    * where the reader was. Only the drawn machines have anything to remember.
    */
   viewStateKey?: string | null;
-  /** Whether this pane may show its properties panel. See JffCytoscapeViewer. */
-  showInspector?: boolean;
+  /** Whether this is the pane being worked in, which is about room. See JffCytoscapeViewer. */
+  focused?: boolean;
+  /** What this pane may do, which is a separate question. See viewer-capabilities. */
+  capabilities?: Partial<ViewerCapabilities>;
   /** Report where this machine is being looked at, for a linked pane. */
   onViewportChange?: ((viewport: ViewerViewport) => void) | null;
   /** Follow another pane's camera. */
@@ -61,7 +65,8 @@ export function ViewerClient({
         // at, because the remembered view wins over this.
         initialZoom="fit"
         viewStateKey={viewStateKey}
-        showInspector={showInspector}
+        focused={focused}
+        capabilities={capabilities}
         onViewportChange={onViewportChange}
         linkedViewport={linkedViewport}
       />

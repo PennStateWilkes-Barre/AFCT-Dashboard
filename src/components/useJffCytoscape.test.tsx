@@ -2477,3 +2477,84 @@ describe('deleting from the drawing', () => {
     expect(api().viewModified).toBe(false);
   });
 });
+
+/**
+ * A machine nobody may change.
+ *
+ * The palette not offering a State button is not what makes a viewer read-only: anything else
+ * that reaches these (a menu item, a shortcut, a pane linked to another) would sail past it.
+ * The refusal lives here, with the machine, so there is one answer rather than one per caller.
+ */
+describe('a viewer that may not edit the machine', () => {
+  const readOnly = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) =>
+    renderViewer({ ...props, canEditMachine: false });
+
+  it('refuses a rename', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().renameState('0', 'renamed'));
+
+    expect(api().parsed?.states.some((s) => s.name === 'renamed')).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('refuses the initial and final marks', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const wasFinal = api().parsed?.states.find((s) => s.id === '1')?.final;
+
+    act(() => api().setFinalState('1', !wasFinal));
+    act(() => api().setInitialState('1'));
+
+    expect(api().parsed?.states.find((s) => s.id === '1')?.final).toBe(wasFinal);
+    expect(api().parsed?.states.find((s) => s.id === '1')?.initial).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('refuses to draw a state, even when something calls straight through', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.states.length;
+
+    act(() => api().addState({ x: 300, y: 400 }));
+
+    expect(api().parsed?.states.length).toBe(before);
+  });
+
+  it('refuses to delete a state or a line', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const states = api().parsed?.states.length;
+    const transitions = api().parsed?.transitions.length;
+
+    act(() => api().removeState('1'));
+    act(() => api().removeTransitions([0]));
+
+    expect(api().parsed?.states.length).toBe(states);
+    expect(api().parsed?.transitions.length).toBe(transitions);
+  });
+
+  it('refuses to re-word a transition', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions[0]?.read;
+
+    act(() => api().setTransitionField(0, 'read', 'zzz'));
+
+    expect(api().parsed?.transitions[0]?.read).toBe(before);
+  });
+
+  /**
+   * Arranging is not editing. Dragging a state and typing its coordinates move the drawing, not
+   * the machine, and pulling a crowded diagram apart is how a read-only one gets read.
+   */
+  it('still lets the drawing be arranged', async () => {
+    const { api } = readOnly();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => api().moveState('1', { x: 640, y: 480 }));
+
+    expect(lastCy().byId('1')?.position()).toEqual({ x: 640, y: 480 });
+  });
+});

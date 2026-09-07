@@ -3,14 +3,22 @@
 import { Circle, MousePointer, Type, type LucideIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import type { ViewerCapabilities } from './viewer-capabilities';
 
 /**
  * What clicking the canvas means.
  *
- * A union rather than a boolean, because this is three of a longer list: a transition tool and
- * a comment tool belong here eventually too, and each of them is another answer to the same
- * question. Everything that reads the mode switches on this one value, so adding the next tool
- * is a case in TOOLS below plus a case wherever the canvas acts on it.
+ * A union rather than a boolean, because this is three of a longer list: a transition tool
+ * belongs here eventually too, and it is another answer to the same question. Everything that
+ * reads the mode switches on this one value, so adding the next tool is a case in TOOLS below
+ * plus a case wherever the canvas acts on it.
+ *
+ * One value, never a set of flags. A tool that takes more than one click to finish, which
+ * Transition will (pick a source, then pick a target), keeps `activeTool = 'transition'`
+ * throughout and holds how far it has got in its own draft state beside this. Stages are not
+ * tools: `transition-source-picked` as a fourth value would multiply with every tool added
+ * after it, and every switch on this union would have to know about a stage it does not care
+ * about. See useCanvasTools.
  */
 export type CanvasTool = 'select' | 'state' | 'text';
 
@@ -23,6 +31,14 @@ const TOOLS: ReadonlyArray<{
   icon: LucideIcon;
   /** What it does, for the tooltip. No key hints: there are no shortcuts for these. */
   description: string;
+  /**
+   * The capability without which this tool cannot do anything. Absent means it always works.
+   *
+   * A field on the tool rather than a check at each button, so the list stays the one place
+   * that describes the palette and a new tool declares what it needs in the same line that
+   * gives it a name.
+   */
+  requires?: keyof ViewerCapabilities;
 }> = [
   {
     tool: 'select',
@@ -30,11 +46,35 @@ const TOOLS: ReadonlyArray<{
     icon: MousePointer,
     description: 'Select and move elements',
   },
-  { tool: 'state', label: 'State', icon: Circle, description: 'Add a state' },
-  // Text is not part of the machine: it writes a note over the drawing and changes nothing
-  // about the automaton. See useViewerTextBoxes.
-  { tool: 'text', label: 'Text', icon: Type, description: 'Add a text box' },
+  {
+    tool: 'state',
+    label: 'State',
+    icon: Circle,
+    description: 'Add a state',
+    requires: 'editMachine',
+  },
+  // A comment is not part of the machine: it writes a note over the drawing and changes nothing
+  // about the automaton. Called Comment here and ViewerTextBox in the code, because renaming the
+  // stored shape would strand every note anybody has already written. See useViewerTextBoxes.
+  {
+    tool: 'text',
+    label: 'Comment',
+    icon: Type,
+    description: 'Add a comment',
+    requires: 'annotate',
+  },
 ];
+
+/**
+ * The tools this viewer can actually offer.
+ *
+ * A tool that cannot work is not shown rather than shown greyed out: a disabled State button on
+ * a machine nobody may redraw is an invitation followed by a refusal, and there is nothing the
+ * reader could do to earn it.
+ */
+export function availableCanvasTools(capabilities: ViewerCapabilities): CanvasTool[] {
+  return TOOLS.filter((t) => !t.requires || capabilities[t.requires]).map((t) => t.tool);
+}
 
 /**
  * The canvas's own tools, floating over the top-left of the drawing.
@@ -49,12 +89,20 @@ const TOOLS: ReadonlyArray<{
 export function CanvasToolPalette({
   activeTool,
   onSelectTool,
+  tools,
   className,
 }: {
   activeTool: CanvasTool;
   onSelectTool: (tool: CanvasTool) => void;
+  /** Which tools to show, in the order given here. See `availableCanvasTools`. */
+  tools: readonly CanvasTool[];
   className?: string;
 }) {
+  const shown = TOOLS.filter((t) => tools.includes(t.tool));
+  // Select on its own is not a palette: it is the way the viewer already behaves, and a single
+  // pressed button that changes nothing is furniture over the drawing.
+  if (shown.length < 2) return null;
+
   return (
     <div
       className={cn(
@@ -67,7 +115,7 @@ export function CanvasToolPalette({
       aria-label="Canvas tools"
       data-testid="viewer-tool-palette"
     >
-      {TOOLS.map(({ tool, label, icon: Icon, description }) => {
+      {shown.map(({ tool, label, icon: Icon, description }) => {
         const active = tool === activeTool;
         return (
           <Tooltip key={tool}>

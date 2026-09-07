@@ -15,12 +15,12 @@ const mounts = new Map<string, number>();
 vi.mock('./ViewerClient', () => ({
   ViewerClient: ({
     src,
-    showInspector,
+    focused,
     onViewportChange,
     linkedViewport,
   }: {
     src: string;
-    showInspector?: boolean;
+    focused?: boolean;
     onViewportChange?: ((v: { zoom: number; pan: { x: number; y: number } }) => void) | null;
     linkedViewport?: { zoom: number; pan: { x: number; y: number } } | null;
   }) => {
@@ -33,8 +33,9 @@ vi.mock('./ViewerClient', () => ({
         data-src={src}
         // Which end of a link this machine is on, and what it has been told to follow.
         data-role={onViewportChange ? 'driving' : linkedViewport ? 'following' : 'alone'}
-        // Whether this pane is allowed to show its properties panel.
-        data-inspector={showInspector ? 'shown' : 'hidden'}
+        // Whether this is the pane being worked in, which is what decides whether its
+        // properties panel and its tool palette have room.
+        data-inspector={focused ? 'shown' : 'hidden'}
         data-following={linkedViewport ? JSON.stringify(linkedViewport) : ''}
       >
         <button

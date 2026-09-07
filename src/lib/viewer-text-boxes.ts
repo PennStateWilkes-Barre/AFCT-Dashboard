@@ -7,6 +7,13 @@
  * the student's own words), and nothing here reaches the parse, the evaluator, or the counts in
  * the toolbar.
  *
+ * Keyed by document, not by document and reader. `localStorage` is already per browser profile,
+ * so the case this would cover is two people sharing one signed-in browser, and the viewer has
+ * no user id to hand: the page that renders it knows one server-side, but the dialogs that use
+ * the same component do not, and fetching one here would put an authentication call inside a
+ * drawing. Worth revisiting when annotations move to the server, which is where per-reader
+ * notes belong anyway.
+ *
  * `localStorage`, not the `sessionStorage` the rest of the view uses. The camera and the
  * arrangement are how one sitting looked at a file; a written note is meant to still be there
  * tomorrow, which is the whole reason it is typed rather than said out loud. Nothing here is

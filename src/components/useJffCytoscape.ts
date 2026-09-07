@@ -249,6 +249,19 @@ export type UseJffCytoscapeOptions = {
    */
   onBackgroundClick?: ((at: { x: number; y: number }) => boolean) | null;
   /**
+   * Whether the reader may change the machine at all.
+   *
+   * Enforced here rather than only by hiding the buttons that call these. A viewer that is
+   * read-only because its palette is absent is read-only until something else calls one of
+   * these: a keyboard shortcut, a menu item, a linked pane. The palette decides what is
+   * offered, this decides what is possible, and the second one is the guarantee.
+   *
+   * Not the arrangement: dragging a state and typing its coordinates move the drawing, which
+   * the viewer already says is not the submitted file, and reading a crowded machine means
+   * pulling it apart. What this withholds is what the machine IS.
+   */
+  canEditMachine?: boolean;
+  /**
    * An element to keep in step with the graph's own transform.
    *
    * For anything drawn over the canvas in HTML rather than by cytoscape, which has to move and
@@ -771,6 +784,7 @@ export function useJffCytoscape({
   honorPositionsDefault = false,
   onBackgroundClick = null,
   graphOverlayRef = null,
+  canEditMachine = true,
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
@@ -961,6 +975,11 @@ export function useJffCytoscape({
   // tool that was active when the machine was drawn.
   const onBackgroundClickRef = useRef(onBackgroundClick);
   onBackgroundClickRef.current = onBackgroundClick;
+  // A ref for the same reason, and read at the top of every mutator below.
+  const canEditMachineRef = useRef(canEditMachine);
+  canEditMachineRef.current = canEditMachine;
+  /** The one gate every change to the machine goes through. Read-only means none of them run. */
+  const mayEditMachine = () => canEditMachineRef.current;
   const graphOverlayRefRef = useRef(graphOverlayRef);
   graphOverlayRefRef.current = graphOverlayRef;
   const initialZoomRef = useRef(initialZoom);
@@ -1325,6 +1344,7 @@ export function useJffCytoscape({
    */
   const addState = useCallback(
     (at: { x: number; y: number }) => {
+      if (!mayEditMachine()) return;
       if (!isFinitePoint(at)) return;
       const pristine = pristineParsed.current;
       if (!pristine) return;
@@ -1414,6 +1434,7 @@ export function useJffCytoscape({
    */
   const removeState = useCallback(
     (id: string) => {
+      if (!mayEditMachine()) return;
       recordStep();
       const next: ViewerRemoved = {
         states: [...removedRef.current.states, id],
@@ -1439,6 +1460,7 @@ export function useJffCytoscape({
    */
   const removeTransitions = useCallback(
     (indices: readonly number[]) => {
+      if (!mayEditMachine()) return;
       if (indices.length === 0) return;
       recordStep();
       const next: ViewerRemoved = {
@@ -2651,6 +2673,7 @@ export function useJffCytoscape({
      * drawing, everything that describes the machine, and the arrangement a reader downloads.
      */
     setInitialState: (id: string | null) => {
+      if (!mayEditMachine()) return;
       // A tick, not a typed word: the whole change happens at once, so the step is recorded
       // here rather than waiting on a first keystroke the way the text boxes do.
       recordStep();
@@ -2692,6 +2715,7 @@ export function useJffCytoscape({
       field: 'read' | 'write' | 'move' | 'pop' | 'push',
       value: string,
     ) => {
+      if (!mayEditMachine()) return;
       // Typed, so the step was taken when the box took focus: this commits it on the first
       // character and does nothing on the rest. One undo per box visited, not per keystroke.
       commitPendingMove();
@@ -2733,6 +2757,7 @@ export function useJffCytoscape({
      * whichever border the state ends up with, so the marker is placed again afterwards.
      */
     setFinalState: (id: string, final: boolean) => {
+      if (!mayEditMachine()) return;
       recordStep();
       setFinalOverrides((current) => ({ ...current, [id]: final }));
       setParsed((current) => (current ? applyFinalStates(current, { [id]: final }) : current));
@@ -2761,6 +2786,7 @@ export function useJffCytoscape({
      * box rather than one per keystroke: see `pendingSnapshot`.
      */
     renameState: (id: string, name: string) => {
+      if (!mayEditMachine()) return;
       // As with a transition's fields: the snapshot was taken when the box took focus, and the
       // first character typed is what turns it into a step.
       commitPendingMove();

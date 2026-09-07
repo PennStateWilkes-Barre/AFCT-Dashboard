@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
   Dialog,
@@ -54,11 +54,12 @@ import {
   useRegisterViewerActions,
   useViewerChromePresent,
 } from '@/components/viewer/viewer-actions';
+import { CanvasToolPalette } from '@/components/viewer/CanvasToolPalette';
+import { useCanvasTools } from '@/components/viewer/useCanvasTools';
 import {
-  CanvasToolPalette,
-  DEFAULT_CANVAS_TOOL,
-  type CanvasTool,
-} from '@/components/viewer/CanvasToolPalette';
+  resolveViewerCapabilities,
+  type ViewerCapabilities,
+} from '@/components/viewer/viewer-capabilities';
 import { CanvasTextLayer } from '@/components/viewer/CanvasTextLayer';
 import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
 import {
@@ -413,6 +414,7 @@ function StateProperties({
   position,
   onBeginEdit,
   onMove,
+  canEdit,
   onDelete,
   onClose,
 }: {
@@ -430,6 +432,14 @@ function StateProperties({
   position: { x: number; y: number } | null;
   onBeginEdit: () => void;
   onMove: (id: string, at: { x: number; y: number }) => void;
+  /**
+   * Whether this panel may change the machine.
+   *
+   * Read-only leaves everything readable and nothing typeable, rather than removing the rows:
+   * the name and the two marks are what somebody opened this panel to see, and a panel that
+   * showed them only when they could be changed would be worse at its main job.
+   */
+  canEdit: boolean;
   onDelete: (id: string) => void;
   onClose: () => void;
 }) {
@@ -468,9 +478,13 @@ function StateProperties({
             // Focus, not the first keystroke, is where an undo step for this box begins.
             onFocus={onBeginEdit}
             onChange={(event) => {
+              // `readOnly` already stops a browser firing this; the guard is so the box cannot
+              // show a name the machine refused, whatever else calls it.
+              if (!canEdit) return;
               setName(event.target.value);
               onRename(state.id, event.target.value);
             }}
+            readOnly={!canEdit}
             className="h-8 font-mono text-sm"
             autoComplete="off"
             spellCheck={false}
@@ -492,6 +506,7 @@ function StateProperties({
             <div className="flex items-center gap-2">
               <Checkbox
                 id={initialFieldId}
+                disabled={!canEdit}
                 checked={state.initial}
                 onCheckedChange={(checked) => onSetInitial(checked === true ? state.id : null)}
               />
@@ -502,6 +517,7 @@ function StateProperties({
             <div className="flex items-center gap-2">
               <Checkbox
                 id={finalFieldId}
+                disabled={!canEdit}
                 checked={state.final}
                 onCheckedChange={(checked) => onSetFinal(state.id, checked === true)}
               />
@@ -554,6 +570,8 @@ function StateProperties({
       {position ? (
         <AdvancedSection open={advancedOpen} onOpenChange={onAdvancedOpenChange}>
           <div className="grid grid-cols-2 gap-2">
+            {/* Not gated by `canEdit`: these move the drawing, not the machine, the same way a
+                drag does, and pulling a crowded diagram apart is how it gets read. */}
             <CoordinateField
               label="X"
               value={position.x}
@@ -570,7 +588,9 @@ function StateProperties({
         </AdvancedSection>
       ) : null}
 
-      <InspectorDeleteRow label="Delete state" onDelete={() => onDelete(state.id)} />
+      {canEdit ? (
+        <InspectorDeleteRow label="Delete state" onDelete={() => onDelete(state.id)} />
+      ) : null}
     </PropertiesPanel>
   );
 }
@@ -790,6 +810,7 @@ function TransitionProperties({
   fields,
   onBeginEdit,
   onEdit,
+  canEdit,
   onDelete,
   onClose,
 }: {
@@ -800,6 +821,8 @@ function TransitionProperties({
   fields: Array<'read' | 'pop' | 'push' | 'write' | 'move'>;
   onBeginEdit: () => void;
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
+  /** Whether this panel may change the machine. See the state panel's own. */
+  canEdit: boolean;
   onDelete: (indices: number[]) => void;
   onClose: () => void;
 }) {
@@ -870,6 +893,7 @@ function TransitionProperties({
                     // Where this box's undo step begins; see the state panel's name field.
                     onFocus={onBeginEdit}
                     onChange={(event) => onEdit(transition.index, field, event.target.value)}
+                    readOnly={!canEdit}
                     className="h-8 font-mono text-sm"
                     autoComplete="off"
                     spellCheck={false}
@@ -887,14 +911,16 @@ function TransitionProperties({
           two states are drawn as one and edited here together, so they go together too. The
           label says how many when there is more than one, since "Delete transition" over three
           of them would be a surprise. */}
-      <InspectorDeleteRow
-        label={
-          edge.transitions.length > 1
-            ? `Delete ${edge.transitions.length} transitions`
-            : 'Delete transition'
-        }
-        onDelete={() => onDelete(edge.transitions.map((transition) => transition.index))}
-      />
+      {canEdit ? (
+        <InspectorDeleteRow
+          label={
+            edge.transitions.length > 1
+              ? `Delete ${edge.transitions.length} transitions`
+              : 'Delete transition'
+          }
+          onDelete={() => onDelete(edge.transitions.map((transition) => transition.index))}
+        />
+      ) : null}
     </PropertiesPanel>
   );
 }
@@ -937,7 +963,8 @@ export function JffCytoscapeViewer({
   honorPositionsDefault = false,
   initialZoom = 'fit',
   viewStateKey = null,
-  showInspector = true,
+  focused = true,
+  capabilities: capabilityOverrides,
   windowTarget,
   onOpenedInWindow,
   onViewportChange,
@@ -964,13 +991,26 @@ export function JffCytoscapeViewer({
   /** Remember the zoom, pan and arrangement under this key. See useJffCytoscape. */
   viewStateKey?: string | null;
   /**
-   * Whether this viewer may show its properties panel.
+   * Whether this is the pane being worked in.
    *
-   * For the split window, where two machines are on screen and two inspectors would take a
-   * third of it between them. The selection itself is untouched: the pane keeps whatever was
-   * clicked in it and shows the panel again the moment the reader goes back to that side.
+   * For the split window, where two machines are on screen: two inspectors would take a third
+   * of it between them and two tool palettes would be two answers to "which machine does this
+   * draw on". The selection itself is untouched, so the other pane keeps whatever was clicked
+   * in it and shows its panel again the moment the reader goes back to that side.
+   *
+   * Room on the screen, and nothing else. What this viewer is ALLOWED to do is `capabilities`,
+   * which is a different question with a different answer: an unfocused pane is still editable,
+   * and a read-only pane is still the focused one when it is the one being read.
    */
-  showInspector?: boolean;
+  focused?: boolean;
+  /**
+   * What this viewer may do: inspect, edit the machine, annotate. Anything left out is allowed.
+   *
+   * See viewer-capabilities. Read-only is enforced by the hook that owns the machine as well as
+   * by the palette, so a context that withholds `editMachine` is not relying on a button being
+   * absent.
+   */
+  capabilities?: Partial<ViewerCapabilities>;
   /** Where the pop-out sends this file, or absent when a link cannot be built for it. */
   windowTarget?: ViewerWindowTarget | null;
   /** Called once the file is on its way to the standalone window. */
@@ -994,7 +1034,11 @@ export function JffCytoscapeViewer({
    * empty canvas), so it stays about the machine and the palette stays about the palette.
    * Adding a tool later is a case in the palette's own list plus whatever it makes a click do.
    */
-  const [activeTool, setActiveTool] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
+  const capabilities = useMemo(
+    () => resolveViewerCapabilities(capabilityOverrides),
+    [capabilityOverrides],
+  );
+  const { activeTool, tools, selectTool } = useCanvasTools(capabilities);
   /**
    * The click handler itself, filled in below once the hook has handed back what it needs.
    *
@@ -1029,29 +1073,6 @@ export function JffCytoscapeViewer({
   const [pendingDelete, setPendingDelete] = useState<
     { kind: 'state'; id: string; name: string } | { kind: 'transitions'; indices: number[] } | null
   >(null);
-
-  /**
-   * Escape leaves the State tool.
-   *
-   * On the window rather than on the viewer, because placing a state leaves focus nowhere in
-   * particular: a click on a canvas focuses no element, so a handler on the container would
-   * never hear the key that is meant to get the reader out of placement mode. Bound only while
-   * a tool other than Select is up, so an ordinary viewer listens for nothing.
-   *
-   * Not while they are typing. The inspector's boxes are inside this viewer, and Escape there
-   * closes the panel; taking the tool away as well would be two answers to one key.
-   */
-  useEffect(() => {
-    if (activeTool === DEFAULT_CANVAS_TOOL) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      const target = event.target;
-      if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
-      setActiveTool(DEFAULT_CANVAS_TOOL);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeTool]);
 
   const {
     containerRef,
@@ -1109,6 +1130,7 @@ export function JffCytoscapeViewer({
     honorPositionsDefault,
     onBackgroundClick,
     graphOverlayRef: textOverlayRef,
+    canEditMachine: capabilities.editMachine,
     initialZoom,
     viewStateKey,
     onViewportChange,
@@ -1173,7 +1195,9 @@ export function JffCytoscapeViewer({
     : selectedTransition
       ? ({ kind: 'transition', edge: selectedTransition } as const)
       : null;
-  const panelOpen = panelSubject !== null && showInspector;
+  // Both conditions, and they mean different things: `inspect` is whether this viewer offers
+  // properties at all, `focused` is whether there is room for them on this side of a split.
+  const panelOpen = panelSubject !== null && capabilities.inspect && focused;
   const lastPanelSubject = useRef(panelSubject);
   if (panelSubject) lastPanelSubject.current = panelSubject;
   const [panelMounted, setPanelMounted] = useState(panelOpen);
@@ -1617,25 +1641,35 @@ export function JffCytoscapeViewer({
           ) : null}
           {/* The reader's own notes, over the drawing and outside the machine entirely: nothing
               here reaches the parse, the counts, the history or an export. In a split window
-              both panes draw their own, since each is annotating a different file. */}
-          <CanvasTextLayer
-            api={textApi}
-            overlayRef={textOverlayRef}
-            viewportNow={viewportNow}
-            zoom={zoom}
-          />
+              both panes draw their own, since each is annotating a different file, and both
+              draw them whether or not they are the focused pane: a note is on the machine, not
+              in a panel beside it.
+
+              What floats over this canvas, bottom to top: this layer, then the loading message,
+              then the palette and the inspector (siblings of this column, so later in the
+              document), then anything Radix puts in a portal, which is above the lot. Nothing
+              here goes past z-10, and nothing needs to. */}
+          {capabilities.annotate ? (
+            <CanvasTextLayer
+              api={textApi}
+              overlayRef={textOverlayRef}
+              viewportNow={viewportNow}
+              zoom={zoom}
+            />
+          ) : null}
         </div>
 
         {/* The canvas's own tools, opposite the inspector and treated the same way: floating over
-            the drawing, never taking width from it. Only where the inspector would show, which
-            in a split window is the side being worked in: two palettes would be two answers to
-            "which machine does this draw on".
+            the drawing, never taking width from it. Only on the pane being worked in, because
+            two palettes would be two answers to "which machine does this draw on", and only the
+            tools this viewer's capabilities allow. Those are two separate conditions on purpose:
+            room on the screen is not permission, and this used to be one flag doing both.
 
             A click on it never reaches cytoscape, so it cannot draw a state under itself. That
             is true of the toolbar, the tabs and the menus for the same reason: only the canvas
             fires the tap that places one. */}
-        {showInspector ? (
-          <CanvasToolPalette activeTool={activeTool} onSelectTool={setActiveTool} />
+        {focused ? (
+          <CanvasToolPalette activeTool={activeTool} onSelectTool={selectTool} tools={tools} />
         ) : null}
 
         {panel === null ? null : (
@@ -1655,6 +1689,7 @@ export function JffCytoscapeViewer({
                 position={selectedStatePosition}
                 onBeginEdit={beginEdit}
                 onMove={moveState}
+                canEdit={capabilities.editMachine}
                 onDelete={(id) => setPendingDelete({ kind: 'state', id, name: panel.state.name })}
                 onClose={clearSelectedState}
               />
@@ -1665,6 +1700,7 @@ export function JffCytoscapeViewer({
                 fields={transitionFields(type)}
                 onBeginEdit={beginEdit}
                 onEdit={setTransitionField}
+                canEdit={capabilities.editMachine}
                 onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />

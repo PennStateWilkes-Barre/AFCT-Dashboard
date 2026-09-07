@@ -347,6 +347,28 @@ describe('the graph canvas says it can be dragged', () => {
 describe('the toolbar does not repeat what a menu already offers', () => {
   const SRC = '/api/files/submissions/abc.jff';
 
+  /**
+   * Properties is the deliberate exception, and it is here so the exception is written down
+   * rather than discovered. It is on the toolbar AND in the File menu: the menu is where
+   * somebody looks for it by convention, and the button is the way to it without leaving the
+   * machine. It also describes a different file in each pane of a split window, which the
+   * menu bar cannot do.
+   */
+  it('offers Properties even though the menu bar has it too', () => {
+    render(
+      <ViewerActionsProvider>
+        <JffCytoscapeViewer src={SRC} title="abc.jff" properties={{ rows: [] }} />
+      </ViewerActionsProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'File properties' })).toBeInTheDocument();
+  });
+
+  it('shows no Properties button where a caller has no answer to give', () => {
+    // A viewer inside a dialog: the page around it has already said whose file this is.
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    expect(screen.queryByRole('button', { name: 'File properties' })).toBeNull();
+  });
+
   it('keeps Grid in a dialog, where the toolbar is the only place it exists', () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     expect(screen.getByRole('button', { name: /toggle grid/i })).toBeInTheDocument();

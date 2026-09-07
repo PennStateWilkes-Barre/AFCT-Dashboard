@@ -1,6 +1,13 @@
 {
   "versions": [
     {
+      "tag": "v0.9.8",
+      "label": "v0.9.8",
+      "notes": "Release v0.9.8.",
+      "requiresHostUpdate": false,
+      "composeSha256": "8459a77fe897e273a04e5a49a610a9d26ae86cd8d6cc770fdbe7ab0d8dda3167"
+    },
+    {
       "tag": "v0.9.7",
       "label": "v0.9.7",
       "notes": "Release v0.9.7.",

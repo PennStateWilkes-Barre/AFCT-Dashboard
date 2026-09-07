@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
 import JffViewerDialog, { JffCytoscapeViewer } from './JffViewerDialog';
+import { transitionFields } from '@/lib/jflap-parse';
 import {
   ViewerActionsGate,
   ViewerActionsProvider,
@@ -2532,6 +2533,172 @@ describe('resetting a machine and its comments', () => {
     await openReset(user);
 
     expect(await screen.findByText(/your comments are removed/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Enter, from the last box of a transition, means "that one is labelled".
+ *
+ * The workflow it is for: click a state, click another, type the symbol, Enter, and start the
+ * next one. The tool stays up, so the mouse never has to go back to the palette.
+ */
+describe('finishing a transition from the keyboard', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+
+  const tapEdge = (source: string, target: string) => {
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown }) => void) | undefined;
+    act(() =>
+      tap?.({
+        target: {
+          isNode: () => false,
+          hasClass: () => false,
+          id: () => `e0-${source}-${target}`,
+          data: (key: string) => (key === 'source' ? source : target),
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+      }),
+    );
+  };
+
+  /**
+   * Still there after the panel's exit animation would have finished.
+   *
+   * The panel slides out rather than vanishing, so it stays in the document for a moment after
+   * it has been closed. Asserting on it the instant a key was pressed cannot tell "did not
+   * close" from "is closing", which is the difference these tests are about.
+   */
+  const stillOpen = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.getByRole('group', { name: /transition from/i })).toBeInTheDocument();
+  };
+
+  it('commits what was typed, closes the panel and lets the line go', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    const reads = await screen.findByLabelText('Reads');
+
+    // Written on every keystroke, so by the time Enter arrives the value is already the
+    // machine's. Enter only puts the panel down.
+    fireEvent.change(reads, { target: { value: 'b' } });
+    fireEvent.keyDown(reads, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+
+    // The line was let go rather than the panel merely hidden, and the symbol stuck: clicking
+    // it again opens a panel about the same transition, reading what was typed.
+    tapEdge('0', '1');
+    expect(await screen.findByLabelText('Reads')).toHaveValue('b');
+  });
+
+  it('leaves the tool it was drawn with alone', async () => {
+    // Nothing in finishing touches the tool, which is what lets the next two clicks draw the
+    // next line. Asserted with the tool this viewer happens to be in, since choosing Transition
+    // is itself what puts a selected line down.
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    const reads = await screen.findByLabelText('Reads');
+
+    fireEvent.keyDown(reads, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+    expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('adds no history step of its own', async () => {
+    // Typing already took one. Closing a panel is not a change to the machine.
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    const reads = await screen.findByLabelText('Reads');
+    fireEvent.focus(reads);
+    fireEvent.change(reads, { target: { value: 'b' } });
+    await screen.findByRole('button', { name: /file changed/i });
+
+    fireEvent.keyDown(reads, { key: 'Enter' });
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+
+    // One undo puts the symbol back, so Enter added nothing to step through.
+    tapEdge('0', '1');
+    expect(await screen.findByLabelText('Reads')).toHaveValue('a');
+  });
+
+  it('leaves the panel alone when Enter comes from anywhere else in it', async () => {
+    // Only the last box means "done". A button, a tick box or the name of a state is not the
+    // end of labelling a transition.
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    const panel = await screen.findByRole('group', { name: /transition from/i });
+
+    fireEvent.keyDown(within(panel).getByRole('button', { name: /delete transition/i }), {
+      key: 'Enter',
+    });
+
+    await stillOpen();
+  });
+
+  /**
+   * A pushdown automaton and a Turing machine have three boxes each, so the last one is not
+   * the first. The panel draws them from `transitionFields`, and this reads the same list, so
+   * the two cannot come to disagree about which box ends the labelling.
+   */
+  it.each([
+    ['pda', 'push'],
+    ['tm', 'move'],
+    ['fa', 'read'],
+  ] as const)('finishes a %s transition from its %s box and no earlier', (type, last) => {
+    const fields = transitionFields(type);
+    expect(fields[fields.length - 1]).toBe(last);
+    // And the boxes before it are not the end: Tab is how somebody gets between them.
+    for (const field of fields.slice(0, -1)) expect(field).not.toBe(last);
+  });
+
+  it('makes the last box of the last transition on a line the one that finishes', async () => {
+    // Parallel transitions between the same two states share a line and a panel. Drawing a
+    // second one adds a block below the first, and it is that block's last box that ends the
+    // labelling: the new transition takes the highest index, so it is the one at the bottom.
+    fetchImpl = async () =>
+      okText(`<?xml version="1.0"?>
+<structure>
+  <type>fa</type>
+  <automaton>
+    <state id="0" name="q0"><x>0</x><y>0</y><initial/></state>
+    <state id="1" name="q1"><x>120</x><y>0</y><final/></state>
+    <transition><from>0</from><to>1</to><read>a</read></transition>
+    <transition><from>0</from><to>1</to><read>b</read></transition>
+  </automaton>
+</structure>`);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapEdge('0', '1');
+    const boxes = await screen.findAllByLabelText('Reads');
+    expect(boxes).toHaveLength(2);
+
+    // The first block is not the end of it.
+    fireEvent.keyDown(boxes[0]!, { key: 'Enter' });
+    await stillOpen();
+
+    fireEvent.keyDown(boxes[1]!, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+  });
+
+  it('says nothing about a machine nobody may edit', async () => {
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
+    await waitForEngine();
+    tapEdge('0', '1');
+    const reads = await screen.findByLabelText('Reads');
+
+    fireEvent.keyDown(reads, { key: 'Enter' });
+
+    // The panel is a read of the transition, and Enter does not close a read.
+    await stillOpen();
   });
 });
 

@@ -822,6 +822,7 @@ function TransitionProperties({
   onEdit,
   canEdit,
   focusSignal,
+  onFinish,
   onDelete,
   onClose,
 }: {
@@ -834,6 +835,14 @@ function TransitionProperties({
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
   /** Whether this panel may change the machine. See the state panel's own. */
   canEdit: boolean;
+  /**
+   * Done labelling this transition: put the panel down and let go of the line.
+   *
+   * For Enter in the last box, which is how somebody drawing a run of transitions gets back to
+   * the canvas without reaching for the mouse: click, click, type, Enter, and the next one can
+   * start straight away. The tool is untouched, so it is still the one that draws lines.
+   */
+  onFinish: () => void;
   /**
    * Bumped when this panel opened because a transition was just drawn, rather than clicked.
    *
@@ -910,8 +919,15 @@ function TransitionProperties({
                 Transition {i + 1} of {edge.transitions.length}
               </div>
             ) : null}
-            {fields.map((field) => {
+            {fields.map((field, fieldIndex) => {
               const fieldId = `${fieldIdPrefix}-${transition.index}-${field}`;
+              // The last box of the last transition on this line: the end of the labelling,
+              // whatever kind of machine it is. A finite automaton reaches it on the first box,
+              // a pushdown automaton after Push and a Turing machine after the direction, and
+              // none of that is written here: it is the length of the field list the panel is
+              // already drawing from.
+              const isLastField =
+                i === edge.transitions.length - 1 && fieldIndex === fields.length - 1;
               return (
                 <div key={field} className="space-y-1.5">
                   <Label htmlFor={fieldId} className="text-muted-foreground text-xs font-normal">
@@ -924,6 +940,16 @@ function TransitionProperties({
                     // Where this box's undo step begins; see the state panel's name field.
                     onFocus={onBeginEdit}
                     onChange={(event) => onEdit(transition.index, field, event.target.value)}
+                    onKeyDown={(event) => {
+                      // Enter in the last box means "that is this one labelled". Only there:
+                      // Tab is how somebody moves between the boxes of a pushdown automaton,
+                      // and Enter in the middle of that would finish a transition that is half
+                      // described. Nothing to commit first, because the value is written on
+                      // every keystroke; this only puts the panel down.
+                      if (event.key !== 'Enter' || !isLastField || !canEdit) return;
+                      event.preventDefault();
+                      onFinish();
+                    }}
                     readOnly={!canEdit}
                     className="h-8 font-mono text-sm"
                     autoComplete="off"
@@ -1933,6 +1959,9 @@ export function JffCytoscapeViewer({
                 onEdit={setTransitionField}
                 canEdit={capabilities.editMachine}
                 focusSignal={drawnTransitions}
+                // The same thing the panel's own close button does: the selection goes with
+                // the panel, so no line is left lit up behind it.
+                onFinish={clearSelectedState}
                 onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />

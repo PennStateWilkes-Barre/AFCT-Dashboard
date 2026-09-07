@@ -116,39 +116,48 @@ export function ViewerMenubar({
                   Original file
                 </a>
               </MenubarItem>
-              {/* The same machine with the layout on screen, which after auto-arranging is
-                  usually far more readable than the one that was submitted. A new file: the
-                  submitted one is never altered. */}
+              {/* The same automaton with the arrangement on screen, which after auto-arranging
+                  is usually far more readable than the one that was submitted. A new file: the
+                  submitted one is never altered.
+
+                  "Current automaton" rather than "Current view": this writes out the automaton,
+                  and the old label read as a screenshot of the viewport, which is what the two
+                  image exports below actually are. */}
               <MenubarItem disabled={!ready} onSelect={() => run('downloadCurrent')}>
                 <FileDown aria-hidden="true" />
-                Current view
+                Current automaton
               </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>
-          <MenubarSeparator />
-          {/* Where the file came from, rather than what is in it. Disabled rather than hidden
-              when there is nothing to show, so the menu does not change shape between files. */}
-          <MenubarItem disabled={!properties} onSelect={() => setPropertiesOpen(true)}>
-            <Info aria-hidden="true" />
-            Properties
-          </MenubarItem>
-          <MenubarSeparator />
+          {/* Directly under Download, because the two are the same question with different
+              answers: the file, or a picture of it. "Export image" says which this one is. */}
           <MenubarSub>
             <MenubarSubTrigger>
               <Share aria-hidden="true" />
-              Export
+              Export image
             </MenubarSubTrigger>
             <MenubarSubContent>
-              <MenubarItem disabled={!ready} onSelect={() => run('downloadSVG')}>
-                <FileCode2 aria-hidden="true" />
-                SVG
-              </MenubarItem>
+              {/* PNG first: it is what somebody pasting into a document or a slide wants, and
+                  SVG is the answer for the smaller number of people who know they want it. */}
               <MenubarItem disabled={!ready} onSelect={() => run('downloadPNG')}>
                 <FileImage aria-hidden="true" />
                 PNG
               </MenubarItem>
+              <MenubarItem disabled={!ready} onSelect={() => run('downloadSVG')}>
+                <FileCode2 aria-hidden="true" />
+                SVG
+              </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>
+          <MenubarSeparator />
+          {/* Where the file came from, rather than what is in it. "File properties", because
+              this viewer has properties panels for a state and for a transition and the bare
+              word could mean any of the three. Disabled rather than hidden when there is
+              nothing to show, so the menu does not change shape between files. */}
+          <MenubarItem disabled={!properties} onSelect={() => setPropertiesOpen(true)}>
+            <Info aria-hidden="true" />
+            File properties
+          </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
 
@@ -165,6 +174,29 @@ export function ViewerMenubar({
           <MenubarItem disabled={!canRedo} onSelect={() => run('redo')}>
             <Redo2 aria-hidden="true" />
             Redo
+          </MenubarItem>
+          <MenubarSeparator />
+          {/* Under Edit with the clipboard, which is where anybody looks for a copy. What they
+              copy is a picture of the automaton rather than a selection, which is what the
+              labels say and why the two formats are named. Format icons, matching File's
+              Export image, so the same format carries the same icon wherever it appears. */}
+          <MenubarItem disabled={!ready} onSelect={() => run('copyPNG')}>
+            <FileImage aria-hidden="true" />
+            Copy as PNG
+          </MenubarItem>
+          {/* Pastes as vector art, so it stays sharp in a slide or a printed handout, where
+              the PNG above does not. */}
+          <MenubarItem disabled={!ready} onSelect={() => run('copySVG')}>
+            <FileCode2 aria-hidden="true" />
+            Copy as SVG
+          </MenubarItem>
+          <MenubarSeparator />
+          {/* The far end of Undo, and the last thing in this menu for the same reason it is
+              confirmed: it puts back everything the reader has done at once. The ellipsis says
+              a question comes first, which is the convention for exactly that. */}
+          <MenubarItem disabled={!ready} onSelect={() => setResetOpen(true)}>
+            <RotateCcw aria-hidden="true" />
+            Reset automaton...
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
@@ -247,12 +279,12 @@ export function ViewerMenubar({
 
         View answers "what can I see and from how far away"; this answers "where is everything".
         The two were one menu, and Snap to grid sitting under the grid's own visibility was the
-        seam: they share a word and nothing else. This is also where aligning and distributing
-        a selection will go, which is the reason to separate them now rather than when there are
-        six more items to move.
+        seam: they share a word and nothing else. "Arrange" rather than "Layout" because a
+        layout is the thing you end up with and arranging is what these do, and because it is
+        the word an aligning and distributing pair will want above them.
       */}
       <MenubarMenu>
-        <MenubarTrigger>Layout</MenubarTrigger>
+        <MenubarTrigger>Arrange</MenubarTrigger>
         <MenubarContent>
           {/* The arrangement itself: the author's own positions, or the engine's. Flattened
               rather than kept behind a submenu, since it is the first thing this menu is
@@ -269,9 +301,9 @@ export function ViewerMenubar({
             </MenubarRadioItem>
           </MenubarRadioGroup>
           <MenubarSeparator />
-          {/* Off by default: a machine arrives with the positions its author chose, and quietly
-              moving every state the first time one is nudged would be a change nobody asked
-              for. */}
+          {/* Off by default: an automaton arrives with the positions its author chose, and
+              quietly moving every state the first time one is nudged would be a change nobody
+              asked for. */}
           <MenubarCheckboxItem
             checked={snapToGrid}
             disabled={!ready}
@@ -279,33 +311,6 @@ export function ViewerMenubar({
           >
             Snap to grid
           </MenubarCheckboxItem>
-        </MenubarContent>
-      </MenubarMenu>
-
-      <MenubarMenu>
-        <MenubarTrigger>Machine</MenubarTrigger>
-        <MenubarContent>
-          {/* What the machine is, and what leaves the viewer as a picture of it. Where its
-              states sit is Layout's, above. "Machine" rather than "Automata" because the code
-              and the text representation already call it that, and because it is one machine. */}
-          {/* Format icons, matching File > Export, so the same format carries the same icon
-              wherever it appears. Two identical Copy icons would say only "these are both
-              copies", which the labels already say. */}
-          <MenubarItem disabled={!ready} onSelect={() => run('copyPNG')}>
-            <FileImage aria-hidden="true" />
-            Copy as PNG
-          </MenubarItem>
-          {/* Pastes as vector art, so it stays sharp in a slide or a printed handout, where
-              the PNG above does not. */}
-          <MenubarItem disabled={!ready} onSelect={() => run('copySVG')}>
-            <FileCode2 aria-hidden="true" />
-            Copy as SVG
-          </MenubarItem>
-          <MenubarSeparator />
-          <MenubarItem disabled={!ready} onSelect={() => setResetOpen(true)}>
-            <RotateCcw aria-hidden="true" />
-            Reset machine
-          </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
 
@@ -327,7 +332,7 @@ export function ViewerMenubar({
         <Dialog open={propertiesOpen} onOpenChange={setPropertiesOpen}>
           <DialogContent className="max-h-[80vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Properties</DialogTitle>
+              <DialogTitle>File properties</DialogTitle>
               <DialogDescription>Where this file came from.</DialogDescription>
             </DialogHeader>
             <dl className="grid grid-cols-[minmax(0,max-content)_minmax(0,1fr)] gap-x-6 gap-y-2 text-sm">
@@ -343,13 +348,15 @@ export function ViewerMenubar({
       ) : null}
 
       {/* Confirmed rather than immediate: a reader can spend a while pulling a crowded
-          machine apart, and there is no undo once the history has gone with it. */}
+          automaton apart, and there is no undo once the history has gone with it. */}
       <ConfirmDialog
         open={resetOpen}
-        title="Reset this machine?"
-        description="The states go back where the file has them, and the layout, the zoom and the undo history for this machine are forgotten. The other open files are not affected, and the submitted file is not changed."
-        confirmText="Reset machine"
+        title="Reset this automaton?"
+        description="The states go back where the file has them, and the arrangement, the zoom and the undo history for this automaton are forgotten. The other open files are not affected, and the submitted file is not changed."
+        confirmText="Reset automaton"
         onConfirm={() => {
+          // The action keeps its own name. What it does has not changed; what it is called on
+          // screen has.
           run('resetMachine');
           setResetOpen(false);
         }}

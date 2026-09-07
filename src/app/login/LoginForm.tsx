@@ -250,6 +250,8 @@ export default function LoginForm({
    * Only ever called after a successful sign-in. A refused credential, a captcha challenge, a
    * rate-limit block or a failed field validation all return before reaching it.
    */
+  const exitTimer = useRef<number | null>(null);
+
   const finishSignIn = useCallback(() => {
     if (reduceMotion) {
       window.location.href = callbackUrl;
@@ -267,10 +269,21 @@ export default function LoginForm({
     setExitOrigin({ x, y, size });
     setLoginComplete(true);
     markLoginTransition();
-    window.setTimeout(() => {
+    exitTimer.current = window.setTimeout(() => {
+      exitTimer.current = null;
       window.location.href = callbackUrl;
     }, LOGIN_EXIT_MS);
   }, [callbackUrl, mode, reduceMotion]);
+
+  // Kept so the navigation can be called off. Nothing on this page cancels a sign-in, but a
+  // form that has been taken off the screen must not steer the browser a third of a second
+  // later: in the app that is a page already leaving, and anywhere else it is a surprise.
+  useEffect(
+    () => () => {
+      if (exitTimer.current !== null) window.clearTimeout(exitTimer.current);
+    },
+    [],
+  );
 
   // Basic credential flow with minimal client-side validation before delegating to NextAuth.
   const handleLogin = async (e: React.FormEvent) => {

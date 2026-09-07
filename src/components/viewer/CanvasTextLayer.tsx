@@ -226,7 +226,14 @@ function TextBoxItem({
     <div
       // touch-none: without it a finger drag scrolls the page and cancels the gesture, and
       // faculty are testing this on tablets.
-      className="pointer-events-auto absolute touch-none"
+      className={cn(
+        'pointer-events-auto absolute touch-none rounded-sm',
+        // A surface of its own, the same one the palette and the inspector float on, so a note
+        // reads as something laid over the machine rather than as stray labels among the state
+        // names. The shadow is what lifts it off the grid; without one the fill just looks like
+        // a hole cut in the drawing.
+        'bg-card shadow-[0_2px_10px_rgba(15,23,42,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.4)]',
+      )}
       style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
       data-testid={`viewer-text-box-${box.id}`}
     >
@@ -270,12 +277,15 @@ function TextBoxItem({
             }
           }}
           className={cn(
-            'text-foreground block h-full w-full cursor-move overflow-hidden rounded-sm p-1 text-left text-[14px] leading-snug break-words whitespace-pre-wrap',
+            // Flex rather than block: a button centres its content vertically whatever its
+            // display is, so a one-line note in a tall box floated in the middle of it while
+            // the same words sat at the top the moment it was opened for editing.
+            'text-foreground flex h-full w-full cursor-move items-start justify-start overflow-hidden rounded-sm p-1 text-left text-[14px] leading-snug break-words whitespace-pre-wrap',
             'focus-visible:outline-none',
           )}
           style={selected ? { boxShadow: `0 0 0 ${px(1)} var(--primary)` } : undefined}
         >
-          {box.text}
+          <span className="w-full">{box.text}</span>
         </button>
       )}
 

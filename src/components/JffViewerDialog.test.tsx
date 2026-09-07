@@ -989,6 +989,33 @@ describe('clicking a state', () => {
     );
   });
 
+  /**
+   * Moving from "look at this" to "make one of these" has to be plain on the canvas. A state
+   * left highlighted from a moment ago is the one thing that could be mistaken for the state a
+   * line is about to start from.
+   */
+  it('puts down whatever was open when Transition is chosen', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transition' }));
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+  });
+
+  it('leaves the selection alone when Select is chosen, which is how you go back to it', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select' }));
+
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+  });
+
   it('leaves the tool alone when Escape is pressed in a box being typed in', async () => {
     // Escape in the inspector's name box closes the panel, and in a comment it puts the caret
     // down. Taking the tool away as well would be two answers to one key.

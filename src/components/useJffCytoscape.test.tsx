@@ -2614,16 +2614,19 @@ describe('drawing a transition on the canvas', () => {
   const at = (id: string) => lastCy().byId(id)!.position();
   const canvas = () => screen.getByTestId('canvas');
 
-  const drag = (fromId: string, to: { x: number; y: number }, end: 'up' | 'cancel' = 'up') => {
-    const start = at(fromId);
-    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
-    fireEvent.pointerMove(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
-    if (end === 'cancel') {
-      fireEvent.pointerCancel(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
-      return;
-    }
-    fireEvent.pointerUp(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
+  /** A click on the canvas at a point in the graph's own coordinates. No button held. */
+  const clickAt = (to: { x: number; y: number }) =>
+    fireEvent.pointerDown(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
+  const hoverAt = (to: { x: number; y: number }) =>
+    fireEvent.pointerMove(canvas(), { clientX: to.x, clientY: to.y, pointerId: 1 });
+  const nowhere = { x: 5000, y: 5000 };
+
+  /** The whole two-click gesture: one state, then another. */
+  const link = (fromId: string, to: { x: number; y: number }) => {
+    clickAt(at(fromId));
+    clickAt(to);
   };
+  const classesOn = (id: string) => [...lastCy().byId(id)!.classes];
 
   const transitionsOf = (api: () => ReturnType<typeof useJffCytoscape>) =>
     api().parsed?.transitions.map((t) => `${t.from}->${t.to}`) ?? [];
@@ -2632,7 +2635,7 @@ describe('drawing a transition on the canvas', () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
 
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
 
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
     // Its label starts empty in every field this machine type has, which is what an empty
@@ -2648,6 +2651,95 @@ describe('drawing a transition on the canvas', () => {
   });
 
   /**
+   * Three things a state can be during this gesture, and none of them is "selected".
+   *
+   * Before a line is started the state under the pointer is where one could begin; after it is
+   * started the state under the pointer is where it could end, and the state it came from stays
+   * dressed as its source until the line is finished or given up.
+   */
+  it('says what a click on the state under the pointer would do', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => hoverAt(at('0')));
+    expect(classesOn('0')).toContain('link-candidate');
+    expect(classesOn('0')).not.toContain('highlighted');
+
+    // Off the state again, and the invitation goes with it.
+    act(() => hoverAt(nowhere));
+    expect(classesOn('0')).not.toContain('link-candidate');
+
+    act(() => clickAt(at('0')));
+    expect(classesOn('0')).toContain('link-source');
+    // Nothing was made and nothing was opened: the first click only says where to start.
+    expect(api().canUndo).toBe(false);
+    expect(api().selectedState).toBeNull();
+    expect(api().viewModified).toBe(false);
+
+    act(() => hoverAt(at('1')));
+    expect(classesOn('1')).toContain('link-target');
+    expect(classesOn('1')).not.toContain('link-candidate');
+    // And the source is still plainly the source.
+    expect(classesOn('0')).toContain('link-source');
+  });
+
+  it('draws a line from the source to the pointer, with no button held', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+
+    act(() => clickAt(at('0')));
+
+    const preview = lastCy().edgeList.find((e) => e.hasClass('preview'));
+    expect(preview?.data('source')).toBe('0');
+
+    act(() => hoverAt({ x: 640, y: 480 }));
+
+    expect(lastCy().byId('__afct-link-preview')?.position()).toEqual({ x: 640, y: 480 });
+    // And it is nobody's transition: the machine has not changed.
+    expect(api().parsed?.transitions.some((t) => t.from === '0' && t.to === undefined)).toBe(false);
+  });
+
+  it('does nothing when the canvas is clicked with no line started', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => clickAt(nowhere));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('gives the line up when the canvas is clicked, and stays in the tool', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => clickAt(at('0')));
+
+    act(() => clickAt(nowhere));
+
+    expect(classesOn('0')).not.toContain('link-source');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(api().canUndo).toBe(false);
+    // Still listening: the next two clicks draw a line.
+    act(() => link('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+  });
+
+  it('takes its own clothes off the states when the line is finished', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => link('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    expect(classesOn('1')).not.toContain('link-source');
+    expect(classesOn('0')).not.toContain('link-target');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+  });
+
+  /**
    * A label that has not been placed is drawn along the middle of its own line, which is what a
    * newly drawn transition looked like: an epsilon sitting on the arrow it belonged to.
    */
@@ -2655,7 +2747,7 @@ describe('drawing a transition on the canvas', () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
 
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
 
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
     const line = lastCy().edgeList.find(
@@ -2668,7 +2760,12 @@ describe('drawing a transition on the canvas', () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
 
-    act(() => drag('0', at('0')));
+    // Away and back again: the state a line starts from is a valid state to finish it on.
+    act(() => {
+      clickAt(at('0'));
+      hoverAt(nowhere);
+      clickAt(at('0'));
+    });
 
     await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
   });
@@ -2678,23 +2775,33 @@ describe('drawing a transition on the canvas', () => {
     await waitFor(() => expect(api().phase).toBe('ready'));
     const before = api().parsed?.transitions.length;
 
-    act(() => drag('0', { x: 5000, y: 5000 }));
+    act(() => link('0', nowhere));
 
     expect(api().parsed?.transitions.length).toBe(before);
-    // Nothing to undo either: a cancelled gesture never touched the machine.
+    // Nothing to undo either: a given-up gesture never touched the machine.
     expect(api().canUndo).toBe(false);
     expect(api().viewModified).toBe(false);
   });
 
-  it('makes nothing when the gesture is cancelled', async () => {
+  it('gives the line up on the first Escape and keeps the tool', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
     const before = api().parsed?.transitions.length;
+    act(() => clickAt(at('0')));
+    expect(classesOn('0')).toContain('link-source');
 
-    act(() => drag('0', at('1'), 'cancel'));
+    // The answer is what tells the viewer whether the key was spent here or on the tool.
+    let spent = false;
+    act(() => {
+      spent = api().cancelLinkDraft();
+    });
 
+    expect(spent).toBe(true);
+    expect(classesOn('0')).not.toContain('link-source');
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
     expect(api().parsed?.transitions.length).toBe(before);
-    expect(api().canUndo).toBe(false);
+    // And with nothing half-drawn, the key is not spent here, so it goes on to the tool.
+    expect(api().cancelLinkDraft()).toBe(false);
   });
 
   /**
@@ -2704,46 +2811,42 @@ describe('drawing a transition on the canvas', () => {
    * they are what actually decides it: states are held still for as long as the tool is up, and
    * the canvas is pinned for the length of a gesture so it cannot slide away under the drag.
    */
-  it('holds the state still, and the canvas with it', async () => {
+  it('holds the states still while the tool is up', async () => {
     const { api, rerender } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
     expect(lastCy().ungrabbed).toBe(true);
 
     const before = { ...at('0') };
-    const start = at('0');
-    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
-    expect(lastCy().panningByUser).toBe(false);
-    fireEvent.pointerUp(window, { clientX: start.x, clientY: start.y, pointerId: 1 });
+    act(() => link('0', at('1')));
 
     expect(lastCy().byId('0')!.position()).toEqual(before);
-    // Both back the moment the gesture ends, and the tool goes.
-    expect(lastCy().panningByUser).toBe(true);
+    // Grabbable again the moment the tool goes, so Select still drags states about.
     act(() => rerender({ onStateLink: null }));
     expect(lastCy().ungrabbed).toBe(false);
   });
 
-  it('takes the half-drawn line off the canvas when the tool goes away', async () => {
+  it('takes the half-drawn line off the canvas when the tool changes', async () => {
     const { api, rerender } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
-    const start = at('0');
-    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
-    fireEvent.pointerMove(window, { clientX: 400, clientY: 400, pointerId: 1 });
+    act(() => clickAt(at('0')));
+    act(() => hoverAt(nowhere));
     expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(true);
 
-    // Escape, or another tool: both arrive here as the handler going away.
     act(() => rerender({ onStateLink: null }));
 
     expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
     expect(lastCy().nodeList.some((n) => n.hasClass('preview'))).toBe(false);
-    // And letting go afterwards makes nothing.
-    fireEvent.pointerUp(window, { clientX: 400, clientY: 400, pointerId: 1 });
-    expect(transitionsOf(api).filter((t) => t === '0->0')).toHaveLength(0);
+    expect(classesOn('0')).not.toContain('link-source');
+    // And clicking two states afterwards makes nothing, because nothing is listening.
+    const before = api().parsed?.transitions.length;
+    act(() => link('1', at('0')));
+    expect(api().parsed?.transitions.length).toBe(before);
   });
 
   it('is one undo step, and redo puts it back', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
 
     act(() => api().undo());
@@ -2764,7 +2867,7 @@ describe('drawing a transition on the canvas', () => {
       );
     expect(linesBetween()).toHaveLength(1);
 
-    act(() => drag('0', at('1')));
+    act(() => link('0', at('1')));
 
     await waitFor(() => expect(transitionsOf(api).filter((t) => t === '0->1')).toHaveLength(2));
     // One line, two labels on it: the same way the file's own parallel transitions are drawn.
@@ -2774,7 +2877,7 @@ describe('drawing a transition on the canvas', () => {
   it('is a transition like any other: named, deleted, and undeleted', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
     await waitFor(() => expect(api().selectedTransition?.from).toBe('q1'));
     const idx = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
 
@@ -2793,7 +2896,7 @@ describe('drawing a transition on the canvas', () => {
   it('goes when a state it touches is deleted, and comes back with it', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
 
     act(() => api().removeState('0'));
@@ -2808,12 +2911,15 @@ describe('drawing a transition on the canvas', () => {
   it('cannot be drawn twice under the same name, even after an undo', async () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
     const first = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
 
     act(() => api().undo());
-    act(() => drag('0', at('0')));
+    act(() => {
+      clickAt(at('0'));
+      clickAt(at('0'));
+    });
 
     await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
     const second = api().parsed!.transitions.find((t) => t.from === '0' && t.to === '0')!.__idx;
@@ -2828,7 +2934,7 @@ describe('drawing a transition on the canvas', () => {
     const { api } = withTransitionTool({ viewStateKey: KEY });
     await waitFor(() => expect(api().phase).toBe('ready'));
 
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
 
     await waitFor(() =>
       expect(
@@ -2844,7 +2950,7 @@ describe('drawing a transition on the canvas', () => {
     const { api } = withTransitionTool();
     await waitFor(() => expect(api().phase).toBe('ready'));
 
-    act(() => drag('1', at('0')));
+    act(() => link('1', at('0')));
 
     await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
     // What "Download this arrangement" writes out is this machine, so a drawn line reaches the

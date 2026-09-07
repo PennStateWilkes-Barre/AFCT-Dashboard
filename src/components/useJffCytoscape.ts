@@ -261,6 +261,13 @@ export type UseJffCytoscapeOptions = {
    */
   onStateLink?: ((sourceId: string, targetId: string) => void) | null;
   /**
+   * A state has just been chosen as the start of a line, and nothing has been made yet.
+   *
+   * Everything open goes: choosing where a line starts is not inspecting anything, and the
+   * viewer is what holds the selection and the panel that follows it.
+   */
+  onLinkAnchor?: (() => void) | null;
+  /**
    * Whether the reader may change the machine at all.
    *
    * Enforced here rather than only by hiding the buttons that call these. A viewer that is
@@ -432,18 +439,21 @@ function freeTransitionIndex(
 }
 
 /**
- * The two classes worn by elements that are on the canvas but not on the machine.
+ * The clothes worn by elements that are on the canvas but not on the machine.
  *
- * `preview` is the line being dragged out of a state before it is a transition; `link-target`
- * is the state under the pointer while that is happening. Everything that walks the graph
- * skips the first the way it already skips `start` and `note`: they are not states or
+ * `preview` is the line being drawn out of a state before it is a transition. The other three
+ * are the three things a state can be during that: the one a click would start from, the one a
+ * line is being drawn from, and the one a click would join to. Everything that walks the graph
+ * skips a `preview` element the way it already skips `start` and `note`: they are not states or
  * transitions, they belong to a gesture, and they are gone the moment it ends.
  *
- * Deliberately not the highlight a selected element wears. A state about to be linked to and a
- * state whose properties are open are two different things, and one appearance for both would
- * leave the reader unable to tell which.
+ * Deliberately none of them is the highlight a selected element wears. A state a line starts
+ * from and a state whose properties are open are different things with different consequences,
+ * and one appearance for both would leave the reader unable to tell which they were looking at.
  */
 const PREVIEW_CLASS = 'preview';
+const CANDIDATE_CLASS = 'link-candidate';
+const LINK_SOURCE_CLASS = 'link-source';
 const LINK_TARGET_CLASS = 'link-target';
 const PREVIEW_NODE_ID = '__afct-link-preview';
 const PREVIEW_EDGE_ID = '__afct-link-preview-edge';
@@ -912,6 +922,7 @@ export function useJffCytoscape({
   honorPositionsDefault = false,
   onBackgroundClick = null,
   onStateLink = null,
+  onLinkAnchor = null,
   graphOverlayRef = null,
   canEditMachine = true,
   viewStateKey = null,
@@ -1126,6 +1137,16 @@ export function useJffCytoscape({
   graphOverlayRefRef.current = graphOverlayRef;
   const onStateLinkRef = useRef(onStateLink);
   onStateLinkRef.current = onStateLink;
+  const onLinkAnchorRef = useRef(onLinkAnchor);
+  onLinkAnchorRef.current = onLinkAnchor;
+  /**
+   * Put down a half-drawn line, and say whether there was one.
+   *
+   * A ref because the gesture's own state lives inside the effect that handles it, and this is
+   * how the outside asks for it: Escape wants to cancel a draft if there is one and otherwise
+   * to leave the tool, which is two answers to one key and needs to know which it is.
+   */
+  const cancelLinkDraftRef = useRef<() => boolean>(() => false);
   const initialZoomRef = useRef(initialZoom);
   initialZoomRef.current = initialZoom;
   const honorPositionsRef = useRef(honorPositions);
@@ -1648,24 +1669,24 @@ export function useJffCytoscape({
   );
 
   /**
-   * Dragging a line out of one state and onto another.
+   * Drawing a line from one state to another, a click at a time.
    *
-   * The draft: which state it started on, and which one the pointer is over now. Held in a ref
-   * rather than in state because it changes on every pointer move and nothing outside this
-   * gesture needs a render for it. It is not the tool, and there is no tool value for "halfway
-   * through drawing a transition": the viewer's tool stays what it was for the whole gesture,
-   * and this is what the gesture has got to. Nothing here touches the machine until the pointer
-   * comes up on a state, so a cancelled drag leaves no history step and nothing to undo.
+   * Two clicks rather than a drag: press the source, press the target. A drag is hard work on a
+   * touchpad, worse on a tablet, and impossible to correct halfway through; two clicks can be
+   * thought about between them, and the second one can be somewhere else entirely or nowhere at
+   * all. Hovering is decoration on top of it, for the devices that have a pointer.
    *
-   * DOM pointer events rather than cytoscape's own, for two reasons. Pointer events cover a
-   * finger and a stylus with the same code, which matters because this is used on tablets. And
-   * pointerdown fires before the mouse event cytoscape acts on, which is what lets the state be
-   * held still: panning is switched off for the length of the gesture before cytoscape has
-   * decided whether to pan, and dragging states is off for as long as the mode is on.
+   * The draft is which state the line starts from, and nothing else. It is held in a ref, not
+   * in state: it changes on every pointer move and none of it is worth a render. It is also not
+   * the selection. The state a line is being drawn from is not a state whose properties are
+   * open, and the two wear different clothes on the canvas so they cannot be confused.
+   *
+   * Nothing here touches the machine until the second click lands on a state, so an abandoned
+   * draft leaves no history step, nothing to undo and no "File changed".
    */
-  const linkDraft = useRef<{ sourceId: string; pointerId: number; targetId: string | null } | null>(
-    null,
-  );
+  const linkDraft = useRef<{ sourceId: string } | null>(null);
+  /** The state under the pointer, whichever half of the gesture it belongs to. */
+  const linkHover = useRef<string | null>(null);
 
   /** The lowest index a drawn transition may take next. See `addTransition`. */
   const nextTransitionIndex = useRef(0);
@@ -1688,102 +1709,124 @@ export function useJffCytoscape({
       };
     };
 
-    /** Which state the pointer is over, dressed as the one about to be linked to. */
-    const markTarget = (cy: any, node: any) => {
-      const draft = linkDraft.current;
-      if (!draft) return;
+    /**
+     * Dress the state under the pointer as what a click on it would do.
+     *
+     * Before a source is chosen that is "start here"; after one it is "join to here", including
+     * on the source itself, which is how a self-loop is drawn. The two look different, and both
+     * look different from a selected state, because they are three different things.
+     */
+    const setHover = (cy: any, node: any) => {
       const id = node?.id?.() ?? null;
-      if (id === draft.targetId) return;
-      if (draft.targetId) cy.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
-      if (node) node.addClass?.(LINK_TARGET_CLASS);
-      draft.targetId = id;
+      if (id === linkHover.current) return;
+      if (linkHover.current) {
+        cy.getElementById(linkHover.current)
+          ?.removeClass?.(CANDIDATE_CLASS)
+          ?.removeClass?.(LINK_TARGET_CLASS);
+      }
+      linkHover.current = id;
+      if (node) node.addClass?.(linkDraft.current ? LINK_TARGET_CLASS : CANDIDATE_CLASS);
+      // A crosshair over the canvas, a finger over a state: cytoscape draws states on a canvas,
+      // so there is nothing to put a CSS cursor on but the container.
+      container.style.cursor = node ? 'pointer' : 'crosshair';
     };
 
-    /** Take the gesture off the canvas: the line being dragged, and the target's ring. */
+    /** Take a half-drawn line off the canvas: the preview, the source, and the hover. */
     const clearDraft = (cy: any) => {
       const draft = linkDraft.current;
       linkDraft.current = null;
+      const hovered = linkHover.current;
+      linkHover.current = null;
       if (!cy) return;
       try {
-        if (draft?.targetId) cy.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
+        if (draft?.sourceId) cy.getElementById(draft.sourceId)?.removeClass?.(LINK_SOURCE_CLASS);
+        if (hovered) {
+          cy.getElementById(hovered)?.removeClass?.(CANDIDATE_CLASS)?.removeClass?.(
+            LINK_TARGET_CLASS,
+          );
+        }
         cy.getElementById(PREVIEW_EDGE_ID)?.remove?.();
         cy.getElementById(PREVIEW_NODE_ID)?.remove?.();
-        cy.userPanningEnabled?.(true);
       } catch {
         // A graph mid-teardown. There is nothing left to take off it.
       }
     };
+    cancelLinkDraftRef.current = () => {
+      const had = linkDraft.current !== null;
+      if (had) clearDraft(cyRef.current);
+      return had;
+    };
 
     const onPointerDown = (event: PointerEvent) => {
-      if (!onStateLinkRef.current || linkDraft.current) return;
+      if (!onStateLinkRef.current) return;
       const cy = cyRef.current;
       if (!cy) return;
       const at = modelPoint(event);
       if (!at) return;
-      const source = stateAtPoint(cy, at);
-      // Empty canvas is not a source. The click goes on to mean whatever the tool says, which
-      // is how the panel still closes and how a state is still drawn.
-      if (!source) return;
+      const node = stateAtPoint(cy, at);
+      const draft = linkDraft.current;
 
-      try {
-        // For the length of the gesture only, so panning is back the moment it ends. Set before
-        // cytoscape sees the mouse event this pointer event precedes, which is what stops the
-        // canvas sliding away under a drag that was meant to draw a line.
-        cy.userPanningEnabled?.(false);
-        linkDraft.current = { sourceId: source.id(), pointerId: event.pointerId, targetId: null };
-        container.setPointerCapture?.(event.pointerId);
-        cy.add({ group: 'nodes', data: { id: PREVIEW_NODE_ID }, position: at, classes: PREVIEW_CLASS });
-        cy.add({
-          group: 'edges',
-          data: { id: PREVIEW_EDGE_ID, source: source.id(), target: PREVIEW_NODE_ID },
-          classes: PREVIEW_CLASS,
-        });
-        markTarget(cy, source);
-      } catch {
-        clearDraft(cy);
+      if (!draft) {
+        // Empty canvas with nothing started means nothing: the tool is waiting for a state.
+        if (!node) return;
+        try {
+          linkDraft.current = { sourceId: node.id() };
+          node.addClass?.(LINK_SOURCE_CLASS);
+          // The hover was "start here" and is now "join to here", including on this state.
+          linkHover.current = null;
+          setHover(cy, node);
+          cy.add({
+            group: 'nodes',
+            data: { id: PREVIEW_NODE_ID },
+            position: at,
+            classes: PREVIEW_CLASS,
+          });
+          cy.add({
+            group: 'edges',
+            data: { id: PREVIEW_EDGE_ID, source: node.id(), target: PREVIEW_NODE_ID },
+            classes: PREVIEW_CLASS,
+          });
+        } catch {
+          clearDraft(cy);
+          return;
+        }
+        // Whatever was open goes: choosing where a line starts is not inspecting anything, and
+        // leaving the last transition selected under a half-drawn one is three highlights at
+        // once with three meanings.
+        onLinkAnchorRef.current?.();
+        return;
       }
+
+      const sourceId = draft.sourceId;
+      const targetId = node?.id?.() ?? null;
+      // Everything the gesture put on the canvas comes off BEFORE anything is made: what
+      // follows redraws the graph and takes a snapshot of it, and neither should ever see it.
+      clearDraft(cy);
+      setHover(cy, node);
+      // Empty canvas is how somebody changes their mind without leaving the tool.
+      if (targetId) onStateLinkRef.current?.(sourceId, targetId);
     };
 
     const onPointerMove = (event: PointerEvent) => {
-      const draft = linkDraft.current;
-      if (!draft || event.pointerId !== draft.pointerId) return;
+      if (!onStateLinkRef.current) return;
       const cy = cyRef.current;
       const at = modelPoint(event);
       if (!cy || !at) return;
       try {
-        cy.getElementById(PREVIEW_NODE_ID)?.position?.(at);
-        markTarget(cy, stateAtPoint(cy, at));
+        setHover(cy, stateAtPoint(cy, at));
+        // The far end of the line, which follows the pointer with no button held.
+        if (linkDraft.current) cy.getElementById(PREVIEW_NODE_ID)?.position?.(at);
       } catch {
         clearDraft(cy);
       }
     };
 
-    const onPointerUp = (event: PointerEvent) => {
-      const draft = linkDraft.current;
-      if (!draft || event.pointerId !== draft.pointerId) return;
-      const cy = cyRef.current;
-      const at = modelPoint(event);
-      const target = cy && at ? stateAtPoint(cy, at) : null;
-      const sourceId = draft.sourceId;
-      const targetId = target?.id?.() ?? null;
-      // The preview and the ring come off BEFORE anything is created: what follows redraws the
-      // graph and takes a snapshot of it, and neither should ever see a gesture's elements.
-      clearDraft(cy);
-      // Released over nothing is a cancelled drag, which is how somebody changes their mind.
-      if (targetId) onStateLinkRef.current?.(sourceId, targetId);
-    };
-
-    const onPointerCancel = () => clearDraft(cyRef.current);
-
     container.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
-    window.addEventListener('pointercancel', onPointerCancel);
+    container.addEventListener('pointermove', onPointerMove);
     return () => {
       container.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
-      window.removeEventListener('pointercancel', onPointerCancel);
+      container.removeEventListener('pointermove', onPointerMove);
+      cancelLinkDraftRef.current = () => false;
       clearDraft(cyRef.current);
     };
   }, []);
@@ -1791,9 +1834,9 @@ export function useJffCytoscape({
   /**
    * Turn the mode on and off on the graph itself.
    *
-   * Dragging a state must not move it while a drag means something else, and a half-finished
-   * gesture must not survive the reader changing their mind: switching tools, pressing Escape
-   * and losing the capability all arrive here as the handler going away.
+   * Dragging a state must not move it while a click on it means something else, and a
+   * half-drawn line must not survive the reader changing their mind: switching tools, pressing
+   * Escape twice and losing the capability all arrive here as the handler going away.
    */
   useEffect(() => {
     const cy = cyRef.current;
@@ -1806,18 +1849,7 @@ export function useJffCytoscape({
     }
     // A crosshair, not a hand: this draws a line from here, it does not pick the state up.
     if (container) container.style.cursor = linking ? 'crosshair' : '';
-    if (!linking && linkDraft.current) {
-      const draft = linkDraft.current;
-      linkDraft.current = null;
-      try {
-        if (draft.targetId) cy?.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
-        cy?.getElementById(PREVIEW_EDGE_ID)?.remove?.();
-        cy?.getElementById(PREVIEW_NODE_ID)?.remove?.();
-        cy?.userPanningEnabled?.(true);
-      } catch {
-        // Nothing left to take off.
-      }
-    }
+    if (!linking) cancelLinkDraftRef.current();
   }, [onStateLink, phase]);
 
   /**
@@ -2222,15 +2254,41 @@ export function useJffCytoscape({
                 events: 'no',
               },
             },
-            // The state the line would land on. A ring outside the circle rather than the
-            // selection colour on the circle itself, so "about to be joined to this" and
-            // "looking at this one's properties" never look the same.
+            // The three states of drawing a line, told apart by how much ring there is and, for
+            // the anchored source, by a dashed border as well, so they do not rest on an amount
+            // of colour alone. All three are rings around the circle rather than colour on it,
+            // which is what keeps them out of the way of the selection highlight.
+            //
+            // "Click here to start a line", under the pointer with nothing begun.
+            {
+              selector: `node.${CANDIDATE_CLASS}`,
+              style: {
+                'overlay-color': HIGHLIGHT_COLOR,
+                'overlay-opacity': 0.1,
+                'overlay-padding': 4,
+              },
+            },
+            // The state a line is being drawn from. It stays dressed like this until the line
+            // is finished or given up, so there is never a doubt about where it starts.
+            {
+              selector: `node.${LINK_SOURCE_CLASS}`,
+              style: {
+                'overlay-color': HIGHLIGHT_COLOR,
+                'overlay-opacity': 0.2,
+                'overlay-padding': 4,
+                'border-color': HIGHLIGHT_COLOR,
+                'border-style': 'dashed',
+              },
+            },
+            // "Click here to finish it". Last, so a source hovered as its own target reads as
+            // the invitation to close the loop, while keeping the dashed border that says it
+            // is also where the line began.
             {
               selector: `node.${LINK_TARGET_CLASS}`,
               style: {
                 'overlay-color': HIGHLIGHT_COLOR,
-                'overlay-opacity': 0.18,
-                'overlay-padding': 6,
+                'overlay-opacity': 0.2,
+                'overlay-padding': 10,
               },
             },
           ],
@@ -3193,6 +3251,13 @@ export function useJffCytoscape({
     },
     addState,
     addTransition,
+    /**
+     * Put down a half-drawn line, and say whether there was one to put down.
+     *
+     * So Escape can mean two things in order: give up this line, and then leave the tool. The
+     * answer is what tells the caller which of the two it just did.
+     */
+    cancelLinkDraft: () => cancelLinkDraftRef.current(),
     /**
      * Make a state final, or stop it being one.
      *

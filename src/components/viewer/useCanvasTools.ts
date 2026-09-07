@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { availableCanvasTools, DEFAULT_CANVAS_TOOL, type CanvasTool } from './CanvasToolPalette';
 import type { ViewerCapabilities } from './viewer-capabilities';
@@ -18,7 +18,17 @@ import type { ViewerCapabilities } from './viewer-capabilities';
  * first click, spent on the second, dropped by Escape. It does not belong in the union and it
  * does not belong in useJffCytoscape, which knows only that a graph coordinate was clicked.
  */
-export function useCanvasTools(capabilities: ViewerCapabilities) {
+export function useCanvasTools(
+  capabilities: ViewerCapabilities,
+  /**
+   * Something for Escape to do before it takes the tool away, if there is anything.
+   *
+   * Returning true means the key was spent on it and the tool stays. That is what makes Escape
+   * two-level for a tool that has a gesture in progress: the first press gives up the half-drawn
+   * thing, the second leaves the tool. Anything with a draft of its own can use it.
+   */
+  onEscape?: () => boolean,
+) {
   const [requested, setRequested] = useState<CanvasTool>(DEFAULT_CANVAS_TOOL);
 
   const tools = useMemo(() => availableCanvasTools(capabilities), [capabilities]);
@@ -54,12 +64,17 @@ export function useCanvasTools(capabilities: ViewerCapabilities) {
    * well would be two answers to one key. A comment editor stops the event before it reaches
    * here, and this checks the target as well for everything that does not.
    */
+  const escapeRef = useRef(onEscape);
+  escapeRef.current = onEscape;
   useEffect(() => {
     if (activeTool === DEFAULT_CANVAS_TOOL) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target;
       if (target instanceof HTMLElement && target.closest('input, textarea, select')) return;
+      // Half-finished work first, the tool second. Somebody who drew a line to the wrong state
+      // wants that line gone, not the tool they are still using.
+      if (escapeRef.current?.()) return;
       resetTool();
     };
     window.addEventListener('keydown', onKeyDown);

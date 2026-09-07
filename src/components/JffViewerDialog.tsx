@@ -1038,7 +1038,15 @@ export function JffCytoscapeViewer({
     () => resolveViewerCapabilities(capabilityOverrides),
     [capabilityOverrides],
   );
-  const { activeTool, tools, selectTool } = useCanvasTools(capabilities);
+  /**
+   * Give up a half-drawn transition, if there is one.
+   *
+   * Through a ref because the graph is what holds the draft and this is handed to the tool hook
+   * above it. Returning true means Escape was spent on the line rather than on the tool.
+   */
+  const cancelLinkDraftRef = useRef<() => boolean>(() => false);
+  const onToolEscape = useCallback(() => cancelLinkDraftRef.current(), []);
+  const { activeTool, tools, selectTool } = useCanvasTools(capabilities, onToolEscape);
   /**
    * The click handler itself, filled in below once the hook has handed back what it needs.
    *
@@ -1079,6 +1087,15 @@ export function JffCytoscapeViewer({
   // Only with the Transition tool up. Null is what puts state dragging back.
   const onStateLink = activeTool === 'transition' ? onStateLinkStable : null;
   /**
+   * A line has been started from a state, so nothing else should look chosen.
+   *
+   * Three highlights with three meanings at once is how a reader stops being able to tell which
+   * state a line is coming from. The transition just made, the state whose properties are open
+   * and a selected comment all go the moment the next line begins.
+   */
+  const clearForDraftRef = useRef<() => void>(() => {});
+  const onLinkAnchor = useCallback(() => clearForDraftRef.current(), []);
+  /**
    * What the reader has asked to delete, held until they say yes.
    *
    * The element itself rather than a boolean, so the dialog can name what is about to go: "the
@@ -1118,6 +1135,7 @@ export function JffCytoscapeViewer({
     selectTransition,
     addState,
     addTransition,
+    cancelLinkDraft,
     removeState,
     removeTransitions,
     selectedStatePosition,
@@ -1146,6 +1164,7 @@ export function JffCytoscapeViewer({
     honorPositionsDefault,
     onBackgroundClick,
     onStateLink,
+    onLinkAnchor,
     graphOverlayRef: textOverlayRef,
     canEditMachine: capabilities.editMachine,
     initialZoom,
@@ -1174,6 +1193,19 @@ export function JffCytoscapeViewer({
     },
     [selectTextBoxRaw],
   );
+  /**
+   * Choosing Transition puts everything else down.
+   *
+   * Moving from "look at this" to "make one of these" should be plain on the canvas, and a
+   * state left highlighted from a moment ago is the one thing that could be mistaken for the
+   * state a line is about to start from. Only this tool: choosing Select is how somebody goes
+   * back to what they had, so it leaves the selection alone.
+   */
+  useEffect(() => {
+    if (activeTool !== 'transition') return;
+    clearForDraftRef.current();
+  }, [activeTool]);
+
   const machineSelectionKey = selectedState
     ? `state:${selectedState.id}`
     : selectedTransition
@@ -1186,6 +1218,11 @@ export function JffCytoscapeViewer({
   const textApi = { ...textBoxes, select: selectTextBox };
 
   stateLinkRef.current = addTransition;
+  cancelLinkDraftRef.current = cancelLinkDraft;
+  clearForDraftRef.current = () => {
+    clearSelectedState();
+    selectTextBoxRaw(null);
+  };
 
   backgroundClickRef.current = (at) => {
     if (activeTool === 'state') {

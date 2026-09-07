@@ -198,6 +198,68 @@ describe('the View menu', () => {
   });
 });
 
+/**
+ * Which menu owns what.
+ *
+ * View answers "what can I see, and from how far away". Layout answers "where is everything".
+ * They were one menu, and Snap to grid sitting under the grid's own visibility was the seam:
+ * the two share a word and nothing else. The split is here so that aligning and distributing a
+ * selection have somewhere to go that is not the toolbar.
+ */
+describe('View and Layout own different things', () => {
+  const openMenu = (user: ReturnType<typeof userEvent.setup>, name: string) =>
+    user.click(screen.getByRole('menuitem', { name }));
+
+  const mount = () =>
+    render(
+      <ViewerActionsProvider>
+        <FakeViewer />
+        <ViewerMenubar downloadHref="/x?download=1" />
+      </ViewerActionsProvider>,
+    );
+
+  it('keeps looking at the machine under View', async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await openMenu(user, 'View');
+
+    // The camera, and what is drawn on top of it.
+    expect(await screen.findByRole('menuitem', { name: /fit to window/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /center in window/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Grid' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: 'JFLAP Notes' })).toBeInTheDocument();
+    // Not the arrangement.
+    expect(screen.queryByRole('menuitemcheckbox', { name: /snap to grid/i })).toBeNull();
+    expect(screen.queryByRole('menuitemradio', { name: /auto-arranged/i })).toBeNull();
+  });
+
+  it('keeps where the states go under Layout', async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await openMenu(user, 'Layout');
+
+    expect(await screen.findByRole('menuitemradio', { name: /as drawn/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: /auto-arranged/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemcheckbox', { name: /snap to grid/i })).toBeInTheDocument();
+    // Not the camera, and not the grid's visibility.
+    expect(screen.queryByRole('menuitemcheckbox', { name: 'Grid' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: /fit to window/i })).toBeNull();
+  });
+
+  it('leaves the Machine menu about the machine rather than its arrangement', async () => {
+    const user = userEvent.setup();
+    mount();
+
+    await openMenu(user, 'Machine');
+
+    expect(await screen.findByRole('menuitem', { name: /copy as png/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /reset machine/i })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitemradio', { name: /as drawn/i })).toBeNull();
+  });
+});
+
 describe('copying the machine', () => {
   // Under Machine rather than Edit: what these copy is the drawing, not a selection.
   const openMachine = (user: ReturnType<typeof userEvent.setup>) =>
@@ -243,9 +305,9 @@ describe('copying the machine', () => {
   });
 });
 
-describe('Machine, the layout choice', () => {
+describe('Layout, the arrangement choice', () => {
   const openLayout = async (user: ReturnType<typeof userEvent.setup>) =>
-    user.click(screen.getByRole('menuitem', { name: 'Machine' }));
+    user.click(screen.getByRole('menuitem', { name: 'Layout' }));
 
   it('marks exactly one of the two, never both', async () => {
     // The machine is drawn one way or the other. A pair of checkboxes could show neither or
@@ -583,9 +645,10 @@ describe('Edit, Undo and Redo', () => {
   });
 });
 
-describe('View, Snap to grid', () => {
+describe('Layout, Snap to grid', () => {
+  // Under Layout, not View: it changes where the states go rather than what can be seen.
   const openView = (user: ReturnType<typeof userEvent.setup>) =>
-    user.click(screen.getByRole('menuitem', { name: 'View' }));
+    user.click(screen.getByRole('menuitem', { name: 'Layout' }));
 
   it('is off to begin with, so nothing moves unasked', async () => {
     const user = userEvent.setup();

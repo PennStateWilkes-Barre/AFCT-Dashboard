@@ -3211,3 +3211,242 @@ describe('snapping a state to the grid as it is dragged', () => {
     expect(marker!.position()).toEqual({ x: 37, y: 61 });
   });
 });
+
+/**
+ * Picking out several states at once.
+ *
+ * Ctrl on Windows and Linux, Cmd on a Mac, which is how every editor spells "and this one too".
+ * There is no mode to be in: a plain click still replaces the selection.
+ *
+ * The inspector is unchanged and still describes one state. It closes for two because the
+ * question "which state is this panel about" has no answer, not because it knows anything about
+ * multiple selection.
+ */
+describe('selecting more than one state', () => {
+  const tap = (id: string, modifier?: 'ctrlKey' | 'metaKey') => {
+    const cy = lastCy();
+    act(() =>
+      cy.handlers['tap']?.({
+        target: cy.byId(id),
+        ...(modifier ? { originalEvent: { [modifier]: true } } : {}),
+      }),
+    );
+  };
+  const tapBackground = () => {
+    const cy = lastCy();
+    act(() => cy.handlers['tap']?.({ target: cy, position: { x: 900, y: 900 } }));
+  };
+  const tapEdge = () => {
+    const cy = lastCy();
+    act(() => cy.handlers['tap']?.({ target: cy.edgeList[0] }));
+  };
+  const lit = () =>
+    lastCy()
+      .nodeList.filter((n) => n.hasClass('highlighted'))
+      .map((n) => n.id())
+      .sort();
+
+  const ready = async () => {
+    const view = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(view.api().phase).toBe('ready'));
+    return view;
+  };
+
+  it('replaces the selection on a plain click', async () => {
+    const { api } = await ready();
+
+    tap('0');
+    expect(api().selectedStateIds).toEqual(['0']);
+    expect(api().selectedState?.name).toBe('q0');
+
+    tap('1');
+    expect(api().selectedStateIds).toEqual(['1']);
+    expect(api().selectedState?.name).toBe('q1');
+  });
+
+  it('adds a state with ctrl, and with cmd', async () => {
+    const { api } = await ready();
+
+    tap('0');
+    tap('1', 'ctrlKey');
+    expect(api().selectedStateIds).toEqual(['0', '1']);
+
+    tap('0');
+    tap('1', 'metaKey');
+    expect(api().selectedStateIds).toEqual(['0', '1']);
+  });
+
+  it('takes a state back out when it is clicked again with the key held', async () => {
+    const { api } = await ready();
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    tap('1', 'ctrlKey');
+
+    expect(api().selectedStateIds).toEqual(['0']);
+  });
+
+  it('starts a selection with the key held, from nothing', async () => {
+    const { api } = await ready();
+
+    tap('0', 'ctrlKey');
+
+    expect(api().selectedStateIds).toEqual(['0']);
+  });
+
+  it('shuts the inspector for two states and opens it again for one', async () => {
+    const { api } = await ready();
+    tap('0');
+    expect(api().selectedState).not.toBeNull();
+
+    tap('1', 'ctrlKey');
+
+    // Still selected, both of them: it is the panel that goes, not the selection.
+    expect(api().selectedStateIds).toEqual(['0', '1']);
+    expect(api().selectedState).toBeNull();
+    expect(api().selectedStatePosition).toBeNull();
+
+    tap('1', 'ctrlKey');
+
+    expect(api().selectedState?.name).toBe('q0');
+    expect(api().selectedStatePosition).not.toBeNull();
+  });
+
+  it('lights every selected state, and dims the rest', async () => {
+    await ready();
+
+    tap('0');
+    expect(lit()).toEqual(['0']);
+
+    tap('1', 'ctrlKey');
+    expect(lit()).toEqual(['0', '1']);
+  });
+
+  it('puts the states down when a transition is clicked, and the other way round', async () => {
+    const { api } = await ready();
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    tapEdge();
+
+    expect(api().selectedStateIds).toEqual([]);
+    expect(api().selectedTransition).not.toBeNull();
+
+    tap('0');
+
+    expect(api().selectedTransition).toBeNull();
+    expect(api().selectedStateIds).toEqual(['0']);
+  });
+
+  it('clears everything on a click on empty canvas', async () => {
+    const { api } = await ready();
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    tapBackground();
+
+    expect(api().selectedStateIds).toEqual([]);
+    expect(lit()).toEqual([]);
+  });
+
+  it('is not a change to the machine, so it is not on the undo stack', async () => {
+    const { api } = await ready();
+
+    tap('0');
+    tap('1', 'ctrlKey');
+    tap('1', 'ctrlKey');
+    tapBackground();
+
+    expect(api().canUndo).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('moves only the state that was dragged', async () => {
+    // Group dragging is a separate feature with its own history question. Cytoscape's own
+    // notion of selection is deliberately not used, which is what keeps this true.
+    const { api } = await ready();
+    tap('0');
+    tap('1', 'ctrlKey');
+    const before = { ...lastCy().byId('1')!.position() };
+
+    act(() => lastCy().handlers['grab']?.({ target: lastCy().byId('0') }));
+    lastCy().byId('0')!.position({ x: 400, y: 400 });
+    act(() => lastCy().handlers['dragfree']?.({ target: lastCy().byId('0') }));
+
+    expect(lastCy().byId('0')!.position()).toEqual({ x: 400, y: 400 });
+    expect(lastCy().byId('1')!.position()).toEqual(before);
+    // And the selection survived the drag.
+    expect(api().selectedStateIds).toEqual(['0', '1']);
+  });
+
+  it('drops a state undo has taken off the machine, and keeps the rest', async () => {
+    const { api } = await ready();
+    act(() => api().addState({ x: 300, y: 300 }));
+    await waitFor(() => expect(api().selectedStateIds).toHaveLength(1));
+    const drawn = api().selectedStateIds[0]!;
+    tap('0', 'ctrlKey');
+    expect(api().selectedStateIds).toEqual([drawn, '0']);
+
+    act(() => api().undo());
+
+    expect(api().selectedStateIds).toEqual(['0']);
+  });
+});
+
+/** What comes back after a refresh, which is a selection of any size. */
+describe('remembering which states were selected', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  const stored = () =>
+    JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).selection;
+
+  it('writes one state the way it always has, and several as a list', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY, honorPositionsDefault: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const cy = lastCy();
+
+    act(() => cy.handlers['tap']?.({ target: cy.byId('0') }));
+    await waitFor(() => expect(stored()).toEqual({ kind: 'state', id: '0' }));
+
+    act(() => cy.handlers['tap']?.({ target: cy.byId('1'), originalEvent: { ctrlKey: true } }));
+    await waitFor(() => expect(stored()).toEqual({ kind: 'state', id: '0', ids: ['0', '1'] }));
+  });
+
+  it('brings a whole selection back, with the inspector still shut', async () => {
+    const { api } = renderViewer({ viewStateKey: KEY, honorPositionsDefault: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const cy = lastCy();
+    act(() => cy.handlers['tap']?.({ target: cy.byId('0') }));
+    act(() => cy.handlers['tap']?.({ target: cy.byId('1'), originalEvent: { ctrlKey: true } }));
+    await waitFor(() => expect(stored().ids).toEqual(['0', '1']));
+
+    const second = renderViewer({ viewStateKey: KEY, honorPositionsDefault: true });
+
+    await waitFor(() => expect(second.api().selectedStateIds).toEqual(['0', '1']));
+    expect(second.api().selectedState).toBeNull();
+  });
+
+  /** An entry written before a selection could name more than one state still opens. */
+  it('restores an older entry that names a single state', async () => {
+    window.sessionStorage.setItem(
+      `afct.viewer.view.${KEY}`,
+      JSON.stringify({
+        v: 1,
+        zoom: 1,
+        pan: { x: 0, y: 0 },
+        positions: { '0': { x: 10, y: 20 }, '1': { x: 100, y: 20 } },
+        honorPositions: true,
+        selection: { kind: 'state', id: '1' },
+      }),
+    );
+
+    const { api } = renderViewer({ viewStateKey: KEY, honorPositionsDefault: true });
+
+    await waitFor(() => expect(api().selectedStateIds).toEqual(['1']));
+    expect(api().selectedState?.name).toBe('q1');
+  });
+});

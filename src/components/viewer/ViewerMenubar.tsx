@@ -208,16 +208,10 @@ export function ViewerMenubar({
           >
             JFLAP Notes
           </MenubarCheckboxItem>
-          {/* Off by default: a machine arrives with the positions its author chose, and
-              quietly moving every state the first time one is nudged would be a change nobody
-              asked for. Directly under Grid, since it is that grid it snaps to. */}
-          <MenubarCheckboxItem
-            checked={snapToGrid}
-            disabled={!ready}
-            onCheckedChange={() => run('toggleSnapToGrid')}
-          >
-            Snap to grid
-          </MenubarCheckboxItem>
+          {/* Snap to grid is not here. It changes where the states go rather than what the
+              reader can see, so it sits under Layout with the rest of the arrangement. The
+              grid's visibility stays here, which is the other half of the same pair: one is
+              about looking, one is about moving. */}
           <MenubarSeparator />
           {/* The same content the dialog viewers show in a panel under the graph. Here it
               opens in a window, so the graph keeps the full height of the screen. */}
@@ -248,13 +242,21 @@ export function ViewerMenubar({
         </MenubarContent>
       </MenubarMenu>
 
+      {/*
+        Where the states go, as against how they are looked at.
+
+        View answers "what can I see and from how far away"; this answers "where is everything".
+        The two were one menu, and Snap to grid sitting under the grid's own visibility was the
+        seam: they share a word and nothing else. This is also where aligning and distributing
+        a selection will go, which is the reason to separate them now rather than when there are
+        six more items to move.
+      */}
       <MenubarMenu>
-        <MenubarTrigger>Machine</MenubarTrigger>
+        <MenubarTrigger>Layout</MenubarTrigger>
         <MenubarContent>
-          {/* Flattened rather than kept behind a Layout submenu: the choice is the whole of
-              this menu, and burying two options one level down to label them is a level of
-              nesting that earns nothing. "Machine" rather than "Automata" because the code and
-              the text representation already call it that, and because it is one machine. */}
+          {/* The arrangement itself: the author's own positions, or the engine's. Flattened
+              rather than kept behind a submenu, since it is the first thing this menu is
+              about. */}
           <MenubarRadioGroup
             value={layout}
             onValueChange={(next) => run(next === 'as-drawn' ? 'setAsDrawn' : 'setAutoArranged')}
@@ -267,8 +269,25 @@ export function ViewerMenubar({
             </MenubarRadioItem>
           </MenubarRadioGroup>
           <MenubarSeparator />
-          {/* With the machine rather than under Edit: what these copy is the drawing, not a
-              selection, and this is the menu about the drawing. */}
+          {/* Off by default: a machine arrives with the positions its author chose, and quietly
+              moving every state the first time one is nudged would be a change nobody asked
+              for. */}
+          <MenubarCheckboxItem
+            checked={snapToGrid}
+            disabled={!ready}
+            onCheckedChange={() => run('toggleSnapToGrid')}
+          >
+            Snap to grid
+          </MenubarCheckboxItem>
+        </MenubarContent>
+      </MenubarMenu>
+
+      <MenubarMenu>
+        <MenubarTrigger>Machine</MenubarTrigger>
+        <MenubarContent>
+          {/* What the machine is, and what leaves the viewer as a picture of it. Where its
+              states sit is Layout's, above. "Machine" rather than "Automata" because the code
+              and the text representation already call it that, and because it is one machine. */}
           {/* Format icons, matching File > Export, so the same format carries the same icon
               wherever it appears. Two identical Copy icons would say only "these are both
               copies", which the labels already say. */}

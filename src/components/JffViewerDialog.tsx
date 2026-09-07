@@ -1130,8 +1130,16 @@ export function JffCytoscapeViewer({
    * above it. Returning true means Escape was spent on the line rather than on the tool.
    */
   const cancelLinkDraftRef = useRef<() => boolean>(() => false);
-  const onToolEscape = useCallback(() => cancelLinkDraftRef.current(), []);
-  const { activeTool, tools, selectTool } = useCanvasTools(capabilities, onToolEscape);
+  /** Put down whatever is selected, when Escape has nothing more urgent to give up. */
+  const clearSelectionRef = useRef<() => void>(() => {});
+  const escapeActions = useMemo(
+    () => ({
+      cancelGesture: () => cancelLinkDraftRef.current(),
+      clearSelection: () => clearSelectionRef.current(),
+    }),
+    [],
+  );
+  const { activeTool, tools, selectTool } = useCanvasTools(capabilities, escapeActions);
   /**
    * The click handler itself, filled in below once the hook has handed back what it needs.
    *
@@ -1213,6 +1221,7 @@ export function JffCytoscapeViewer({
     undo,
     redo,
     selectedState,
+    selectedStateIds,
     selectedTransition,
     clearSelectedState,
     renameState,
@@ -1311,6 +1320,10 @@ export function JffCytoscapeViewer({
     setDrawnTransitions((n) => n + 1);
   };
   cancelLinkDraftRef.current = cancelLinkDraft;
+  clearSelectionRef.current = () => {
+    clearSelectedState();
+    selectTextBoxRaw(null);
+  };
   clearForDraftRef.current = () => {
     clearSelectedState();
     selectTextBoxRaw(null);
@@ -1474,6 +1487,15 @@ export function JffCytoscapeViewer({
             like editing, and a reader has no way of knowing from the screen that the file they
             were sent is untouched. It says so, and offers the two things they might want next.
           */}
+          {/* What is selected, when the inspector cannot say it. The panel describes one state,
+              so picking out a second closes it, and without this the only sign of a selection
+              that big is the dimming behind it. Beside the file's own labels rather than in a
+              panel of its own: it is a line of text about what is happening, not a surface. */}
+          {selectedStateIds.length > 1 ? (
+            <span className="text-muted-foreground text-xs" aria-live="polite">
+              {selectedStateIds.length} states selected
+            </span>
+          ) : null}
           {viewModified && !preview ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

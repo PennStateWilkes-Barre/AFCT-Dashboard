@@ -661,9 +661,22 @@ function isFinitePoint(value: any): value is { x: number; y: number } {
  * properties panel and nothing marked on the canvas.
  */
 function highlightElement(cy: any, ele: any): void {
+  highlightElements(cy, [ele]);
+}
+
+/**
+ * Light what is selected, and dim the rest of the machine behind it.
+ *
+ * A list, because a reader can pick out several states at once. One pass either way: everything
+ * is dimmed and then the chosen elements are brought back, so adding a state to a selection and
+ * starting again from nothing go through the same code and cannot drift apart.
+ */
+function highlightElements(cy: any, eles: readonly any[]): void {
   cy.elements().addClass('faded');
-  ele.addClass?.('highlighted');
-  ele.removeClass?.('faded');
+  for (const ele of eles) {
+    ele?.addClass?.('highlighted');
+    ele?.removeClass?.('faded');
+  }
 }
 
 /**
@@ -1009,9 +1022,28 @@ export function useJffCytoscape({
   // Off by default: a machine arrives with the positions its author chose, and quietly moving
   // every state the first time one is nudged would be a change nobody asked for.
   const [snapToGrid, setSnapToGrid] = useState(false);
-  // The state a reader has clicked, if any. Held as an id rather than a described object so it
-  // survives a reload of the same file and cannot go stale against a re-parsed machine.
-  const [selectedStateId, setSelectedStateId] = useState<string | null>(null);
+  /**
+   * The states a reader has clicked, in the order they were clicked.
+   *
+   * Ids rather than described objects, so a selection survives a reload of the same file and
+   * cannot go stale against a re-parsed machine. A list rather than one id because a reader
+   * picking several states out to line up is the ordinary way to work on a diagram, and
+   * ctrl-clicking is how every editor spells it.
+   *
+   * Not cytoscape's own `:selected`, deliberately. Cytoscape drags everything it considers
+   * selected as one, and that is a separate feature with its own history question. Here the
+   * selection is a set of ids the viewer holds and shows through a class, so dragging one of
+   * several moves the one that was dragged.
+   */
+  const [selectedStateIds, setSelectedStateIds] = useState<string[]>([]);
+  /**
+   * The one state the inspector is about, or null when that question has no single answer.
+   *
+   * Which is what closes the panel for a multiple selection, without the panel knowing anything
+   * about multiple selection: everything downstream already asks this and gets null when
+   * nothing is selected. Two states selected is the same "no one state" answer.
+   */
+  const selectedStateId = selectedStateIds.length === 1 ? (selectedStateIds[0] ?? null) : null;
   /**
    * Whether the first layout has finished and the graph is worth showing.
    *
@@ -1137,11 +1169,19 @@ export function useJffCytoscape({
    */
   const loadGeneration = useRef(0);
   // Read by the graph's own event handlers, which are built once per load.
+  const selectedStateIdsRef = useRef<string[]>([]);
+  selectedStateIdsRef.current = selectedStateIds;
   const selectedStateIdRef = useRef<string | null>(null);
   selectedStateIdRef.current = selectedStateId;
   const selectionRef = useRef<ViewerSelection | null>(null);
-  selectionRef.current = selectedStateId
-    ? { kind: 'state', id: selectedStateId }
+  selectionRef.current = selectedStateIds[0]
+    ? {
+        kind: 'state',
+        id: selectedStateIds[0],
+        // Only when there is something the single id does not say, so the common entry keeps
+        // the shape it has always had.
+        ...(selectedStateIds.length > 1 ? { ids: selectedStateIds } : {}),
+      }
     : selectedEdge
       ? { kind: 'transition', from: selectedEdge.from, to: selectedEdge.to }
       : null;
@@ -1471,13 +1511,21 @@ export function useJffCytoscape({
     if (!selection) return;
     try {
       if (selection.kind === 'state') {
-        const node = cy.getElementById(selection.id);
-        if (!node || node.empty?.() || node.length === 0) return;
-        setSelectedStateId(selection.id);
+        // `ids` when the entry has it, `id` alone when it does not, which is every entry
+        // written before a selection could name more than one state.
+        const wanted = selection.ids?.length ? selection.ids : [selection.id];
+        const nodes = wanted
+          .map((id) => cy.getElementById(id))
+          .filter((node: any) => node && !node.empty?.() && node.length !== 0);
+        if (nodes.length === 0) return;
+        const ids = nodes.map((node: any) => node.id());
+        setSelectedStateIds(ids);
         setSelectedEdge(null);
-        const at = node.position?.();
+        // Only when it is one state: the boxes describe one, and there is no panel to put them
+        // in when several are selected.
+        const at = ids.length === 1 ? nodes[0].position?.() : null;
         setSelectedPosition(isFinitePoint(at) ? { x: at.x, y: at.y } : null);
-        highlightElement(cy, node);
+        highlightElements(cy, nodes);
         return;
       }
       // By its two ends, since that is how it was written down. Works on a cytoscape collection
@@ -1490,7 +1538,7 @@ export function useJffCytoscape({
         );
       const edge = match?.[0];
       if (!edge) return;
-      setSelectedStateId(null);
+      setSelectedStateIds([]);
       setSelectedPosition(null);
       setSelectedEdge({ from: selection.from, to: selection.to });
       highlightElement(cy, edge);
@@ -1916,7 +1964,7 @@ export function useJffCytoscape({
       // The panel was describing it, and it is not there any more. The dimming has to go with
       // it: the state it belonged to is gone, so nothing would ever take it off the rest.
       clearHighlight(cyRef.current);
-      setSelectedStateId(null);
+      setSelectedStateIds([]);
       setSelectedPosition(null);
       setSelectedEdge(null);
     },
@@ -2050,7 +2098,7 @@ export function useJffCytoscape({
         setPhase('drawing');
         setType(parsed.type);
         setParsed(parsed);
-        setSelectedStateId(null);
+        setSelectedStateIds([]);
         setSelectedEdge(null);
         setSelectedPosition(null);
         // A different file is a different machine. Keeping the old history would let undo
@@ -2660,8 +2708,9 @@ export function useJffCytoscape({
             // leave something else underneath it.
             if (onBackgroundClickRef.current?.(evt.position)) return;
             clearHighlight(cy);
-            // A click on empty canvas means "never mind", so the properties panel goes too.
-            setSelectedStateId(null);
+            // A click on empty canvas means "never mind", so the panel and every selected
+            // state go together.
+            setSelectedStateIds([]);
             setSelectedEdge(null);
             setSelectedPosition(null);
             return;
@@ -2673,17 +2722,46 @@ export function useJffCytoscape({
           // already stop a note being a tap target; this is the belt to that brace, since a
           // note has no neighbourhood and would otherwise fade everything.)
           if (ele.hasClass?.('note') || ele.hasClass?.('start')) return;
-          // One panel at a time: a state and an edge cannot both be what was just clicked.
           const isNode = ele.isNode?.() ?? false;
-          setSelectedStateId(isNode ? (ele.id?.() ?? null) : null);
-          // Where it is now, for the panel's coordinate boxes. From the graph rather than the
-          // file: this is the point a drag moves, and the file's is where its author put it.
-          const at = isNode ? ele.position?.() : null;
+
+          if (!isNode) {
+            // One panel at a time, and a line is only ever one: a transition is edited on its
+            // own, so clicking one puts down every state that was picked out.
+            setSelectedStateIds([]);
+            setSelectedPosition(null);
+            setSelectedEdge({ from: ele.data?.('source') ?? '', to: ele.data?.('target') ?? '' });
+            highlightElements(cy, [ele]);
+            return;
+          }
+
+          /**
+           * Ctrl on Windows and Linux, Cmd on a Mac: the way every editor spells "and this one
+           * too". Both are read, rather than the platform being detected, because a Mac
+           * keyboard has a Ctrl key that people do press and neither means anything else here.
+           *
+           * A plain click replaces the selection; a modified one adds the state or, if it is
+           * already selected, takes it out. There is no multi-select mode to be in.
+           */
+          const id = ele.id?.() ?? '';
+          const original = evt.originalEvent;
+          const adding = Boolean(original?.ctrlKey || original?.metaKey);
+          const current = selectedStateIdsRef.current;
+          const next = !adding
+            ? [id]
+            : current.includes(id)
+              ? current.filter((other) => other !== id)
+              : [...current, id];
+
+          setSelectedStateIds(next);
+          setSelectedEdge(null);
+          // The coordinate boxes describe one state, and there is no panel showing them when
+          // several are selected.
+          const at = next.length === 1 ? ele.position?.() : null;
           setSelectedPosition(isFinitePoint(at) ? { x: at.x, y: at.y } : null);
-          setSelectedEdge(
-            isNode ? null : { from: ele.data?.('source') ?? '', to: ele.data?.('target') ?? '' },
+          highlightElements(
+            cy,
+            next.map((each) => cy.getElementById(each)),
           );
-          highlightElement(cy, ele);
         });
 
         /**
@@ -2861,7 +2939,7 @@ export function useJffCytoscape({
     rememberView();
   }, [
     phase,
-    selectedStateId,
+    selectedStateIds,
     selectedEdge,
     renames,
     initialOverride,
@@ -2931,13 +3009,15 @@ export function useJffCytoscape({
     setParsed(next);
     // Undo can take a drawn state off the machine, and the panel must not go on describing one
     // that is no longer there.
-    if (
-      selectedStateIdRef.current &&
-      !next.states.some((state) => state.id === selectedStateIdRef.current)
-    ) {
+    // Undo can take a drawn state off the machine, and the selection must not go on naming one
+    // that is not there. The others it names are still there and stay selected.
+    const stillThere = selectedStateIdsRef.current.filter((id) =>
+      next.states.some((state) => state.id === id),
+    );
+    if (stillThere.length !== selectedStateIdsRef.current.length) {
       clearHighlight(cyRef.current);
-      setSelectedStateId(null);
-      setSelectedPosition(null);
+      setSelectedStateIds(stillThere);
+      if (stillThere.length !== 1) setSelectedPosition(null);
     }
     const cy = cyRef.current;
     if (cy) redrawGraph(cy, next);
@@ -3216,11 +3296,19 @@ export function useJffCytoscape({
     redo: () => step(redoStack, undoStack),
     selectedState:
       parsed && selectedStateId ? describeState(parsed, selectedStateId, epsSymbol) : null,
+    /**
+     * Every state the reader has picked out, in the order they picked them.
+     *
+     * Ids rather than cytoscape elements: an id is what the rest of this hook names a state by,
+     * it survives a rebuild, and anything wanting the nodes or their positions can ask the
+     * graph for them. This is what an alignment or distribution command would work from.
+     */
+    selectedStateIds,
     clearSelectedState: () => {
       // The drawing as well as the panel. Closing the inspector, and choosing a tool that puts
       // the selection down, both come through here.
       clearHighlight(cyRef.current);
-      setSelectedStateId(null);
+      setSelectedStateIds([]);
       setSelectedEdge(null);
       setSelectedPosition(null);
     },

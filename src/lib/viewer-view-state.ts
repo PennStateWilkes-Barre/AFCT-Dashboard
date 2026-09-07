@@ -30,7 +30,25 @@ export type ViewerViewport = { zoom: number; pan: { x: number; y: number } };
  * line on the canvas.
  */
 export type ViewerSelection =
-  { kind: 'state'; id: string } | { kind: 'transition'; from: string; to: string };
+  | {
+      kind: 'state';
+      /**
+       * The state whose properties were open, or the first of several.
+       *
+       * Always written, even when several states were selected, so an entry from before
+       * multi-select still reads and an older viewer still restores something sensible from a
+       * newer one. One shape rather than a second `kind`, because this is one concept.
+       */
+      id: string;
+      /**
+       * Every selected state, when there was more than one. Absent means just `id`.
+       *
+       * Two or more states selected is not a panel: the inspector describes one state, so it
+       * stays shut and the highlight is the whole of what comes back.
+       */
+      ids?: string[];
+    }
+  | { kind: 'transition'; from: string; to: string };
 
 /** Where every state sits, plus the camera looking at it. */
 export type ViewerViewState = {
@@ -214,7 +232,14 @@ const isPoint = (value: unknown): value is { x: number; y: number } => {
 function isSelection(value: unknown): value is ViewerSelection {
   if (!value || typeof value !== 'object') return false;
   const sel = value as Record<string, unknown>;
-  if (sel.kind === 'state') return typeof sel.id === 'string' && sel.id.length > 0;
+  if (sel.kind === 'state') {
+    if (typeof sel.id !== 'string' || sel.id.length === 0) return false;
+    // Absent is the ordinary case and the only one an older entry has.
+    return (
+      sel.ids === undefined ||
+      (Array.isArray(sel.ids) && sel.ids.every((id) => typeof id === 'string'))
+    );
+  }
   if (sel.kind === 'transition') return typeof sel.from === 'string' && typeof sel.to === 'string';
   return false;
 }

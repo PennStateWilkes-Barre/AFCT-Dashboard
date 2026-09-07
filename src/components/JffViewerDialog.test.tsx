@@ -2320,6 +2320,82 @@ describe('viewer capabilities', () => {
  * of a capability a student does not have, and the states stay where the file put them, because
  * a preview that invites rearranging invites a change nobody can save.
  */
+/**
+ * Several states at once, from the reader's side of it.
+ *
+ * The panel describes one state. Picking out a second closes it, which is the honest answer to
+ * "which state is this about", and leaves the dimming as the only sign of what is selected: the
+ * count in the toolbar is what says so in words.
+ */
+describe('picking out several states', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+
+  const tap = (id: string, modifier?: 'ctrlKey' | 'metaKey') => {
+    const handler = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown; originalEvent?: Record<string, boolean> }) => void) | undefined;
+    act(() =>
+      handler?.({
+        target: {
+          isNode: () => true,
+          hasClass: () => false,
+          id: () => id,
+          position: () => ({ x: 100, y: 200 }),
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+        ...(modifier ? { originalEvent: { [modifier]: true } } : {}),
+      }),
+    );
+  };
+
+  it('closes the inspector for two, and says how many are selected instead', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    tap('1', 'ctrlKey');
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+    expect(await screen.findByText('2 states selected')).toBeInTheDocument();
+  });
+
+  it('brings the inspector back when one is taken out again', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    tap('1', 'ctrlKey');
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+
+    tap('1', 'ctrlKey');
+
+    expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+    expect(screen.queryByText(/states selected/)).toBeNull();
+  });
+
+  it('says nothing about a count when only one state is selected', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    tap('0');
+
+    expect(screen.queryByText(/states selected/)).toBeNull();
+  });
+
+  it('puts the selection down on Escape', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tap('0');
+    tap('1', 'ctrlKey');
+    await screen.findByText('2 states selected');
+
+    // On the window: a click on a canvas focuses no element, so there is nowhere else for the
+    // key to arrive. The tool's own Escape and this are one handler, in order.
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByText(/states selected/)).toBeNull());
+  });
+});
+
 describe('a preview', () => {
   const SRC = '/api/files/submissions/abc.jff';
 

@@ -34,6 +34,7 @@ import {
   historyFits,
   VIEWER_HISTORY_LIMIT,
   type ViewerAddedState,
+  type ViewerAddedTransition,
   type ViewerHistoryStep,
   type ViewerRemoved,
   type ViewerSelection,
@@ -48,6 +49,7 @@ import {
   machineDescriptionText,
   parseJflap,
   toElements,
+  transitionFields,
   POSITION_SCALE,
   type MachineType,
   type Parsed,
@@ -249,6 +251,16 @@ export type UseJffCytoscapeOptions = {
    */
   onBackgroundClick?: ((at: { x: number; y: number }) => boolean) | null;
   /**
+   * What a drag from one state onto another means, when it means anything.
+   *
+   * The same bargain `onBackgroundClick` makes, one gesture further on: this hook reports what
+   * happened on the graph (a drag started on this state and ended on that one) and the viewer
+   * decides what it is for. Present is also the switch: with a handler here, dragging a state
+   * draws a line out of it instead of moving it, and with none the graph behaves as it always
+   * has. One option rather than a flag and a callback that could disagree.
+   */
+  onStateLink?: ((sourceId: string, targetId: string) => void) | null;
+  /**
    * Whether the reader may change the machine at all.
    *
    * Enforced here rather than only by hiding the buttons that call these. A viewer that is
@@ -332,6 +344,8 @@ type ViewerSnapshot = Arrangement & {
   transitionEdits: Record<number, Partial<Parsed['transitions'][number]>>;
   /** States the reader drew, which the file does not have. See `addState`. */
   addedStates: ViewerAddedState[];
+  /** Transitions the reader drew between two states. See `addTransition`. */
+  addedTransitions: ViewerAddedTransition[];
   /** What the reader took off the drawing. See `removeState` and `removeTransitions`. */
   removed: ViewerRemoved;
 };
@@ -353,6 +367,7 @@ function toStoredStep(snapshot: ViewerSnapshot): ViewerHistoryStep {
     finals: snapshot.finalOverrides,
     transitions: snapshot.transitionEdits,
     addedStates: snapshot.addedStates,
+    addedTransitions: snapshot.addedTransitions,
     removed: snapshot.removed,
   };
 }
@@ -366,6 +381,8 @@ function fromStoredStep(step: ViewerHistoryStep): ViewerSnapshot {
     finalOverrides: step.finals ?? {},
     transitionEdits: step.transitions ?? {},
     addedStates: step.addedStates ?? [],
+    // Absent in a step written before drawn transitions existed, which is a step with none.
+    addedTransitions: step.addedTransitions ?? [],
     removed: step.removed ?? { states: [], transitions: [] },
   };
 }
@@ -390,12 +407,90 @@ function freeStateIdentity(parsed: Parsed): { id: string; name: string } {
   return { id, name: `q${index}` };
 }
 
+/**
+ * An index for a transition about to be drawn, which can never mean one of the file's own.
+ *
+ * Transitions are named by `__idx` everywhere here: `transitionEdits` is keyed by it, a
+ * deletion is a list of them, and the panel hands them back when it edits a label. The file's
+ * are its own positions, 0 upward. A drawn one takes the next number above everything in play,
+ * including indices already handed out and ones sitting in the removed list, so that undoing a
+ * deletion and drawing a new line cannot produce two transitions claiming to be the same one.
+ *
+ * Allocated once and then stored on the record, so it is the same number after a rebuild, a
+ * refresh, an undo and a redo.
+ */
+function freeTransitionIndex(
+  pristine: Parsed,
+  added: readonly ViewerAddedTransition[],
+  removed: ViewerRemoved,
+): number {
+  let max = pristine.transitions.length - 1;
+  for (const t of pristine.transitions) max = Math.max(max, t.__idx);
+  for (const t of added) max = Math.max(max, t.idx);
+  for (const idx of removed.transitions) max = Math.max(max, idx);
+  return max + 1;
+}
+
+/**
+ * The two classes worn by elements that are on the canvas but not on the machine.
+ *
+ * `preview` is the line being dragged out of a state before it is a transition; `link-target`
+ * is the state under the pointer while that is happening. Everything that walks the graph
+ * skips the first the way it already skips `start` and `note`: they are not states or
+ * transitions, they belong to a gesture, and they are gone the moment it ends.
+ *
+ * Deliberately not the highlight a selected element wears. A state about to be linked to and a
+ * state whose properties are open are two different things, and one appearance for both would
+ * leave the reader unable to tell which.
+ */
+const PREVIEW_CLASS = 'preview';
+const LINK_TARGET_CLASS = 'link-target';
+const PREVIEW_NODE_ID = '__afct-link-preview';
+const PREVIEW_EDGE_ID = '__afct-link-preview-edge';
+
+/** Whether an element is furniture rather than part of the machine. */
+function isNotAState(node: any): boolean {
+  return (
+    node.hasClass?.('start') || node.hasClass?.('note') || node.hasClass?.(PREVIEW_CLASS) || false
+  );
+}
+
+/**
+ * The state under a point, in the graph's own coordinates.
+ *
+ * Measured from the middle of each state rather than asked of cytoscape, because the answer has
+ * to be the same one the reader sees: a state is a circle of a known size, and the nearest
+ * middle within that radius is the one under the pointer. Nearest, not first, so overlapping
+ * states resolve to the one that looks on top.
+ */
+function stateAtPoint(cy: any, at: { x: number; y: number }): any | null {
+  let found: any = null;
+  let best = Infinity;
+  cy.nodes().forEach((node: any) => {
+    if (isNotAState(node)) return;
+    const p = node.position?.();
+    if (!isFinitePoint(p)) return;
+    const distance = Math.hypot(p.x - at.x, p.y - at.y);
+    if (distance <= NODE_DIAMETER / 2 && distance < best) {
+      best = distance;
+      found = node;
+    }
+  });
+  return found;
+}
+
 /** The reader's changes laid over the file as parsed, which is how every load draws them. */
 function deriveParsed(
   pristine: Parsed,
   edits: Pick<
     ViewerSnapshot,
-    'renames' | 'initialOverride' | 'finalOverrides' | 'transitionEdits' | 'addedStates' | 'removed'
+    | 'renames'
+    | 'initialOverride'
+    | 'finalOverrides'
+    | 'transitionEdits'
+    | 'addedStates'
+    | 'addedTransitions'
+    | 'removed'
   >,
 ): Parsed {
   // Added states go in FIRST, so everything after this treats them as ordinary states: a name
@@ -419,9 +514,39 @@ function deriveParsed(
             })),
           ],
         };
+  // Drawn transitions go in next, and for the same reason: after this line nothing downstream
+  // can tell one from a transition the file came with. Editing one writes to `transitionEdits`
+  // under its index like any other, deleting one names that index like any other, and the
+  // inspector, the counts, the description and the exported `.jff` all read them from here.
+  //
+  // One whose ends are not on the machine is dropped rather than drawn: it would be a line to
+  // nowhere and an invalid `.jff`. That happens when the state it was drawn from has been
+  // deleted, which `applyRemovals` handles for the file's own transitions the same way.
+  const stateIds = new Set(withAdded.states.map((state) => state.id));
+  const withTransitions =
+    edits.addedTransitions.length === 0
+      ? withAdded
+      : {
+          ...withAdded,
+          transitions: [
+            ...withAdded.transitions,
+            ...edits.addedTransitions
+              .filter((t) => stateIds.has(t.from) && stateIds.has(t.to))
+              .map((t) => ({
+                from: t.from,
+                to: t.to,
+                read: t.read,
+                write: t.write,
+                move: t.move,
+                pop: t.pop,
+                push: t.push,
+                __idx: t.idx,
+              })),
+          ],
+        };
   const marked = applyTransitionEdits(
     applyFinalStates(
-      applyInitialState(applyRenames(withAdded, edits.renames), edits.initialOverride),
+      applyInitialState(applyRenames(withTransitions, edits.renames), edits.initialOverride),
       edits.finalOverrides,
     ),
     edits.transitionEdits,
@@ -610,7 +735,7 @@ function readArrangement(cy: any, honorPositions: boolean): Arrangement | null {
     cy.nodes().forEach((node: any) => {
       // Notes and start markers are placed relative to what they annotate, so restoring them
       // directly would fight the code that keeps them attached.
-      if (node.hasClass?.('note') || node.hasClass?.('start')) return;
+      if (isNotAState(node)) return;
       const p = node.position();
       if (p && Number.isFinite(p.x) && Number.isFinite(p.y))
         positions[node.id()] = { x: p.x, y: p.y };
@@ -654,7 +779,7 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     // is already drawn. Notes and start markers are not states and are left to their own code.
     const goneNodes: any[] = [];
     cy.nodes().forEach((node: any) => {
-      if (node.hasClass?.('start') || node.hasClass?.('note')) return;
+      if (isNotAState(node)) return;
       if (!byId.has(node.id())) goneNodes.push(node);
     });
     // Gathered, then removed: same reason as the lines below.
@@ -662,7 +787,7 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     const present = new Set(
       cy
         .nodes()
-        .filter((node: any) => !node.hasClass?.('start') && !node.hasClass?.('note'))
+        .filter((node: any) => !isNotAState(node))
         .map((node: any) => node.id()),
     );
     parsed.states.forEach((state) => {
@@ -681,7 +806,7 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     });
 
     cy.nodes().forEach((node: any) => {
-      if (node.hasClass?.('start') || node.hasClass?.('note')) return;
+      if (isNotAState(node)) return;
       const state = byId.get(node.id());
       if (!state) return;
       if (state.initial) initialId = state.id;
@@ -715,6 +840,9 @@ function syncGraph(cy: any, parsed: Parsed, epsSymbol: string): void {
     // time by the loop below.
     const stale: any[] = [];
     cy.edges().forEach((edge: any) => {
+      // The line being dragged out of a state is not a transition and is nobody's business
+      // here: it is removed by the gesture that made it.
+      if (edge.hasClass?.(PREVIEW_CLASS)) return;
       const key = `${edge.data('source')}\u0000${edge.data('target')}`;
       const line = wanted.get(key);
       if (!line) {
@@ -783,6 +911,7 @@ export function useJffCytoscape({
   darkMode = false,
   honorPositionsDefault = false,
   onBackgroundClick = null,
+  onStateLink = null,
   graphOverlayRef = null,
   canEditMachine = true,
   viewStateKey = null,
@@ -934,6 +1063,19 @@ export function useJffCytoscape({
   const addedStatesRef = useRef(addedStates);
   addedStatesRef.current = addedStates;
   /**
+   * Lines the reader drew between two states, held beside the file for the same reason.
+   *
+   * Kept apart from `transitionEdits` deliberately. That map says "the file's transition 3 now
+   * reads a" and is meaningless without the file's transition 3; these have no file transition
+   * behind them at all. Folding one into the other would make every reader of that map ask
+   * which kind it was looking at.
+   */
+  const [addedTransitions, setAddedTransitions] = useState<ViewerAddedTransition[]>(
+    savedView?.addedTransitions ?? [],
+  );
+  const addedTransitionsRef = useRef(addedTransitions);
+  addedTransitionsRef.current = addedTransitions;
+  /**
    * What the reader has taken off the drawing, held beside the file like everything else here.
    *
    * Deleting is subtraction from the derived machine rather than surgery on the parse, for the
@@ -982,6 +1124,8 @@ export function useJffCytoscape({
   const mayEditMachine = () => canEditMachineRef.current;
   const graphOverlayRefRef = useRef(graphOverlayRef);
   graphOverlayRefRef.current = graphOverlayRef;
+  const onStateLinkRef = useRef(onStateLink);
+  onStateLinkRef.current = onStateLink;
   const initialZoomRef = useRef(initialZoom);
   initialZoomRef.current = initialZoom;
   const honorPositionsRef = useRef(honorPositions);
@@ -1112,6 +1256,7 @@ export function useJffCytoscape({
     Object.keys(finalOverrides).length > 0 ||
     Object.keys(transitionEdits).length > 0 ||
     addedStates.length > 0 ||
+    addedTransitions.length > 0 ||
     removed.states.length > 0 ||
     removed.transitions.length > 0;
 
@@ -1201,6 +1346,7 @@ export function useJffCytoscape({
         finals: finalOverridesRef.current,
         transitions: transitionEditsRef.current,
         addedStates: addedStatesRef.current,
+        addedTransitions: addedTransitionsRef.current,
         removed: removedRef.current,
         // The most recent steps a side. Trimmed from the front, so what is dropped is the
         // oldest history, which is the part a reader is least likely to walk back to.
@@ -1299,12 +1445,34 @@ export function useJffCytoscape({
       finalOverrides: { ...finalOverridesRef.current },
       transitionEdits: { ...transitionEditsRef.current },
       addedStates: [...addedStatesRef.current],
+      addedTransitions: [...addedTransitionsRef.current],
       removed: {
         states: [...removedRef.current.states],
         transitions: [...removedRef.current.transitions],
       },
     };
   }, []);
+
+  /**
+   * The reader's answers as they stand right now, which is what every derivation needs.
+   *
+   * From the refs rather than from state, because most of the callers are cytoscape handlers
+   * built once per load: a closure over state would keep deriving the machine from whatever
+   * the answers were when the graph was drawn. One function rather than the same seven-line
+   * object written out at each call site, which is how one of them ends up a field behind.
+   */
+  const currentEdits = useCallback(
+    () => ({
+      renames: renamesRef.current,
+      initialOverride: initialOverrideRef.current,
+      finalOverrides: finalOverridesRef.current,
+      transitionEdits: transitionEditsRef.current,
+      addedStates: addedStatesRef.current,
+      addedTransitions: addedTransitionsRef.current,
+      removed: removedRef.current,
+    }),
+    [],
+  );
 
   /** Make a snapshot the step that undo will return to. */
   const pushUndoStep = useCallback((before: ViewerSnapshot | null) => {
@@ -1350,14 +1518,7 @@ export function useJffCytoscape({
       if (!pristine) return;
       recordStep();
 
-      const current = deriveParsed(pristine, {
-        renames: renamesRef.current,
-        initialOverride: initialOverrideRef.current,
-        finalOverrides: finalOverridesRef.current,
-        transitionEdits: transitionEditsRef.current,
-        addedStates: addedStatesRef.current,
-        removed: removedRef.current,
-      });
+      const current = deriveParsed(pristine, currentEdits());
       const { id, name } = freeStateIdentity(current);
       const drawn: ViewerAddedState = {
         id,
@@ -1369,14 +1530,7 @@ export function useJffCytoscape({
       const nextAdded = [...addedStatesRef.current, drawn];
       addedStatesRef.current = nextAdded;
       setAddedStates(nextAdded);
-      const next = deriveParsed(pristine, {
-        renames: renamesRef.current,
-        initialOverride: initialOverrideRef.current,
-        finalOverrides: finalOverridesRef.current,
-        transitionEdits: transitionEditsRef.current,
-        addedStates: nextAdded,
-        removed: removedRef.current,
-      });
+      const next = deriveParsed(pristine, { ...currentEdits(), addedStates: nextAdded });
       setParsed(next);
 
       const cy = cyRef.current;
@@ -1392,7 +1546,7 @@ export function useJffCytoscape({
         // A graph mid-teardown. The state is kept, and the next load draws it.
       }
     },
-    [recordStep, restoreSelection],
+    [recordStep, restoreSelection, currentEdits],
   );
 
   /**
@@ -1407,10 +1561,7 @@ export function useJffCytoscape({
       const pristine = pristineParsed.current;
       if (!pristine) return;
       const next = deriveParsed(pristine, {
-        renames: renamesRef.current,
-        initialOverride: initialOverrideRef.current,
-        finalOverrides: finalOverridesRef.current,
-        transitionEdits: transitionEditsRef.current,
+        ...currentEdits(),
         addedStates: nextAdded,
         removed: nextRemoved,
       });
@@ -1418,8 +1569,239 @@ export function useJffCytoscape({
       const cy = cyRef.current;
       if (cy) syncGraph(cy, next, epsSymbol);
     },
-    [epsSymbol],
+    [epsSymbol, currentEdits],
   );
+
+  /**
+   * Draw a line between two states, which the file does not have.
+   *
+   * On screen only, like every other change here. It joins the parsed machine, so from the next
+   * line onward it is an ordinary transition: it counts in the inspector's lists, reads in the
+   * text representation, is edited through the same boxes, deletes through the same button and
+   * is written into "Download this arrangement" like any other.
+   *
+   * Its label starts empty in every field the machine type has, which is what an empty element
+   * in a `.jff` parses to: a finite automaton reads epsilon, a Turing machine has a blank tape
+   * symbol and no move. The reader names it in the panel that opens on it.
+   *
+   * Either end may be a state the file came with or one the reader drew, and a self-loop (both
+   * ends the same state) is allowed and is what dragging from a state back onto itself makes.
+   */
+  const addTransition = useCallback(
+    (fromId: string, toId: string) => {
+      if (!mayEditMachine()) return;
+      const pristine = pristineParsed.current;
+      if (!pristine) return;
+      const current = deriveParsed(pristine, currentEdits());
+      // Both ends have to be on the machine as it now stands. A drag can only start and end on
+      // a drawn state, so this is about anything else that calls in.
+      const has = (id: string) => current.states.some((state) => state.id === id);
+      if (!has(fromId) || !has(toId)) return;
+      recordStep();
+
+      // Never below one already handed out in this session, even after an undo has taken the
+      // record that claimed it back off the machine. The history is snapshot-based, so reusing
+      // a number would be safe today for a reason that is far from the code that would break
+      // if it stopped being true: one number, one transition, is cheaper to keep than to check.
+      const idx = Math.max(
+        freeTransitionIndex(pristine, addedTransitionsRef.current, removedRef.current),
+        nextTransitionIndex.current,
+      );
+      nextTransitionIndex.current = idx + 1;
+      const drawn: ViewerAddedTransition = { idx, from: fromId, to: toId };
+      for (const field of transitionFields(pristine.type)) drawn[field] = '';
+
+      const nextAdded = [...addedTransitionsRef.current, drawn];
+      addedTransitionsRef.current = nextAdded;
+      setAddedTransitions(nextAdded);
+      const next = deriveParsed(pristine, { ...currentEdits(), addedTransitions: nextAdded });
+      setParsed(next);
+
+      const cy = cyRef.current;
+      if (!cy) return;
+      // Through the same redraw a deletion uses, so a second transition between the same two
+      // states joins the label on the line that is already there rather than drawing a second
+      // line over it.
+      syncGraph(cy, next, epsSymbol);
+      // Its properties open on it, so it can be labelled at once. The tool is the caller's
+      // business and is left alone, so the next drag draws another one.
+      restoreSelection(cy, { kind: 'transition', from: fromId, to: toId });
+    },
+    [recordStep, restoreSelection, currentEdits, epsSymbol],
+  );
+
+  /**
+   * Dragging a line out of one state and onto another.
+   *
+   * The draft: which state it started on, and which one the pointer is over now. Held in a ref
+   * rather than in state because it changes on every pointer move and nothing outside this
+   * gesture needs a render for it. It is not the tool, and there is no tool value for "halfway
+   * through drawing a transition": the viewer's tool stays what it was for the whole gesture,
+   * and this is what the gesture has got to. Nothing here touches the machine until the pointer
+   * comes up on a state, so a cancelled drag leaves no history step and nothing to undo.
+   *
+   * DOM pointer events rather than cytoscape's own, for two reasons. Pointer events cover a
+   * finger and a stylus with the same code, which matters because this is used on tablets. And
+   * pointerdown fires before the mouse event cytoscape acts on, which is what lets the state be
+   * held still: panning is switched off for the length of the gesture before cytoscape has
+   * decided whether to pan, and dragging states is off for as long as the mode is on.
+   */
+  const linkDraft = useRef<{ sourceId: string; pointerId: number; targetId: string | null } | null>(
+    null,
+  );
+
+  /** The lowest index a drawn transition may take next. See `addTransition`. */
+  const nextTransitionIndex = useRef(0);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    /** Where a pointer is, in the graph's own coordinates. */
+    const modelPoint = (event: PointerEvent) => {
+      const cy = cyRef.current;
+      if (!cy) return null;
+      const rect = container.getBoundingClientRect();
+      const pan = cy.pan();
+      const zoom = cy.zoom();
+      if (!zoom || !Number.isFinite(zoom) || !isFinitePoint(pan)) return null;
+      return {
+        x: (event.clientX - rect.left - pan.x) / zoom,
+        y: (event.clientY - rect.top - pan.y) / zoom,
+      };
+    };
+
+    /** Which state the pointer is over, dressed as the one about to be linked to. */
+    const markTarget = (cy: any, node: any) => {
+      const draft = linkDraft.current;
+      if (!draft) return;
+      const id = node?.id?.() ?? null;
+      if (id === draft.targetId) return;
+      if (draft.targetId) cy.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
+      if (node) node.addClass?.(LINK_TARGET_CLASS);
+      draft.targetId = id;
+    };
+
+    /** Take the gesture off the canvas: the line being dragged, and the target's ring. */
+    const clearDraft = (cy: any) => {
+      const draft = linkDraft.current;
+      linkDraft.current = null;
+      if (!cy) return;
+      try {
+        if (draft?.targetId) cy.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
+        cy.getElementById(PREVIEW_EDGE_ID)?.remove?.();
+        cy.getElementById(PREVIEW_NODE_ID)?.remove?.();
+        cy.userPanningEnabled?.(true);
+      } catch {
+        // A graph mid-teardown. There is nothing left to take off it.
+      }
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (!onStateLinkRef.current || linkDraft.current) return;
+      const cy = cyRef.current;
+      if (!cy) return;
+      const at = modelPoint(event);
+      if (!at) return;
+      const source = stateAtPoint(cy, at);
+      // Empty canvas is not a source. The click goes on to mean whatever the tool says, which
+      // is how the panel still closes and how a state is still drawn.
+      if (!source) return;
+
+      try {
+        // For the length of the gesture only, so panning is back the moment it ends. Set before
+        // cytoscape sees the mouse event this pointer event precedes, which is what stops the
+        // canvas sliding away under a drag that was meant to draw a line.
+        cy.userPanningEnabled?.(false);
+        linkDraft.current = { sourceId: source.id(), pointerId: event.pointerId, targetId: null };
+        container.setPointerCapture?.(event.pointerId);
+        cy.add({ group: 'nodes', data: { id: PREVIEW_NODE_ID }, position: at, classes: PREVIEW_CLASS });
+        cy.add({
+          group: 'edges',
+          data: { id: PREVIEW_EDGE_ID, source: source.id(), target: PREVIEW_NODE_ID },
+          classes: PREVIEW_CLASS,
+        });
+        markTarget(cy, source);
+      } catch {
+        clearDraft(cy);
+      }
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const draft = linkDraft.current;
+      if (!draft || event.pointerId !== draft.pointerId) return;
+      const cy = cyRef.current;
+      const at = modelPoint(event);
+      if (!cy || !at) return;
+      try {
+        cy.getElementById(PREVIEW_NODE_ID)?.position?.(at);
+        markTarget(cy, stateAtPoint(cy, at));
+      } catch {
+        clearDraft(cy);
+      }
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      const draft = linkDraft.current;
+      if (!draft || event.pointerId !== draft.pointerId) return;
+      const cy = cyRef.current;
+      const at = modelPoint(event);
+      const target = cy && at ? stateAtPoint(cy, at) : null;
+      const sourceId = draft.sourceId;
+      const targetId = target?.id?.() ?? null;
+      // The preview and the ring come off BEFORE anything is created: what follows redraws the
+      // graph and takes a snapshot of it, and neither should ever see a gesture's elements.
+      clearDraft(cy);
+      // Released over nothing is a cancelled drag, which is how somebody changes their mind.
+      if (targetId) onStateLinkRef.current?.(sourceId, targetId);
+    };
+
+    const onPointerCancel = () => clearDraft(cyRef.current);
+
+    container.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    return () => {
+      container.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      clearDraft(cyRef.current);
+    };
+  }, []);
+
+  /**
+   * Turn the mode on and off on the graph itself.
+   *
+   * Dragging a state must not move it while a drag means something else, and a half-finished
+   * gesture must not survive the reader changing their mind: switching tools, pressing Escape
+   * and losing the capability all arrive here as the handler going away.
+   */
+  useEffect(() => {
+    const cy = cyRef.current;
+    const container = containerRef.current;
+    const linking = onStateLink !== null;
+    try {
+      cy?.autoungrabify?.(linking);
+    } catch {
+      // A graph mid-teardown.
+    }
+    // A crosshair, not a hand: this draws a line from here, it does not pick the state up.
+    if (container) container.style.cursor = linking ? 'crosshair' : '';
+    if (!linking && linkDraft.current) {
+      const draft = linkDraft.current;
+      linkDraft.current = null;
+      try {
+        if (draft.targetId) cy?.getElementById(draft.targetId)?.removeClass?.(LINK_TARGET_CLASS);
+        cy?.getElementById(PREVIEW_EDGE_ID)?.remove?.();
+        cy?.getElementById(PREVIEW_NODE_ID)?.remove?.();
+        cy?.userPanningEnabled?.(true);
+      } catch {
+        // Nothing left to take off.
+      }
+    }
+  }, [onStateLink, phase]);
 
   /**
    * Take a state off the drawing, and every transition that touched it.
@@ -1572,14 +1954,7 @@ export function useJffCytoscape({
         pristineParsed.current = parsed;
         // Whatever the reader has renamed, put back over the file's own names. Every load
         // re-reads the file, so this is where a rename survives a rebuild.
-        parsed = deriveParsed(parsed, {
-          renames: renamesRef.current,
-          initialOverride: initialOverrideRef.current,
-          finalOverrides: finalOverridesRef.current,
-          transitionEdits: transitionEditsRef.current,
-          addedStates: addedStatesRef.current,
-          removed: removedRef.current,
-        });
+        parsed = deriveParsed(parsed, currentEdits());
         setPhase('drawing');
         setType(parsed.type);
         setParsed(parsed);
@@ -1801,6 +2176,46 @@ export function useJffCytoscape({
               },
             },
             { selector: '.faded', style: { opacity: 0.25 } },
+
+            /* the line being dragged out of a state, before it is a transition */
+            {
+              selector: `edge.${PREVIEW_CLASS}`,
+              style: {
+                'line-color': HIGHLIGHT_COLOR,
+                'target-arrow-color': HIGHLIGHT_COLOR,
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'straight',
+                // Dashed, so it reads as a line being drawn rather than one that is there.
+                'line-style': 'dashed',
+                width: EDGE_WIDTH,
+                label: '',
+                events: 'no',
+              },
+            },
+            // The end of that line is a node with no size and no fill: it exists to give the
+            // edge somewhere to point, and it follows the pointer.
+            {
+              selector: `node.${PREVIEW_CLASS}`,
+              style: {
+                width: 1,
+                height: 1,
+                'background-opacity': 0,
+                'border-width': 0,
+                label: '',
+                events: 'no',
+              },
+            },
+            // The state the line would land on. A ring outside the circle rather than the
+            // selection colour on the circle itself, so "about to be joined to this" and
+            // "looking at this one's properties" never look the same.
+            {
+              selector: `node.${LINK_TARGET_CLASS}`,
+              style: {
+                'overlay-color': HIGHLIGHT_COLOR,
+                'overlay-opacity': 0.18,
+                'overlay-padding': 6,
+              },
+            },
           ],
           layout: { name: 'preset' },
         });
@@ -2244,6 +2659,7 @@ export function useJffCytoscape({
       restoreSavedView,
       commitPendingMove,
       readSnapshot,
+      currentEdits,
     ],
   );
 
@@ -2270,6 +2686,7 @@ export function useJffCytoscape({
     finalOverrides,
     transitionEdits,
     addedStates,
+    addedTransitions,
     removed,
     rememberView,
   ]);
@@ -2316,12 +2733,14 @@ export function useJffCytoscape({
     setFinalOverrides(snapshot.finalOverrides);
     setTransitionEdits(snapshot.transitionEdits);
     setAddedStates(snapshot.addedStates);
+    setAddedTransitions(snapshot.addedTransitions);
     setRemoved(snapshot.removed);
     renamesRef.current = snapshot.renames;
     initialOverrideRef.current = snapshot.initialOverride;
     finalOverridesRef.current = snapshot.finalOverrides;
     transitionEditsRef.current = snapshot.transitionEdits;
     addedStatesRef.current = snapshot.addedStates;
+    addedTransitionsRef.current = snapshot.addedTransitions;
     removedRef.current = snapshot.removed;
 
     const pristine = pristineParsed.current;
@@ -2592,6 +3011,7 @@ export function useJffCytoscape({
       setFinalOverrides({});
       setTransitionEdits({});
       setAddedStates([]);
+      setAddedTransitions([]);
       setRemoved({ states: [], transitions: [] });
       setHonorPositions(honorPositionsDefault);
       // The rebuild puts every state back where its author had it.
@@ -2749,6 +3169,7 @@ export function useJffCytoscape({
       }
     },
     addState,
+    addTransition,
     /**
      * Make a state final, or stop it being one.
      *

@@ -62,6 +62,40 @@ describe('an entry from before a field existed', () => {
     writeViewState('submissions:a.jff', { ...STATE, modified: true });
     expect(readViewState('submissions:a.jff')?.modified).toBe(true);
   });
+
+  /**
+   * The same promise, for the field drawn transitions added. An entry written before this
+   * existed is one with no drawn transitions in it, and it has to open rather than being
+   * thrown away: what a reader had on screen is worth more than the field they never used.
+   */
+  it('opens an entry, history and all, that predates drawn transitions', () => {
+    window.sessionStorage.setItem(
+      'afct.viewer.view.submissions:a.jff',
+      JSON.stringify({
+        ...STATE,
+        history: {
+          undo: [{ positions: { q0: { x: 0, y: 0 } }, honorPositions: true }],
+          redo: [],
+        },
+      }),
+    );
+    const back = readViewState('submissions:a.jff');
+    expect(back?.addedTransitions).toBeUndefined();
+    expect(back?.history?.undo).toHaveLength(1);
+    expect(back?.history?.undo[0].addedTransitions).toBeUndefined();
+  });
+
+  it('keeps drawn transitions when they are there, and refuses a mangled one', () => {
+    const drawn = [{ idx: 7, from: '0', to: '1', read: 'a' }];
+    writeViewState('submissions:a.jff', { ...STATE, addedTransitions: drawn });
+    expect(readViewState('submissions:a.jff')?.addedTransitions).toEqual(drawn);
+
+    window.sessionStorage.setItem(
+      'afct.viewer.view.submissions:a.jff',
+      JSON.stringify({ ...STATE, addedTransitions: [{ idx: 'seven', from: '0', to: '1' }] }),
+    );
+    expect(readViewState('submissions:a.jff')).toBeNull();
+  });
 });
 
 describe('refusing an entry that is not ours', () => {

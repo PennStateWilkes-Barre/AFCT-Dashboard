@@ -1064,6 +1064,21 @@ export function JffCytoscapeViewer({
     [],
   );
   /**
+   * What a drag from one state to another means, and when it means anything.
+   *
+   * Null with any other tool up, which is what tells the graph to go on moving states when they
+   * are dragged. The identity has to be stable while the tool is unchanged: the hook watches it
+   * to know when to cancel a half-drawn line, so a new function every render would cancel a
+   * gesture as it was being made.
+   */
+  const stateLinkRef = useRef<((from: string, to: string) => void) | null>(null);
+  const onStateLinkStable = useCallback(
+    (from: string, to: string) => stateLinkRef.current?.(from, to),
+    [],
+  );
+  // Only with the Transition tool up. Null is what puts state dragging back.
+  const onStateLink = activeTool === 'transition' ? onStateLinkStable : null;
+  /**
    * What the reader has asked to delete, held until they say yes.
    *
    * The element itself rather than a boolean, so the dialog can name what is about to go: "the
@@ -1102,6 +1117,7 @@ export function JffCytoscapeViewer({
     setTransitionField,
     selectTransition,
     addState,
+    addTransition,
     removeState,
     removeTransitions,
     selectedStatePosition,
@@ -1129,6 +1145,7 @@ export function JffCytoscapeViewer({
     darkMode: isDark,
     honorPositionsDefault,
     onBackgroundClick,
+    onStateLink,
     graphOverlayRef: textOverlayRef,
     canEditMachine: capabilities.editMachine,
     initialZoom,
@@ -1167,6 +1184,8 @@ export function JffCytoscapeViewer({
   }, [machineSelectionKey, selectTextBoxRaw]);
 
   const textApi = { ...textBoxes, select: selectTextBox };
+
+  stateLinkRef.current = addTransition;
 
   backgroundClickRef.current = (at) => {
     if (activeTool === 'state') {

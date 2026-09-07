@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
 import React from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -305,7 +305,24 @@ class FakeCy {
     return this.panPosition;
   }
   panningEnabled() {}
-  userPanningEnabled() {}
+  /**
+   * Whether a person may drag the canvas, and whether they may drag a state.
+   *
+   * Modelled rather than ignored because they are the whole of how a drag means one thing or
+   * the other: with the Transition tool up the states are held still and the canvas does not
+   * slide away under the gesture. A fake that swallowed both calls would let a test of "the
+   * state did not move" pass because this fake never moves states anyway.
+   */
+  panningByUser = true;
+  userPanningEnabled(next?: boolean) {
+    if (typeof next === 'boolean') this.panningByUser = next;
+    return this.panningByUser;
+  }
+  ungrabbed = false;
+  autoungrabify(next?: boolean) {
+    if (typeof next === 'boolean') this.ungrabbed = next;
+    return this.ungrabbed;
+  }
   userZoomingEnabled() {}
   svg() {
     return '<svg/>';
@@ -329,7 +346,8 @@ vi.mock('cytoscape-elk', () => ({ default: () => {} }));
 vi.mock('cytoscape-svg', () => ({ default: () => {} }));
 
 import { useJffCytoscape, DEFAULT_EPS } from './useJffCytoscape';
-import { describeState } from '@/lib/jflap-parse';
+import { describeState, parseJflap } from '@/lib/jflap-parse';
+import { toJflapXml } from '@/lib/jflap-write';
 import { STATE_FONT_SIZE } from '@/lib/jflap-layout';
 import type { ViewerViewState } from '@/lib/viewer-view-state';
 
@@ -2556,5 +2574,285 @@ describe('a viewer that may not edit the machine', () => {
     act(() => api().moveState('1', { x: 640, y: 480 }));
 
     expect(lastCy().byId('1')?.position()).toEqual({ x: 640, y: 480 });
+  });
+});
+
+/**
+ * Drawing a transition between two states.
+ *
+ * The seventh thing held beside the parsed file rather than in it. A drawn line has no place in
+ * the file's own numbering, so it takes an index above everything the file used and above every
+ * one already handed out: that number is its name in `transitionEdits`, in a deletion and in the
+ * `__idx` the derived machine gives it, and it is the same number after a rebuild, a refresh, an
+ * undo and a redo.
+ */
+describe('drawing a transition on the canvas', () => {
+  const KEY = 'submissions:machine.jff';
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  /**
+   * A viewer with the Transition tool up.
+   *
+   * The hook is told only what a drag between two states means; the viewer decides that it
+   * means a transition. Same circle as the State tool, broken the same way.
+   */
+  const withTransitionTool = (props: Partial<Parameters<typeof useJffCytoscape>[0]> = {}) => {
+    const handle: { api?: () => ReturnType<typeof useJffCytoscape> } = {};
+    const view = renderViewer({
+      honorPositionsDefault: true,
+      ...props,
+      onStateLink: (from, to) => handle.api?.().addTransition(from, to),
+    });
+    handle.api = view.api;
+    return view;
+  };
+
+  /** Where a state is on the graph. The canvas has no box in jsdom, so client is model. */
+  const at = (id: string) => lastCy().byId(id)!.position();
+  const canvas = () => screen.getByTestId('canvas');
+
+  const drag = (fromId: string, to: { x: number; y: number }, end: 'up' | 'cancel' = 'up') => {
+    const start = at(fromId);
+    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
+    if (end === 'cancel') {
+      fireEvent.pointerCancel(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
+      return;
+    }
+    fireEvent.pointerUp(window, { clientX: to.x, clientY: to.y, pointerId: 1 });
+  };
+
+  const transitionsOf = (api: () => ReturnType<typeof useJffCytoscape>) =>
+    api().parsed?.transitions.map((t) => `${t.from}->${t.to}`) ?? [];
+
+  it('makes one where the drag landed, and opens its properties', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => drag('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    // Its label starts empty in every field this machine type has, which is what an empty
+    // element in a .jff parses to.
+    const drawn = api().parsed?.transitions.find((t) => t.from === '1' && t.to === '0');
+    expect(drawn?.read).toBe('');
+    // And the panel is on it, so it can be labelled at once. By name, which is how the panel
+    // describes a transition.
+    expect(api().selectedTransition?.from).toBe('q1');
+    expect(api().selectedTransition?.to).toBe('q0');
+    expect(api().selectedTransition?.transitions.map((t) => t.index)).toEqual([drawn!.__idx]);
+    expect(api().viewModified).toBe(true);
+  });
+
+  it('makes a self-loop when the drag ends where it began', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => drag('0', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
+  });
+
+  it('makes nothing when the drag ends on empty canvas', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => drag('0', { x: 5000, y: 5000 }));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+    // Nothing to undo either: a cancelled gesture never touched the machine.
+    expect(api().canUndo).toBe(false);
+    expect(api().viewModified).toBe(false);
+  });
+
+  it('makes nothing when the gesture is cancelled', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => drag('0', at('1'), 'cancel'));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+    expect(api().canUndo).toBe(false);
+  });
+
+  /**
+   * The important one: with this tool up, a drag draws a line rather than moving the state.
+   *
+   * Asserted on the graph's own two switches rather than on where the state ended up, because
+   * they are what actually decides it: states are held still for as long as the tool is up, and
+   * the canvas is pinned for the length of a gesture so it cannot slide away under the drag.
+   */
+  it('holds the state still, and the canvas with it', async () => {
+    const { api, rerender } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    expect(lastCy().ungrabbed).toBe(true);
+
+    const before = { ...at('0') };
+    const start = at('0');
+    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
+    expect(lastCy().panningByUser).toBe(false);
+    fireEvent.pointerUp(window, { clientX: start.x, clientY: start.y, pointerId: 1 });
+
+    expect(lastCy().byId('0')!.position()).toEqual(before);
+    // Both back the moment the gesture ends, and the tool goes.
+    expect(lastCy().panningByUser).toBe(true);
+    act(() => rerender({ onStateLink: null }));
+    expect(lastCy().ungrabbed).toBe(false);
+  });
+
+  it('takes the half-drawn line off the canvas when the tool goes away', async () => {
+    const { api, rerender } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const start = at('0');
+    fireEvent.pointerDown(canvas(), { clientX: start.x, clientY: start.y, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 400, clientY: 400, pointerId: 1 });
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(true);
+
+    // Escape, or another tool: both arrive here as the handler going away.
+    act(() => rerender({ onStateLink: null }));
+
+    expect(lastCy().edgeList.some((e) => e.hasClass('preview'))).toBe(false);
+    expect(lastCy().nodeList.some((n) => n.hasClass('preview'))).toBe(false);
+    // And letting go afterwards makes nothing.
+    fireEvent.pointerUp(window, { clientX: 400, clientY: 400, pointerId: 1 });
+    expect(transitionsOf(api).filter((t) => t === '0->0')).toHaveLength(0);
+  });
+
+  it('is one undo step, and redo puts it back', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => drag('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    act(() => api().undo());
+
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().redo());
+
+    expect(transitionsOf(api)).toContain('1->0');
+  });
+
+  it('shares a line with the transitions already between the same two states', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const linesBetween = () =>
+      lastCy().edgeList.filter(
+        (e) => e.data('source') === '0' && e.data('target') === '1' && !e.hasClass('preview'),
+      );
+    expect(linesBetween()).toHaveLength(1);
+
+    act(() => drag('0', at('1')));
+
+    await waitFor(() => expect(transitionsOf(api).filter((t) => t === '0->1')).toHaveLength(2));
+    // One line, two labels on it: the same way the file's own parallel transitions are drawn.
+    expect(linesBetween()).toHaveLength(1);
+  });
+
+  it('is a transition like any other: named, deleted, and undeleted', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => drag('1', at('0')));
+    await waitFor(() => expect(api().selectedTransition?.from).toBe('q1'));
+    const idx = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
+
+    act(() => api().setTransitionField(idx, 'read', 'b'));
+    expect(api().parsed?.transitions.find((t) => t.__idx === idx)?.read).toBe('b');
+
+    act(() => api().removeTransitions([idx]));
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().undo());
+    expect(transitionsOf(api)).toContain('1->0');
+    // The label came back with it, rather than the line coming back blank.
+    expect(api().parsed?.transitions.find((t) => t.__idx === idx)?.read).toBe('b');
+  });
+
+  it('goes when a state it touches is deleted, and comes back with it', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => drag('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+
+    act(() => api().removeState('0'));
+
+    expect(transitionsOf(api)).not.toContain('1->0');
+
+    act(() => api().undo());
+
+    expect(transitionsOf(api)).toContain('1->0');
+  });
+
+  it('cannot be drawn twice under the same name, even after an undo', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    act(() => drag('1', at('0')));
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    const first = api().parsed!.transitions.find((t) => t.from === '1' && t.to === '0')!.__idx;
+
+    act(() => api().undo());
+    act(() => drag('0', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('0->0'));
+    const second = api().parsed!.transitions.find((t) => t.from === '0' && t.to === '0')!.__idx;
+    // A reused index would make an edit to one of them silently change the other.
+    expect(second).not.toBe(first);
+    expect(api().parsed!.transitions.map((t) => t.__idx)).toHaveLength(
+      new Set(api().parsed!.transitions.map((t) => t.__idx)).size,
+    );
+  });
+
+  it('comes back after a refresh, like a drawn state does', async () => {
+    const { api } = withTransitionTool({ viewStateKey: KEY });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => drag('1', at('0')));
+
+    await waitFor(() =>
+      expect(
+        JSON.parse(window.sessionStorage.getItem(`afct.viewer.view.${KEY}`)!).addedTransitions,
+      ).toHaveLength(1),
+    );
+
+    const second = withTransitionTool({ viewStateKey: KEY });
+    await waitFor(() => expect(transitionsOf(second.api)).toContain('1->0'));
+  });
+
+  it('is written into the machine that leaves the viewer', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+
+    act(() => drag('1', at('0')));
+
+    await waitFor(() => expect(transitionsOf(api)).toContain('1->0'));
+    // What "Download this arrangement" writes out is this machine, so a drawn line reaches the
+    // file the same way a drawn state does.
+    const xml = toJflapXml(api().parsed!);
+    expect(parseJflap(xml).transitions.map((t) => `${t.from}->${t.to}`)).toContain('1->0');
+  });
+
+  it('is refused when the machine may not be edited', async () => {
+    const { api } = renderViewer({ canEditMachine: false, honorPositionsDefault: true });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => api().addTransition('0', '1'));
+
+    expect(api().parsed?.transitions.length).toBe(before);
+  });
+
+  it('refuses an end that is not on the machine', async () => {
+    const { api } = withTransitionTool();
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    const before = api().parsed?.transitions.length;
+
+    act(() => api().addTransition('0', 'nowhere'));
+
+    expect(api().parsed?.transitions.length).toBe(before);
   });
 });

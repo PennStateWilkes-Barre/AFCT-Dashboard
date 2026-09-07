@@ -969,6 +969,26 @@ describe('clicking a state', () => {
     );
   });
 
+  it('offers Transition between State and Comment, and Escape leaves it', async () => {
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Transition' }));
+    expect(screen.getByRole('button', { name: 'Transition' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Select' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    );
+  });
+
   it('leaves the tool alone when Escape is pressed in a box being typed in', async () => {
     // Escape in the inspector's name box closes the panel, and in a comment it puts the caret
     // down. Taking the tool away as well would be two answers to one key.
@@ -1850,7 +1870,7 @@ describe('the Text tool', () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
-    expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State', 'Comment']);
+    expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State', 'Transition', 'Comment']);
   });
 
   it('puts a box where the canvas was clicked, with the caret already in it', async () => {
@@ -2089,7 +2109,7 @@ describe('viewer capabilities', () => {
     await waitForEngine();
 
     const tools = within(screen.getByTestId('viewer-tool-palette')).getAllByRole('button');
-    expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State']);
+    expect(tools.map((b) => b.textContent)).toEqual(['Select', 'State', 'Transition']);
   });
 
   it('shows no palette at all when nothing can be created', async () => {

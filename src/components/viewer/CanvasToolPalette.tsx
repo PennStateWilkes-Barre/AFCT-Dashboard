@@ -1,6 +1,6 @@
 'use client';
 
-import { Circle, MousePointer, Type, type LucideIcon } from 'lucide-react';
+import { Circle, MousePointer, MoveRight, Type, type LucideIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { ViewerCapabilities } from './viewer-capabilities';
@@ -8,19 +8,18 @@ import type { ViewerCapabilities } from './viewer-capabilities';
 /**
  * What clicking the canvas means.
  *
- * A union rather than a boolean, because this is three of a longer list: a transition tool
- * belongs here eventually too, and it is another answer to the same question. Everything that
- * reads the mode switches on this one value, so adding the next tool is a case in TOOLS below
- * plus a case wherever the canvas acts on it.
+ * A union rather than a boolean, because this is four of a longer list. Everything that reads
+ * the mode switches on this one value, so adding the next tool is a case in TOOLS below plus a
+ * case wherever the canvas acts on it.
  *
- * One value, never a set of flags. A tool that takes more than one click to finish, which
- * Transition will (pick a source, then pick a target), keeps `activeTool = 'transition'`
- * throughout and holds how far it has got in its own draft state beside this. Stages are not
- * tools: `transition-source-picked` as a fourth value would multiply with every tool added
- * after it, and every switch on this union would have to know about a stage it does not care
- * about. See useCanvasTools.
+ * One value, never a set of flags. Transition takes a whole gesture to finish rather than a
+ * click, and it is still one value: `activeTool` stays `'transition'` from the first press to
+ * the release, and how far the gesture has got is held beside it, in the layer that owns the
+ * graph. Stages are not tools. `transition-source-picked` as a fifth value would multiply with
+ * every tool added after it, and every switch on this union would have to know about a stage it
+ * does not care about. See useCanvasTools and `onStateLink` in useJffCytoscape.
  */
-export type CanvasTool = 'select' | 'state' | 'text';
+export type CanvasTool = 'select' | 'state' | 'transition' | 'text';
 
 /** The default, and what Escape returns to: the viewer as it has always behaved. */
 export const DEFAULT_CANVAS_TOOL: CanvasTool = 'select';
@@ -51,6 +50,15 @@ const TOOLS: ReadonlyArray<{
     label: 'State',
     icon: Circle,
     description: 'Add a state',
+    requires: 'editMachine',
+  },
+  // The same arrow the transition inspector wears in its header, so the tool that draws one and
+  // the panel that describes one are plainly about the same thing.
+  {
+    tool: 'transition',
+    label: 'Transition',
+    icon: MoveRight,
+    description: 'Add a transition',
     requires: 'editMachine',
   },
   // A comment is not part of the machine: it writes a note over the drawing and changes nothing

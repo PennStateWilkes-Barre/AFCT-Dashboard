@@ -2728,6 +2728,137 @@ describe('finishing a transition from the keyboard', () => {
   });
 });
 
+/**
+ * The panel for a line carrying several transitions.
+ *
+ * Each is its own record with its own delete, and another can be added without going back to
+ * the canvas to click the same two states again. The numbering is where a transition sits in
+ * the list; what a delete names is the transition's own index.
+ */
+describe('a line with several transitions', () => {
+  const SRC = '/api/files/submissions/abc.jff';
+  const BUNDLE = `<?xml version="1.0"?>
+<structure>
+  <type>fa</type>
+  <automaton>
+    <state id="0" name="q0"><x>0</x><y>0</y><initial/></state>
+    <state id="1" name="q1"><x>120</x><y>0</y><final/></state>
+    <transition><from>0</from><to>1</to><read>0</read></transition>
+    <transition><from>0</from><to>1</to><read>8</read></transition>
+  </automaton>
+</structure>`;
+
+  const tapEdge = () => {
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown }) => void) | undefined;
+    act(() =>
+      tap?.({
+        target: {
+          isNode: () => false,
+          hasClass: () => false,
+          id: () => 'e0-0-1',
+          data: (key: string) => (key === 'source' ? '0' : '1'),
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+      }),
+    );
+  };
+
+  const openBundle = async (props: Record<string, unknown> = {}) => {
+    fetchImpl = async () => okText(BUNDLE);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" {...props} />);
+    await waitForEngine();
+    tapEdge();
+    return screen.findByRole('group', { name: /transition from/i });
+  };
+
+  it('shows one editor per transition, each with its own delete', async () => {
+    const panel = await openBundle();
+
+    expect(within(panel).getByText('Transition 1 of 2')).toBeInTheDocument();
+    expect(within(panel).getByText('Transition 2 of 2')).toBeInTheDocument();
+    expect(
+      within(panel)
+        .getAllByLabelText('Reads')
+        .map((box) => (box as HTMLInputElement).value),
+    ).toEqual(['0', '8']);
+    expect(within(panel).getByRole('button', { name: 'Delete transition 1' })).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Delete transition 2' })).toBeInTheDocument();
+    // And the whole line, said as such so it cannot be mistaken for one of the two above.
+    expect(
+      within(panel).getByRole('button', { name: /delete all 2 transitions/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('deletes the one that was asked for, renumbers, and stays open', async () => {
+    const panel = await openBundle();
+
+    fireEvent.click(within(panel).getByRole('button', { name: 'Delete transition 1' }));
+
+    const remaining = await screen.findByRole('group', { name: /transition from/i });
+    expect(within(remaining).getAllByLabelText('Reads')).toHaveLength(1);
+    expect((within(remaining).getByLabelText('Reads') as HTMLInputElement).value).toBe('8');
+    // One left, so it is no longer "1 of 2" and has no delete of its own.
+    expect(within(remaining).queryByText(/transition 1 of/i)).toBeNull();
+    expect(within(remaining).queryByRole('button', { name: 'Delete transition 1' })).toBeNull();
+  });
+
+  it('closes only when the last one goes', async () => {
+    const panel = await openBundle();
+    fireEvent.click(within(panel).getByRole('button', { name: 'Delete transition 2' }));
+    const remaining = await screen.findByRole('group', { name: /transition from/i });
+
+    // One left, so the row at the foot is the way to it, and that one asks first.
+    fireEvent.click(within(remaining).getByRole('button', { name: /delete transition/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+  });
+
+  it('adds another between the same two states, with the caret in it', async () => {
+    const panel = await openBundle();
+
+    fireEvent.click(within(panel).getByRole('button', { name: /add transition/i }));
+
+    const grown = await screen.findByRole('group', { name: /transition from/i });
+    const boxes = within(grown).getAllByLabelText('Reads');
+    expect(boxes).toHaveLength(3);
+    expect(boxes[2]).toHaveValue('');
+    // The same pair: the panel is still about this line rather than a new one.
+    expect(within(grown).getByText('q0 → q1')).toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(boxes[2]));
+  });
+
+  it('finishes the added one with Enter, the same way any other is finished', async () => {
+    const panel = await openBundle();
+    fireEvent.click(within(panel).getByRole('button', { name: /add transition/i }));
+    const grown = await screen.findByRole('group', { name: /transition from/i });
+    const boxes = within(grown).getAllByLabelText('Reads');
+
+    fireEvent.change(boxes[2]!, { target: { value: 'z' } });
+    fireEvent.keyDown(boxes[2]!, { key: 'Enter' });
+
+    await waitFor(() => expect(screen.queryByTestId('viewer-properties-panel')).toBeNull());
+    tapEdge();
+    const back = await screen.findByRole('group', { name: /transition from/i });
+    expect(
+      within(back)
+        .getAllByLabelText('Reads')
+        .map((b) => (b as HTMLInputElement).value),
+    ).toEqual(['0', '8', 'z']);
+  });
+
+  it('offers neither to a reader who may not edit the machine', async () => {
+    const panel = await openBundle({ capabilities: { editMachine: false } });
+
+    expect(within(panel).queryByRole('button', { name: /add transition/i })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: 'Delete transition 1' })).toBeNull();
+    expect(within(panel).queryByRole('button', { name: /delete all/i })).toBeNull();
+    // Still readable, which is the point of withholding only the editing.
+    expect(within(panel).getAllByLabelText('Reads')).toHaveLength(2);
+  });
+});
+
 describe('a preview', () => {
   const SRC = '/api/files/submissions/abc.jff';
 

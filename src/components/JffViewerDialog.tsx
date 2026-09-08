@@ -823,6 +823,8 @@ function TransitionProperties({
   canEdit,
   focusSignal,
   onFinish,
+  onDeleteOne,
+  onAdd,
   onDelete,
   onClose,
 }: {
@@ -835,6 +837,10 @@ function TransitionProperties({
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
   /** Whether this panel may change the machine. See the state panel's own. */
   canEdit: boolean;
+  /** Take one transition off this line, by its own index rather than by where it is shown. */
+  onDeleteOne: (index: number) => void;
+  /** Draw another between the same two states. */
+  onAdd: () => void;
   /**
    * Done labelling this transition: put the panel down and let go of the line.
    *
@@ -914,9 +920,37 @@ function TransitionProperties({
           <div key={transition.index} className={cn('space-y-2', i > 0 && 'border-t pt-2.5')}>
             {/* Only when there is more than one to tell apart, and it says which line of the
                 label on the drawing this block is. */}
+            {/* The heading and this one's own delete, on one line. The number is where it sits
+                in the list and nothing more: what is deleted is named by the transition's own
+                index, so taking the middle one off renumbers the rest and removes the right
+                one either way. */}
             {edge.transitions.length > 1 ? (
-              <div className="text-muted-foreground text-xs">
-                Transition {i + 1} of {edge.transitions.length}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground text-xs">
+                  Transition {i + 1} of {edge.transitions.length}
+                </span>
+                {/* Only where there is more than one to tell apart. With a single transition
+                    the row at the foot of the panel already is this action, and two buttons
+                    that delete the same thing is a choice nobody wants to make. */}
+                {canEdit ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        // Quiet next to the label, and destructive on the way to being pressed.
+                        // The whole-line delete at the foot keeps the louder treatment.
+                        className="text-muted-foreground hover:text-destructive h-6 w-6 shrink-0 p-0"
+                        aria-label={`Delete transition ${i + 1}`}
+                        onClick={() => onDeleteOne(transition.index)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="left">Delete this transition</TooltipContent>
+                  </Tooltip>
+                ) : null}
               </div>
             ) : null}
             {fields.map((field, fieldIndex) => {
@@ -935,7 +969,14 @@ function TransitionProperties({
                   </Label>
                   <Input
                     id={fieldId}
-                    ref={i === 0 && field === fields[0] ? firstFieldRef : undefined}
+                    // The newest transition rather than the first: one drawn on a line that
+                    // already had transitions lands at the bottom, and that is the one somebody
+                    // has just made and is about to label.
+                    ref={
+                      i === edge.transitions.length - 1 && fieldIndex === 0
+                        ? firstFieldRef
+                        : undefined
+                    }
                     value={transition[field] ?? ''}
                     // Where this box's undo step begins; see the state panel's name field.
                     onFocus={onBeginEdit}
@@ -960,6 +1001,21 @@ function TransitionProperties({
             })}
           </div>
         ))}
+        {/* Another transition between the same two states, without going back to the canvas to
+            click them again. It is the same creation the Transition tool does, so the new one
+            joins this same line and this same panel, at the bottom, with the caret in it. */}
+        {canEdit ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground h-7 w-full justify-start gap-1.5 px-2 text-xs"
+            onClick={onAdd}
+          >
+            <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+            Add transition
+          </Button>
+        ) : null}
       </InspectorSection>
       {/* No Advanced here. A transition has no coordinates of its own, and a disclosure over an
           empty box is furniture. */}
@@ -972,7 +1028,7 @@ function TransitionProperties({
         <InspectorDeleteRow
           label={
             edge.transitions.length > 1
-              ? `Delete ${edge.transitions.length} transitions`
+              ? `Delete all ${edge.transitions.length} transitions`
               : 'Delete transition'
           }
           onDelete={() => onDelete(edge.transitions.map((transition) => transition.index))}
@@ -1232,8 +1288,14 @@ export function JffCytoscapeViewer({
    * and a selected comment all go the moment the next line begins.
    */
   const clearForDraftRef = useRef<() => void>(() => {});
-  /** How many lines have been drawn in this viewer. See `focusSignal` on the transition panel. */
-  const [drawnTransitions, setDrawnTransitions] = useState(0);
+  /**
+   * Bumped whenever the transitions on the selected line change under the reader.
+   *
+   * Drawing one on the canvas, adding one from the panel, or deleting one: each leaves a panel
+   * whose contents are not what they were, and the caret should be somewhere useful in it
+   * rather than nowhere. See `focusSignal` on the transition panel.
+   */
+  const [transitionFocus, setTransitionFocus] = useState(0);
   const onLinkAnchor = useCallback(() => clearForDraftRef.current(), []);
   /**
    * What the reader has asked to delete, held until they say yes.
@@ -1276,6 +1338,7 @@ export function JffCytoscapeViewer({
     selectTransition,
     addState,
     addTransition,
+    addTransitionToSelected,
     alignStates,
     distributeStates,
     cancelLinkDraft,
@@ -1364,7 +1427,7 @@ export function JffCytoscapeViewer({
   stateLinkRef.current = (from, to) => {
     addTransition(from, to);
     // So the reader can type the symbol straight away, which is the only reason to draw a line.
-    setDrawnTransitions((n) => n + 1);
+    setTransitionFocus((n) => n + 1);
   };
   cancelLinkDraftRef.current = cancelLinkDraft;
   clearSelectionRef.current = () => {
@@ -1966,10 +2029,24 @@ export function JffCytoscapeViewer({
                 onBeginEdit={beginEdit}
                 onEdit={setTransitionField}
                 canEdit={capabilities.editMachine}
-                focusSignal={drawnTransitions}
+                focusSignal={transitionFocus}
                 // The same thing the panel's own close button does: the selection goes with
                 // the panel, so no line is left lit up behind it.
                 onFinish={clearSelectedState}
+                // One transition, named by its own index. Not confirmed: the panel is right
+                // there showing what went, and Undo puts it back, which is the bargain every
+                // other single edit in here makes. The whole line still asks first.
+                onDeleteOne={(index) => {
+                  removeTransitions([index]);
+                  // The button that was just pressed has gone with the block it was in. The
+                  // caret goes to the last transition still on the line, or nowhere if that
+                  // was the last one and the panel has closed with it.
+                  setTransitionFocus((n) => n + 1);
+                }}
+                onAdd={() => {
+                  addTransitionToSelected();
+                  setTransitionFocus((n) => n + 1);
+                }}
                 onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />

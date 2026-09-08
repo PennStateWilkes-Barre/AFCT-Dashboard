@@ -1063,6 +1063,9 @@ export function useJffCytoscape({
   // assigned by the bundler and would not survive a re-parse, while the pair is the machine's
   // own identity for it.
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
+  /** The selected line's two ends, by state id, for the handlers built once per load. */
+  const selectedEdgeRef = useRef<{ from: string; to: string } | null>(null);
+  selectedEdgeRef.current = selectedEdge;
   /**
    * Where the selected state is on the canvas right now.
    *
@@ -2045,11 +2048,30 @@ export function useJffCytoscape({
       removedRef.current = next;
       setRemoved(next);
       applyDerived(next, addedStatesRef.current);
-      // The line has gone, so the dimming it put on everything else has to go too.
-      clearHighlight(cyRef.current);
-      setSelectedEdge(null);
+
+      /**
+       * Whether the line itself has gone, or only one of the transitions drawn on it.
+       *
+       * Parallel transitions between the same two states share one line and one panel. Taking
+       * one of three off leaves a line with two on it, and the reader is still looking at it:
+       * closing the panel there would throw away the thing they were working in. Only when the
+       * last one goes does the line go, and the selection with it.
+       */
+      const pristine = pristineParsed.current;
+      const pair = selectedEdgeRef.current;
+      const remaining =
+        pristine && pair
+          ? deriveParsed(pristine, { ...currentEdits(), removed: next }).transitions.some(
+              (t) => t.from === pair.from && t.to === pair.to,
+            )
+          : false;
+      if (!remaining) {
+        // The line has gone, so the dimming it put on everything else has to go too.
+        clearHighlight(cyRef.current);
+        setSelectedEdge(null);
+      }
     },
-    [recordStep, applyDerived],
+    [recordStep, applyDerived, currentEdits],
   );
 
   const restoreSavedView = useCallback(
@@ -3515,6 +3537,21 @@ export function useJffCytoscape({
     },
     addState,
     addTransition,
+    /**
+     * Draw another transition between the two states the panel is already about.
+     *
+     * The same `addTransition` the canvas tool calls, so it is a real transition in every way
+     * that matters: one history step, the same identity scheme, the same bundling onto the one
+     * line, the same export. This only saves the reader going back to the canvas to click the
+     * same two states again.
+     *
+     * The pair comes from the selection, which holds state ids; the panel above it shows names,
+     * and two states are allowed to share a name.
+     */
+    addTransitionToSelected: () => {
+      const pair = selectedEdgeRef.current;
+      if (pair) addTransition(pair.from, pair.to);
+    },
     /**
      * Put down a half-drawn line, and say whether there was one to put down.
      *

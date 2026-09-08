@@ -3657,3 +3657,165 @@ describe('arranging the selected states', () => {
     await waitFor(() => expect(line.style()['text-margin-x']).toBeDefined());
   });
 });
+
+/**
+ * Several transitions on one line, managed one at a time.
+ *
+ * Parallel transitions between the same two states share a line and a panel. Each is its own
+ * record with its own index, and that index is what a deletion names: the number the panel
+ * shows is where it sits in the list and nothing more.
+ */
+describe('one line, several transitions', () => {
+  const bundled = `<?xml version="1.0"?>
+<structure>
+  <type>fa</type>
+  <automaton>
+    <state id="0" name="q0"><x>10</x><y>20</y><initial/></state>
+    <state id="1" name="q1"><x>100</x><y>20</y><final/></state>
+    <transition><from>0</from><to>1</to><read>0</read></transition>
+    <transition><from>0</from><to>1</to><read>8</read></transition>
+  </automaton>
+</structure>`;
+
+  const ready = async () => {
+    global.fetch = fetchOk(bundled) as unknown as typeof fetch;
+    const view = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(view.api().phase).toBe('ready'));
+    return view;
+  };
+  const reads = (api: () => ReturnType<typeof useJffCytoscape>) =>
+    (api().parsed?.transitions ?? []).map((t) => t.read);
+  const selectLine = () => {
+    const cy = lastCy();
+    act(() => cy.handlers['tap']?.({ target: cy.edgeList[0] }));
+  };
+
+  it('takes off the one that was named, and leaves the other', async () => {
+    const { api } = await ready();
+    selectLine();
+    const eight = api().parsed!.transitions.find((t) => t.read === '8')!.__idx;
+
+    act(() => api().removeTransitions([eight]));
+
+    expect(reads(api)).toEqual(['0']);
+    // The line is still there, and so is the panel: one of two went, not the pair.
+    expect(api().selectedTransition?.transitions).toHaveLength(1);
+  });
+
+  it('lets the line go only when the last transition on it does', async () => {
+    const { api } = await ready();
+    selectLine();
+    const [first, second] = api().parsed!.transitions.map((t) => t.__idx);
+
+    act(() => api().removeTransitions([first!]));
+    expect(api().selectedTransition).not.toBeNull();
+
+    act(() => api().removeTransitions([second!]));
+
+    expect(api().selectedTransition).toBeNull();
+    expect(
+      lastCy().edgeList.some((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toBe(false);
+  });
+
+  it('puts the right one back on undo, and takes it off again on redo', async () => {
+    const { api } = await ready();
+    selectLine();
+    const eight = api().parsed!.transitions.find((t) => t.read === '8')!.__idx;
+
+    act(() => api().removeTransitions([eight]));
+    expect(reads(api)).toEqual(['0']);
+
+    act(() => api().undo());
+    expect(reads(api).sort()).toEqual(['0', '8']);
+
+    act(() => api().redo());
+    expect(reads(api)).toEqual(['0']);
+  });
+
+  it('writes out only what is left', async () => {
+    const { api } = await ready();
+    selectLine();
+    const eight = api().parsed!.transitions.find((t) => t.read === '8')!.__idx;
+
+    act(() => api().removeTransitions([eight]));
+
+    const back = parseJflap(toJflapXml(api().parsed!));
+    expect(back.transitions.map((t) => t.read)).toEqual(['0']);
+  });
+
+  it('adds another between the same two states, and writes that out too', async () => {
+    const { api } = await ready();
+    selectLine();
+
+    act(() => api().addTransitionToSelected());
+
+    // A real transition on the same line: three records, one edge.
+    expect(api().parsed?.transitions).toHaveLength(3);
+    expect(api().selectedTransition?.transitions).toHaveLength(3);
+    expect(
+      lastCy().edgeList.filter((e) => e.data('source') === '0' && e.data('target') === '1'),
+    ).toHaveLength(1);
+
+    act(() => api().setTransitionField(api().parsed!.transitions[2]!.__idx, 'read', 'z'));
+    const back = parseJflap(toJflapXml(api().parsed!));
+    expect(back.transitions.map((t) => t.read).sort()).toEqual(['0', '8', 'z']);
+  });
+
+  it('gives the new one an index of its own, and leaves the others theirs', async () => {
+    const { api } = await ready();
+    selectLine();
+    const before = api().parsed!.transitions.map((t) => t.__idx);
+
+    act(() => api().addTransitionToSelected());
+
+    const after = api().parsed!.transitions.map((t) => t.__idx);
+    expect(after.slice(0, 2)).toEqual(before);
+    expect(new Set(after).size).toBe(3);
+  });
+
+  it('is one history step, undone and redone whole', async () => {
+    const { api } = await ready();
+    selectLine();
+
+    act(() => api().addTransitionToSelected());
+    expect(api().parsed?.transitions).toHaveLength(3);
+
+    act(() => api().undo());
+    expect(api().parsed?.transitions).toHaveLength(2);
+
+    act(() => api().redo());
+    expect(api().parsed?.transitions).toHaveLength(3);
+  });
+
+  it('edits one without touching the other', async () => {
+    const { api } = await ready();
+    selectLine();
+    const zero = api().parsed!.transitions.find((t) => t.read === '0')!.__idx;
+
+    act(() => api().setTransitionField(zero, 'read', 'x'));
+
+    expect(reads(api).sort()).toEqual(['8', 'x']);
+  });
+
+  it('refuses both when the machine may not be edited', async () => {
+    global.fetch = fetchOk(bundled) as unknown as typeof fetch;
+    const { api } = renderViewer({ honorPositionsDefault: true, canEditMachine: false });
+    await waitFor(() => expect(api().phase).toBe('ready'));
+    selectLine();
+    const eight = api().parsed!.transitions.find((t) => t.read === '8')!.__idx;
+
+    act(() => api().removeTransitions([eight]));
+    act(() => api().addTransitionToSelected());
+
+    expect(api().parsed?.transitions).toHaveLength(2);
+  });
+
+  it('does nothing when no line is selected', async () => {
+    const { api } = await ready();
+
+    act(() => api().addTransitionToSelected());
+
+    expect(api().parsed?.transitions).toHaveLength(2);
+  });
+});

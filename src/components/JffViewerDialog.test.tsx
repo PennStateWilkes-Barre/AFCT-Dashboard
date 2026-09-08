@@ -2257,7 +2257,13 @@ describe('the Text tool', () => {
 
   /**
    * The one that matters. A note over a drawing must not become part of the drawing: no state,
-   * no transition, and nothing that says the reader has changed the submitted file.
+   * no transition, nothing in the panels.
+   *
+   * It does now say the drawing has changed, which it did not before comments joined the undo
+   * history. That is deliberate rather than a leak: the note beside the machine type is partly
+   * the depth of that history, and a comment is a change to the drawing the reader can step
+   * back through. What the note says stays true either way, since the submitted file is
+   * untouched and nothing here writes to it.
    */
   it('changes nothing about the machine', async () => {
     const user = userEvent.setup();
@@ -2269,8 +2275,30 @@ describe('the Text tool', () => {
     await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'not a state');
 
     expect(h.cy.add.mock.calls.length).toBe(drawnBefore);
-    expect(screen.queryByRole('button', { name: /file changed/i })).toBeNull();
     expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+  });
+
+  /** And the other side of that: the comment is undoable, whole, in one step. */
+  it('steps back through a comment with Undo, and forward again with Redo', async () => {
+    const user = userEvent.setup();
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground();
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'this loop');
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+    expect(await screen.findByText('this loop')).toBeInTheDocument();
+
+    const undo = screen.getByRole('button', { name: /^undo$/i });
+    await waitFor(() => expect(undo).toBeEnabled());
+    await user.click(undo);
+
+    // The box and its words together: typing a sentence is one step, not one per letter.
+    await waitFor(() => expect(screen.queryByText('this loop')).toBeNull());
+    await waitFor(() => expect(stored()).toEqual([]));
+
+    await user.click(screen.getByRole('button', { name: /^redo$/i }));
+    expect(await screen.findByText('this loop')).toBeInTheDocument();
   });
 });
 

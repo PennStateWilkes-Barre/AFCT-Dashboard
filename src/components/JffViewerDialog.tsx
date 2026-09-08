@@ -71,7 +71,10 @@ import {
   ViewerFileProperties,
   useViewerFileProperties,
 } from '@/components/viewer/ViewerFileProperties';
-import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
+import {
+  useViewerTextBoxes,
+  type ViewerTextBoxHistory,
+} from '@/components/viewer/useViewerTextBoxes';
 import {
   Grid,
   Copy,
@@ -1250,6 +1253,24 @@ export function JffCytoscapeViewer({
    */
   const backgroundClickRef = useRef<((at: { x: number; y: number }) => boolean) | null>(null);
   /**
+   * The undo history, reached before the hook that owns it has run.
+   *
+   * The comments and the machine share one history, so the comment hook has to be able to
+   * record a step. It is created first, because the graph hook needs to be able to read and
+   * restore the comments, so what it is handed is this stable shim over a ref that is filled in
+   * below. The same knot `backgroundClickRef` ties, for the same reason.
+   */
+  const textHistoryRef = useRef<ViewerTextBoxHistory | null>(null);
+  const textHistory = useMemo<ViewerTextBoxHistory>(
+    () => ({
+      record: () => textHistoryRef.current?.record(),
+      hold: () => textHistoryRef.current?.hold() ?? null,
+      commitHeld: () => textHistoryRef.current?.commitHeld(),
+      discardHeld: (held) => textHistoryRef.current?.discardHeld(held),
+    }),
+    [],
+  );
+  /**
    * The reader's own writing over this machine, and where it is kept between visits.
    *
    * Keyed by the file's own route, which is the one thing every way into this viewer agrees on:
@@ -1257,7 +1278,7 @@ export function JffCytoscapeViewer({
    * split window keep their own. Not `viewStateKey`, which the standalone window supplies and
    * the dialog does not, so the same file would have had two sets of notes.
    */
-  const textBoxes = useViewerTextBoxes(src);
+  const textBoxes = useViewerTextBoxes(src, textHistory);
   const selectTextBoxRaw = textBoxes.select;
   // The element the graph's transform is written to, so the boxes ride the pan and the zoom.
   const textOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -1325,6 +1346,7 @@ export function JffCytoscapeViewer({
     toggleSnapToGrid,
     canUndo,
     canRedo,
+    textBoxHistory,
     undo,
     redo,
     selectedState,
@@ -1372,6 +1394,8 @@ export function JffCytoscapeViewer({
     onStateLink,
     onLinkAnchor,
     graphOverlayRef: textOverlayRef,
+    readTextBoxes: textBoxes.readBoxes,
+    restoreTextBoxes: textBoxes.restore,
     canEditMachine: capabilities.editMachine,
     lockArrangement: preview,
     initialZoom,
@@ -1391,6 +1415,10 @@ export function JffCytoscapeViewer({
    * this is the only place that hears about it. Only that one direction, deliberately: two
    * effects pointing at each other would each undo the other within one commit.
    */
+  // The other half of the knot tied above: from here on, a comment's changes reach the
+  // machine's undo history. Assigned during render, so the very first note is undoable.
+  textHistoryRef.current = textBoxHistory;
+
   const clearSelectedStateRef = useRef(clearSelectedState);
   clearSelectedStateRef.current = clearSelectedState;
   const selectTextBox = useCallback(

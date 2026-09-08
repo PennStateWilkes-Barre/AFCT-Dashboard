@@ -85,6 +85,56 @@ describe('an entry from before a field existed', () => {
     expect(back?.history?.undo[0].addedTransitions).toBeUndefined();
   });
 
+  /**
+   * And the same again for the comments a step now carries. An entry written before undo
+   * reached them is a step with no comments in it, not a broken one.
+   */
+  it('opens a step that predates comments, and keeps them when they are there', () => {
+    window.sessionStorage.setItem(
+      'afct.viewer.view.submissions:a.jff',
+      JSON.stringify({
+        ...STATE,
+        history: {
+          undo: [{ positions: { q0: { x: 0, y: 0 } }, honorPositions: true }],
+          redo: [],
+        },
+      }),
+    );
+    expect(readViewState('submissions:a.jff')?.history?.undo[0].textBoxes).toBeUndefined();
+
+    const boxes = [{ id: 'text-1', x: 10, y: 20, width: 200, height: 80, text: 'the bug' }];
+    writeViewState('submissions:a.jff', {
+      ...STATE,
+      history: {
+        undo: [{ positions: { q0: { x: 0, y: 0 } }, honorPositions: true, textBoxes: boxes }],
+        redo: [],
+      },
+    });
+    expect(readViewState('submissions:a.jff')?.history?.undo[0].textBoxes).toEqual(boxes);
+  });
+
+  it('refuses a step whose comments are the wrong shape', () => {
+    window.sessionStorage.setItem(
+      'afct.viewer.view.submissions:a.jff',
+      JSON.stringify({
+        ...STATE,
+        history: {
+          undo: [
+            {
+              positions: { q0: { x: 0, y: 0 } },
+              honorPositions: true,
+              // No width, which `isTextBox` refuses. A half-shaped record should not reach
+              // the canvas through the history any more than it should through storage.
+              textBoxes: [{ id: 'text-1', x: 10, y: 20, height: 80, text: 'the bug' }],
+            },
+          ],
+          redo: [],
+        },
+      }),
+    );
+    expect(readViewState('submissions:a.jff')).toBeNull();
+  });
+
   it('keeps drawn transitions when they are there, and refuses a mangled one', () => {
     const drawn = [{ idx: 7, from: '0', to: '1', read: 'a' }];
     writeViewState('submissions:a.jff', { ...STATE, addedTransitions: drawn });

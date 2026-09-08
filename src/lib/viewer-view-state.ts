@@ -13,6 +13,8 @@
  * view of it, and losing it costs a reader one fit.
  */
 
+import { isTextBoxList, type ViewerTextBox } from '@/lib/viewer-text-boxes';
+
 /**
  * The camera: how far in, and where over the machine.
  *
@@ -200,6 +202,16 @@ export type ViewerHistoryStep = {
   /** Optional like the rest, so a step written before this existed still steps. */
   addedTransitions?: ViewerAddedTransition[];
   removed?: ViewerRemoved;
+  /**
+   * The comments written over the machine, as they stood.
+   *
+   * They ride in the step even though they live in `localStorage` rather than here, because a
+   * step is one moment of the drawing and a reader who writes a note and presses undo means
+   * that note. The two stores keep their own lifetimes: close the window and the history goes
+   * while the comments stay, which reads as "nothing left to undo", the same answer a machine
+   * with no history gives.
+   */
+  textBoxes?: ViewerTextBox[];
 };
 
 export type ViewerHistory = { undo: ViewerHistoryStep[]; redo: ViewerHistoryStep[] };
@@ -383,6 +395,7 @@ function isHistoryStep(value: unknown): value is ViewerHistoryStep {
     return false;
   }
   if (step.removed !== undefined && !isRemoved(step.removed)) return false;
+  if (step.textBoxes !== undefined && !isTextBoxList(step.textBoxes)) return false;
   return true;
 }
 

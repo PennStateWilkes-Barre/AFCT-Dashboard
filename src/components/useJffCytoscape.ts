@@ -6,6 +6,7 @@ import {
   bestLoopDirection,
   bestStartMarkerDirection,
   edgeLabelOffset,
+  edgeLabelGapForText,
   loopLabelOffset,
   startMarkerPolygon,
   startMarkerPosition,
@@ -129,6 +130,25 @@ function debounce(fn: () => void, ms: number) {
   };
 }
 
+/**
+ * How far one edge's label sits off the point cytoscape anchors it to.
+ *
+ * The one place that answers it, because two things ask: the style that actually moves the
+ * label, and the obstacle list that steers self-loops and initial-state markers around it. The
+ * two answering differently is how a marker ends up drawn through a label that has moved.
+ *
+ * The gap comes from the label cytoscape is drawing, so a bundle of several transitions stands
+ * off far enough for its nearest line to clear the edge rather than its middle.
+ */
+function edgeLabelShift(edge: any): { x: number; y: number } {
+  return edgeLabelOffset(
+    edge.source().position(),
+    edge.target().position(),
+    edge.midpoint(),
+    edgeLabelGapForText(String(edge.data('label') ?? '')),
+  );
+}
+
 // Where every transition label has ended up, for the things that have to dodge them.
 // Only meaningful once `updateEdgeLabelMargins` has run.
 function edgeLabelAnchors(cy: any): { x: number; y: number }[] {
@@ -137,7 +157,7 @@ function edgeLabelAnchors(cy: any): { x: number; y: number }[] {
     .filter((e: any) => e.data('isLoop') !== 1 && String(e.data('label') ?? '') !== '')
     .map((e: any) => {
       const mid = e.midpoint();
-      const off = edgeLabelOffset(e.source().position(), e.target().position(), mid);
+      const off = edgeLabelShift(e);
       return { x: mid.x + off.x, y: mid.y + off.y };
     });
 }
@@ -1063,6 +1083,9 @@ export function useJffCytoscape({
   // assigned by the bundler and would not survive a re-parse, while the pair is the machine's
   // own identity for it.
   const [selectedEdge, setSelectedEdge] = useState<{ from: string; to: string } | null>(null);
+  /** The selected line's two ends, by state id, for the handlers built once per load. */
+  const selectedEdgeRef = useRef<{ from: string; to: string } | null>(null);
+  selectedEdgeRef.current = selectedEdge;
   /**
    * Where the selected state is on the canvas right now.
    *
@@ -2045,11 +2068,30 @@ export function useJffCytoscape({
       removedRef.current = next;
       setRemoved(next);
       applyDerived(next, addedStatesRef.current);
-      // The line has gone, so the dimming it put on everything else has to go too.
-      clearHighlight(cyRef.current);
-      setSelectedEdge(null);
+
+      /**
+       * Whether the line itself has gone, or only one of the transitions drawn on it.
+       *
+       * Parallel transitions between the same two states share one line and one panel. Taking
+       * one of three off leaves a line with two on it, and the reader is still looking at it:
+       * closing the panel there would throw away the thing they were working in. Only when the
+       * last one goes does the line go, and the selection with it.
+       */
+      const pristine = pristineParsed.current;
+      const pair = selectedEdgeRef.current;
+      const remaining =
+        pristine && pair
+          ? deriveParsed(pristine, { ...currentEdits(), removed: next }).transitions.some(
+              (t) => t.from === pair.from && t.to === pair.to,
+            )
+          : false;
+      if (!remaining) {
+        // The line has gone, so the dimming it put on everything else has to go too.
+        clearHighlight(cyRef.current);
+        setSelectedEdge(null);
+      }
     },
-    [recordStep, applyDerived],
+    [recordStep, applyDerived, currentEdits],
   );
 
   const restoreSavedView = useCallback(
@@ -2448,11 +2490,7 @@ export function useJffCytoscape({
             // loop and leaves it horizontal, as JFLAP does. Source and target coincide, so
             // there is no edge direction here to work from anyway.
             if (edge.data('isLoop') === 1) return;
-            const { x, y } = edgeLabelOffset(
-              edge.source().position(),
-              edge.target().position(),
-              edge.midpoint(),
-            );
+            const { x, y } = edgeLabelShift(edge);
             // The angle comes from `text-rotation: autorotate` in the stylesheet. These
             // margins are in screen space, not the label's own rotated frame, so the
             // standoff stays perpendicular to the edge whatever angle the label is at.
@@ -3515,6 +3553,21 @@ export function useJffCytoscape({
     },
     addState,
     addTransition,
+    /**
+     * Draw another transition between the two states the panel is already about.
+     *
+     * The same `addTransition` the canvas tool calls, so it is a real transition in every way
+     * that matters: one history step, the same identity scheme, the same bundling onto the one
+     * line, the same export. This only saves the reader going back to the canvas to click the
+     * same two states again.
+     *
+     * The pair comes from the selection, which holds state ids; the panel above it shows names,
+     * and two states are allowed to share a name.
+     */
+    addTransitionToSelected: () => {
+      const pair = selectedEdgeRef.current;
+      if (pair) addTransition(pair.from, pair.to);
+    },
     /**
      * Put down a half-drawn line, and say whether there was one to put down.
      *

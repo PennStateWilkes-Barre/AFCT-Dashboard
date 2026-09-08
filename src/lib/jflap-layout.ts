@@ -386,6 +386,45 @@ export function loopLabelOffset(
 }
 
 /**
+ * How far a bundled transition label has to stand off its edge, given how tall it is.
+ *
+ * Cytoscape centres a label on the point it is anchored to, so a block of several lines grows
+ * in both directions: half of it comes back over the edge it belongs to, and where there is a
+ * transition each way between two states, the two blocks grow into each other and interleave.
+ * What somebody reads then is one column of alternating symbols with no way to tell which
+ * belongs to which direction.
+ *
+ * So the gap is measured to the NEAREST line rather than to the middle of the block: the line
+ * closest to the edge keeps the same clearance a single label has always had, and the rest of
+ * the stack grows outward. A one-line label comes out at exactly the old gap, which is what
+ * leaves every ordinary edge where it was.
+ *
+ * Pure, and separate from which side the label goes on: this only says how far.
+ */
+export function edgeLabelGapForLines(
+  lineCount: number,
+  lineHeight: number = LABEL_LINE_HEIGHT,
+  gap: number = EDGE_LABEL_GAP,
+): number {
+  return gap + (Math.max(1, lineCount) - 1) * (lineHeight / 2);
+}
+
+/**
+ * The same, from the label cytoscape is actually drawing.
+ *
+ * The lines are counted off the final string, after `bundleEdges` has wrapped anything too
+ * long, so a single transition whose symbols wrap onto three lines is three lines here too.
+ * An empty label counts as one and gets the plain gap.
+ */
+export function edgeLabelGapForText(
+  label: string,
+  lineHeight: number = LABEL_LINE_HEIGHT,
+  gap: number = EDGE_LABEL_GAP,
+): number {
+  return edgeLabelGapForLines(label.split('\n').length, lineHeight, gap);
+}
+
+/**
  * How far to shift a transition label off the point cytoscape anchors it to, which is the
  * midpoint of the drawn curve.
  *

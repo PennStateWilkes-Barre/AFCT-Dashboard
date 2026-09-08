@@ -1,26 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import {
-  bestLoopDirection,
-  bestStartMarkerDirection,
-  edgeLabelOffset,
-  loopLabelOffset,
-  startMarkerPolygon,
-  startMarkerPosition,
   EDGE_LABEL_GAP,
   FINAL_STATE_BORDER_WIDTH,
   LABEL_LINE_HEIGHT,
   LABEL_LOOP_GAP,
   LOOP_REACH,
   NODE_DIAMETER,
-  START_MARKER_SIZE,
-  STATE_BORDER_WIDTH,
-  noteBox,
-  noteCentre,
-  stateFontSize,
-  STATE_FONT_SIZE,
-  STATE_FONT_MIN_SIZE,
   NOTE_MAX_WIDTH,
   NOTE_PADDING,
+  START_MARKER_SIZE,
+  STATE_BORDER_WIDTH,
+  STATE_FONT_MIN_SIZE,
+  STATE_FONT_SIZE,
+  bestLoopDirection,
+  bestStartMarkerDirection,
+  edgeLabelGapForLines,
+  edgeLabelGapForText,
+  edgeLabelOffset,
+  loopLabelOffset,
+  noteBox,
+  noteCentre,
+  startMarkerPolygon,
+  startMarkerPosition,
+  stateFontSize,
 } from './jflap-layout';
 
 describe('the initial-state marker', () => {
@@ -350,5 +352,82 @@ describe('stateFontSize', () => {
 
   it('leaves an empty name alone rather than dividing by nothing', () => {
     expect(stateFontSize('')).toBe(STATE_FONT_SIZE);
+  });
+});
+
+/**
+ * How far a bundled transition label stands off its edge.
+ *
+ * Cytoscape centres a label on its anchor, so a block of several lines grows both ways and half
+ * of it comes back over the edge. Where two states have a transition each way, the two blocks
+ * grew into each other and the reader saw one column of alternating symbols. The gap is
+ * measured to the nearest line instead, so the stack grows outward.
+ */
+describe('the gap between an edge and its label', () => {
+  it('leaves a single line exactly where it has always been', () => {
+    expect(edgeLabelGapForLines(1)).toBe(EDGE_LABEL_GAP);
+    expect(edgeLabelGapForText('a')).toBe(EDGE_LABEL_GAP);
+  });
+
+  it('grows by half a line for each line after the first', () => {
+    // Half, not a whole one: the block is centred on the anchor, so pushing it out by half its
+    // extra height is what puts its nearest line back at the plain gap.
+    expect(edgeLabelGapForLines(2)).toBe(EDGE_LABEL_GAP + LABEL_LINE_HEIGHT / 2);
+    expect(edgeLabelGapForLines(3)).toBe(EDGE_LABEL_GAP + LABEL_LINE_HEIGHT);
+    expect(edgeLabelGapForLines(5)).toBe(EDGE_LABEL_GAP + 2 * LABEL_LINE_HEIGHT);
+  });
+
+  it('keeps growing, one step at a time, however many there are', () => {
+    const gaps = [1, 2, 3, 5, 8].map((n) => edgeLabelGapForLines(n));
+    for (let i = 1; i < gaps.length; i += 1) expect(gaps[i]!).toBeGreaterThan(gaps[i - 1]!);
+    expect(edgeLabelGapForLines(8)).toBe(EDGE_LABEL_GAP + 3.5 * LABEL_LINE_HEIGHT);
+  });
+
+  it('counts the lines the label actually has, after any wrapping', () => {
+    expect(edgeLabelGapForText('a\nb\nc')).toBe(edgeLabelGapForLines(3));
+    // A single transition whose symbols wrapped is still three lines to look at.
+    expect(edgeLabelGapForText('a, b,\nc, d,\ne')).toBe(edgeLabelGapForLines(3));
+  });
+
+  it('treats an empty label as one line rather than none', () => {
+    expect(edgeLabelGapForText('')).toBe(EDGE_LABEL_GAP);
+    expect(edgeLabelGapForLines(0)).toBe(EDGE_LABEL_GAP);
+  });
+
+  /** The side is chosen by the curve's bow; this only says how far. */
+  it('pushes further out without changing which side', () => {
+    const source = { x: 0, y: 0 };
+    const target = { x: 200, y: 0 };
+    const mid = { x: 100, y: 0 };
+    const one = edgeLabelOffset(source, target, mid, edgeLabelGapForLines(1));
+    const three = edgeLabelOffset(source, target, mid, edgeLabelGapForLines(3));
+
+    expect(Math.sign(three.y)).toBe(Math.sign(one.y));
+    expect(Math.abs(three.y)).toBeGreaterThan(Math.abs(one.y));
+  });
+
+  it('keeps the two directions on opposite sides, however tall they get', () => {
+    // Two states joined both ways: cytoscape bows the curves apart, and the labels follow the
+    // bow. Both blocks growing outward keeps them apart rather than into each other.
+    const a = { x: 0, y: 0 };
+    const b = { x: 200, y: 0 };
+    const gap = edgeLabelGapForLines(3);
+    const forward = edgeLabelOffset(a, b, { x: 100, y: 20 }, gap);
+    const back = edgeLabelOffset(b, a, { x: 100, y: -20 }, gap);
+
+    expect(Math.sign(forward.y)).not.toBe(Math.sign(back.y));
+  });
+
+  it.each([
+    ['horizontal', { x: 0, y: 0 }, { x: 200, y: 0 }],
+    ['vertical', { x: 0, y: 0 }, { x: 0, y: 200 }],
+    ['diagonal', { x: 0, y: 0 }, { x: 140, y: 140 }],
+  ])('stands off a %s edge by the whole gap', (_name, source, target) => {
+    const mid = { x: (source.x + target.x) / 2, y: (source.y + target.y) / 2 };
+    const gap = edgeLabelGapForLines(3);
+    const off = edgeLabelOffset(source, target, mid, gap);
+
+    // Straight out from the edge, so the whole of the gap is spent crossing it.
+    expect(Math.hypot(off.x, off.y)).toBeCloseTo(gap, 0);
   });
 });

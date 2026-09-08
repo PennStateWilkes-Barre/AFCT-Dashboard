@@ -1145,13 +1145,26 @@ export function JffCytoscapeViewer({
   const fetchedProperties = useViewerFileProperties(src, properties === undefined);
   const fileProperties = properties === undefined ? fetchedProperties : properties;
 
-  const capabilities = useMemo(
-    () =>
-      preview
-        ? { inspect: false, editMachine: false, annotate: false }
-        : resolveViewerCapabilities(capabilityOverrides),
-    [capabilityOverrides, preview],
-  );
+  // In the standalone window a menu bar offers the grid and the layout, so the toolbar drops
+  // them rather than showing the same two controls twice. False in every dialog, where the
+  // toolbar is the only place they exist. Read here rather than further down because what this
+  // viewer may do depends on it.
+  const chromeHasViewControls = useViewerChromePresent();
+
+  /**
+   * What this viewer may do, once the surface it is on has had its say.
+   *
+   * A preview may do none of the three: the word is the decision. A viewer in a dialog may not
+   * inspect either, on the same line as the exports, the layout choice and the tool palette: a
+   * panel over a page is for looking at a machine, and a properties panel that opens over one
+   * is a second panel in a space that has room for neither. Clicking still lights what was
+   * clicked, which is how an edge is picked out of a crowd; it just does not open anything.
+   */
+  const capabilities = useMemo(() => {
+    if (preview) return { inspect: false, editMachine: false, annotate: false };
+    const resolved = resolveViewerCapabilities(capabilityOverrides);
+    return chromeHasViewControls ? resolved : { ...resolved, inspect: false };
+  }, [capabilityOverrides, preview, chromeHasViewControls]);
   /**
    * Give up a half-drawn transition, if there is one.
    *
@@ -1423,11 +1436,6 @@ export function JffCytoscapeViewer({
   const [showText, setShowText] = useState(false);
 
   const [grid, setGrid] = useState(showGridDefault);
-
-  // In the standalone window a menu bar offers the grid and the layout, so the toolbar drops
-  // them rather than showing the same two controls twice. False in every dialog, where the
-  // toolbar is the only place they exist.
-  const chromeHasViewControls = useViewerChromePresent();
 
   /**
    * Put everything back the way this file opened.

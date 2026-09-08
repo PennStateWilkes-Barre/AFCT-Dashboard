@@ -423,6 +423,28 @@ describe('the toolbar does not repeat what a menu already offers', () => {
    * and no room, and offering a way to redraw the automaton in it was the one editing surface
    * that had leaked across that line.
    */
+  it('keeps the properties inspector out of a dialog too', async () => {
+    // Clicking still lights what was clicked, which is how an edge is picked out of a crowd.
+    // It just does not open a panel over a panel.
+    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
+      ((evt: { target: unknown }) => void) | undefined;
+    act(() =>
+      tap?.({
+        target: {
+          isNode: () => true,
+          hasClass: () => false,
+          id: () => '0',
+          position: () => ({ x: 0, y: 0 }),
+          closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
+        },
+      }),
+    );
+
+    expect(screen.queryByTestId('viewer-properties-panel')).toBeNull();
+  });
+
   it('keeps the canvas tools out of a dialog', async () => {
     render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
@@ -798,7 +820,7 @@ describe('clicking a state', () => {
   });
 
   it('names the state and lists what leaves and arrives', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const panel = await screen.findByRole('group', { name: /properties of state/i });
@@ -807,7 +829,7 @@ describe('clicking a state', () => {
   });
 
   it('goes away when the canvas is clicked, which is how somebody dismisses it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
@@ -821,7 +843,7 @@ describe('clicking a state', () => {
   });
 
   it('closes from its own button too', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     fireEvent.click(await screen.findByRole('button', { name: /close state properties/i }));
@@ -831,7 +853,7 @@ describe('clicking a state', () => {
   });
 
   it('says what was clicked in the header, not just its name', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const panel = await screen.findByRole('group', { name: /properties of state/i });
@@ -841,7 +863,7 @@ describe('clicking a state', () => {
   it('closes on Escape from anywhere in the panel, not only from the close button', async () => {
     // The handler used to sit on the close button, which was the only thing that took focus.
     // It is not any more: a reader typing a name has to be able to press Escape too.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const name = await screen.findByLabelText('Name');
@@ -855,7 +877,7 @@ describe('clicking a state', () => {
   });
 
   it('closes on Escape from the keyboard, since it is not a modal that traps it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const close = await screen.findByRole('button', { name: /close state properties/i });
@@ -872,7 +894,7 @@ describe('clicking a state', () => {
     // Two things at once. The canvas is a `role="img"`, so anything inside it is unreachable to
     // a screen reader; and the panel is positioned rather than laid out, so opening it does not
     // narrow the drawing and shift the machine under the reader.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const panel = await screen.findByRole('group', { name: /properties of state/i });
@@ -892,7 +914,7 @@ describe('clicking a state', () => {
    * from one state to another, which would restart the entrance for every click.
    */
   it('opens as a drawer, and stays put while it slides away', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     tapNode('0');
@@ -909,7 +931,7 @@ describe('clicking a state', () => {
   });
 
   it('swaps its contents rather than arriving again when another state is clicked', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     tapNode('0');
@@ -930,7 +952,7 @@ describe('clicking a state', () => {
    * as it was, not leave the reader to find their state again.
    */
   it('keeps the selection but hides the panel when the pane is not the active one', async () => {
-    const { rerender } = render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    const { rerender } = renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -946,7 +968,7 @@ describe('clicking a state', () => {
   });
 
   it('names the machine under the title, so a window of four files says which is which', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     tapNode('0');
@@ -985,7 +1007,7 @@ describe('clicking a state', () => {
    * including across clicking a different state, which rebuilds the panel underneath.
    */
   it('opens Advanced by default and keeps it shut once the reader shuts it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapTarget(positionedNode('0', { x: 100, y: 200 }));
 
@@ -1020,7 +1042,7 @@ describe('clicking a state', () => {
     const node = positionedNode('0', pos);
     h.cy.getElementById.mockReturnValue(node);
 
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapTarget(node);
     const x = (await screen.findByLabelText('X')) as HTMLInputElement;
@@ -1209,7 +1231,7 @@ describe('clicking a state', () => {
    * the right thing and that nothing goes until it is answered.
    */
   it('asks which state before deleting it, and takes it off when told to', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -1232,7 +1254,7 @@ describe('clicking a state', () => {
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const field = await screen.findByLabelText('Name');
@@ -1247,7 +1269,7 @@ describe('clicking a state', () => {
   it('keeps the box empty when it is emptied, rather than filling it back in', async () => {
     // A state with no name is described by its id, so a box that read its value back from the
     // machine would put `q0` in as soon as the last character went.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     const field = await screen.findByLabelText('Name');
@@ -1258,7 +1280,7 @@ describe('clicking a state', () => {
   });
 
   it('offers Initial and Final as boxes that can be ticked', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
 
@@ -1277,7 +1299,7 @@ describe('clicking a state', () => {
   it('lists what touches the state, and opens a transition when one is clicked', async () => {
     // The only other way to a transition's properties is clicking its line on the canvas, which
     // is no way at all for somebody not using a mouse.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
 
@@ -1296,7 +1318,7 @@ describe('clicking a state', () => {
    * every row of one mixed list, which left the reader doing the sorting.
    */
   it('lists what leaves the state apart from what arrives at it', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     // q0 -> q1 on a is the whole machine, so q0 has an outgoing list and no incoming one.
@@ -1335,7 +1357,7 @@ describe('clicking a state', () => {
       closedNeighborhood: () => ({ addClass: () => ({ removeClass: () => undefined }) }),
     };
     h.cy.getElementById.mockReturnValue(node);
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     const tap = h.cy.on.mock.calls.find(([name]) => name === 'tap')?.[1] as
       ((evt: { target: unknown }) => void) | undefined;
@@ -1404,7 +1426,7 @@ describe('clicking a transition', () => {
    * never a click: taking the focus of somebody who clicked a line to read it would be rude.
    */
   it('leaves the focus alone when a transition is only clicked', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
 
     tapEdge('0', '1');
@@ -1414,7 +1436,7 @@ describe('clicking a transition', () => {
   });
 
   it('names both ends and lists what the transition reads', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapEdge('0', '1');
     const panel = await screen.findByRole('group', { name: /transition from/i });
@@ -1422,7 +1444,7 @@ describe('clicking a transition', () => {
   });
 
   it('names the pair in the header and closes under its own name', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapEdge('0', '1');
     const panel = await screen.findByRole('group', { name: /transition from/i });
@@ -1437,7 +1459,7 @@ describe('clicking a transition', () => {
   });
 
   it('offers to delete the line a transition panel is about', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapEdge('0', '1');
     await screen.findByRole('group', { name: /transition from/i });
@@ -1450,7 +1472,7 @@ describe('clicking a transition', () => {
   });
 
   it('offers what it reads as a box that can be typed in', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapEdge('0', '1');
 
@@ -1467,7 +1489,7 @@ describe('clicking a transition', () => {
   it('shows one panel at a time, not a state and a transition together', async () => {
     // Both are driven by the same click, so the previous one has to give way rather than the
     // two stacking in the same corner.
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapNode('0');
     expect(await screen.findByRole('group', { name: /properties of state/i })).toBeInTheDocument();
@@ -1477,7 +1499,7 @@ describe('clicking a transition', () => {
   });
 
   it('goes away on a background click, like the state panel', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tapEdge('0', '1');
     expect(await screen.findByRole('group', { name: /transition from/i })).toBeInTheDocument();
@@ -2285,7 +2307,9 @@ describe('viewer capabilities', () => {
   });
 
   it('inspects a state while the machine may not be edited', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />);
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
     await waitForEngine();
     tapNode('0');
 
@@ -2318,7 +2342,7 @@ describe('viewer capabilities', () => {
   });
 
   it('shows no palette at all when nothing can be created', async () => {
-    render(
+    renderInWindow(
       <JffCytoscapeViewer
         src={SRC}
         title="abc.jff"
@@ -2371,7 +2395,9 @@ describe('viewer capabilities', () => {
    * with the machine rather than with the buttons.
    */
   it('refuses to change the machine even when something calls straight through', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />);
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
     await waitForEngine();
     tapNode('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -2432,7 +2458,7 @@ describe('picking out several states', () => {
   };
 
   it('closes the inspector for two, and says how many are selected instead', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tap('0');
     await screen.findByRole('group', { name: /properties of state/i });
@@ -2444,7 +2470,7 @@ describe('picking out several states', () => {
   });
 
   it('brings the inspector back when one is taken out again', async () => {
-    render(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
     await waitForEngine();
     tap('0');
     tap('1', 'ctrlKey');

@@ -3819,3 +3819,108 @@ describe('one line, several transitions', () => {
     expect(api().parsed?.transitions).toHaveLength(2);
   });
 });
+
+/**
+ * Where a bundle's label sits, on the drawn graph.
+ *
+ * The unit tests above cover the arithmetic. These are about the label cytoscape is actually
+ * given: that the margins written to an edge grow with the transitions on it and shrink again
+ * when one goes, and that undo puts the old spacing back with the old transitions.
+ */
+describe('the standoff of a bundled label', () => {
+  const twoWays = `<?xml version="1.0"?>
+<structure>
+  <type>fa</type>
+  <automaton>
+    <state id="0" name="q0"><x>10</x><y>20</y><initial/></state>
+    <state id="1" name="q1"><x>200</x><y>20</y><final/></state>
+    <transition><from>0</from><to>1</to><read>a</read></transition>
+    <transition><from>0</from><to>1</to><read>b</read></transition>
+    <transition><from>0</from><to>1</to><read>c</read></transition>
+    <transition><from>1</from><to>0</to><read>x</read></transition>
+  </automaton>
+</structure>`;
+
+  const ready = async (xml: string) => {
+    global.fetch = fetchOk(xml) as unknown as typeof fetch;
+    const view = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(view.api().phase).toBe('ready'));
+    return view;
+  };
+
+  const lineFor = (from: string, to: string) =>
+    lastCy().edgeList.find((e) => e.data('source') === from && e.data('target') === to)!;
+  const standoff = (from: string, to: string) => {
+    const style = lineFor(from, to).style();
+    return Math.hypot(Number(style['text-margin-x'] ?? 0), Number(style['text-margin-y'] ?? 0));
+  };
+
+  it('pushes a bundle further out than a single transition', async () => {
+    await ready(twoWays);
+
+    await waitFor(() => expect(standoff('0', '1')).toBeGreaterThan(0));
+    // Three transitions one way, one the other, on the same pair of states.
+    expect(String(lineFor('0', '1').data('label')).split('\n')).toHaveLength(3);
+    expect(standoff('0', '1')).toBeGreaterThan(standoff('1', '0'));
+  });
+
+  it('keeps the two directions on opposite sides of the pair', async () => {
+    await ready(twoWays);
+    await waitFor(() => expect(standoff('0', '1')).toBeGreaterThan(0));
+
+    const forward = Number(lineFor('0', '1').style()['text-margin-y'] ?? 0);
+    const back = Number(lineFor('1', '0').style()['text-margin-y'] ?? 0);
+
+    // One block above the pair and one below, which is what stops them interleaving.
+    expect(Math.sign(forward)).not.toBe(Math.sign(back));
+  });
+
+  it('grows when a transition is added and shrinks when one goes', async () => {
+    const { api } = await ready(twoWays);
+    await waitFor(() => expect(standoff('1', '0')).toBeGreaterThan(0));
+    const one = standoff('1', '0');
+
+    act(() => api().addTransition('1', '0'));
+    await waitFor(() => expect(standoff('1', '0')).toBeGreaterThan(one));
+    const two = standoff('1', '0');
+
+    const added = api().parsed!.transitions.filter((t) => t.from === '1' && t.to === '0');
+    act(() => api().removeTransitions([added[added.length - 1]!.__idx]));
+
+    await waitFor(() => expect(standoff('1', '0')).toBe(one));
+    expect(two).toBeGreaterThan(one);
+  });
+
+  it('puts the old spacing back with the old transitions, on undo and redo', async () => {
+    const { api } = await ready(twoWays);
+    await waitFor(() => expect(standoff('1', '0')).toBeGreaterThan(0));
+    const one = standoff('1', '0');
+
+    act(() => api().addTransition('1', '0'));
+    await waitFor(() => expect(standoff('1', '0')).toBeGreaterThan(one));
+    const two = standoff('1', '0');
+
+    act(() => api().undo());
+    await waitFor(() => expect(standoff('1', '0')).toBe(one));
+
+    act(() => api().redo());
+    await waitFor(() => expect(standoff('1', '0')).toBe(two));
+  });
+
+  it('leaves a self-loop label to the loop geometry', async () => {
+    // Loops are aimed and labelled by their own code, which lifts the label past the arc.
+    await ready(`<?xml version="1.0"?>
+<structure>
+  <type>fa</type>
+  <automaton>
+    <state id="0" name="q0"><x>10</x><y>20</y><initial/></state>
+    <transition><from>0</from><to>0</to><read>a</read></transition>
+  </automaton>
+</structure>`);
+
+    const loop = lastCy().edgeList.find((e) => e.data('isLoop') === 1);
+    expect(loop).toBeDefined();
+    // The edge standoff never touched it: what it has came from the loop pass.
+    await waitFor(() => expect(loop!.style()['text-margin-y']).toBeDefined());
+  });
+});

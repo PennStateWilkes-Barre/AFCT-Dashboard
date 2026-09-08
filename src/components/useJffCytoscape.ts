@@ -6,6 +6,7 @@ import {
   bestLoopDirection,
   bestStartMarkerDirection,
   edgeLabelOffset,
+  edgeLabelGapForText,
   loopLabelOffset,
   startMarkerPolygon,
   startMarkerPosition,
@@ -129,6 +130,25 @@ function debounce(fn: () => void, ms: number) {
   };
 }
 
+/**
+ * How far one edge's label sits off the point cytoscape anchors it to.
+ *
+ * The one place that answers it, because two things ask: the style that actually moves the
+ * label, and the obstacle list that steers self-loops and initial-state markers around it. The
+ * two answering differently is how a marker ends up drawn through a label that has moved.
+ *
+ * The gap comes from the label cytoscape is drawing, so a bundle of several transitions stands
+ * off far enough for its nearest line to clear the edge rather than its middle.
+ */
+function edgeLabelShift(edge: any): { x: number; y: number } {
+  return edgeLabelOffset(
+    edge.source().position(),
+    edge.target().position(),
+    edge.midpoint(),
+    edgeLabelGapForText(String(edge.data('label') ?? '')),
+  );
+}
+
 // Where every transition label has ended up, for the things that have to dodge them.
 // Only meaningful once `updateEdgeLabelMargins` has run.
 function edgeLabelAnchors(cy: any): { x: number; y: number }[] {
@@ -137,7 +157,7 @@ function edgeLabelAnchors(cy: any): { x: number; y: number }[] {
     .filter((e: any) => e.data('isLoop') !== 1 && String(e.data('label') ?? '') !== '')
     .map((e: any) => {
       const mid = e.midpoint();
-      const off = edgeLabelOffset(e.source().position(), e.target().position(), mid);
+      const off = edgeLabelShift(e);
       return { x: mid.x + off.x, y: mid.y + off.y };
     });
 }
@@ -2470,11 +2490,7 @@ export function useJffCytoscape({
             // loop and leaves it horizontal, as JFLAP does. Source and target coincide, so
             // there is no edge direction here to work from anyway.
             if (edge.data('isLoop') === 1) return;
-            const { x, y } = edgeLabelOffset(
-              edge.source().position(),
-              edge.target().position(),
-              edge.midpoint(),
-            );
+            const { x, y } = edgeLabelShift(edge);
             // The angle comes from `text-rotation: autorotate` in the stylesheet. These
             // margins are in screen space, not the label's own rotated frame, so the
             // standoff stays perpendicular to the edge whatever angle the label is at.

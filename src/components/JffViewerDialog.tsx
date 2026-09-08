@@ -822,6 +822,7 @@ function TransitionProperties({
   onEdit,
   canEdit,
   focusSignal,
+  onFinish,
   onDelete,
   onClose,
 }: {
@@ -834,6 +835,14 @@ function TransitionProperties({
   onEdit: (index: number, field: 'read' | 'pop' | 'push' | 'write' | 'move', value: string) => void;
   /** Whether this panel may change the machine. See the state panel's own. */
   canEdit: boolean;
+  /**
+   * Done labelling this transition: put the panel down and let go of the line.
+   *
+   * For Enter in the last box, which is how somebody drawing a run of transitions gets back to
+   * the canvas without reaching for the mouse: click, click, type, Enter, and the next one can
+   * start straight away. The tool is untouched, so it is still the one that draws lines.
+   */
+  onFinish: () => void;
   /**
    * Bumped when this panel opened because a transition was just drawn, rather than clicked.
    *
@@ -910,8 +919,15 @@ function TransitionProperties({
                 Transition {i + 1} of {edge.transitions.length}
               </div>
             ) : null}
-            {fields.map((field) => {
+            {fields.map((field, fieldIndex) => {
               const fieldId = `${fieldIdPrefix}-${transition.index}-${field}`;
+              // The last box of the last transition on this line: the end of the labelling,
+              // whatever kind of machine it is. A finite automaton reaches it on the first box,
+              // a pushdown automaton after Push and a Turing machine after the direction, and
+              // none of that is written here: it is the length of the field list the panel is
+              // already drawing from.
+              const isLastField =
+                i === edge.transitions.length - 1 && fieldIndex === fields.length - 1;
               return (
                 <div key={field} className="space-y-1.5">
                   <Label htmlFor={fieldId} className="text-muted-foreground text-xs font-normal">
@@ -924,6 +940,16 @@ function TransitionProperties({
                     // Where this box's undo step begins; see the state panel's name field.
                     onFocus={onBeginEdit}
                     onChange={(event) => onEdit(transition.index, field, event.target.value)}
+                    onKeyDown={(event) => {
+                      // Enter in the last box means "that is this one labelled". Only there:
+                      // Tab is how somebody moves between the boxes of a pushdown automaton,
+                      // and Enter in the middle of that would finish a transition that is half
+                      // described. Nothing to commit first, because the value is written on
+                      // every keystroke; this only puts the panel down.
+                      if (event.key !== 'Enter' || !isLastField || !canEdit) return;
+                      event.preventDefault();
+                      onFinish();
+                    }}
                     readOnly={!canEdit}
                     className="h-8 font-mono text-sm"
                     autoComplete="off"
@@ -1237,6 +1263,8 @@ export function JffCytoscapeViewer({
     selectTransition,
     addState,
     addTransition,
+    alignStates,
+    distributeStates,
     cancelLinkDraft,
     removeState,
     removeTransitions,
@@ -1401,6 +1429,20 @@ export function JffCytoscapeViewer({
   // toolbar is the only place they exist.
   const chromeHasViewControls = useViewerChromePresent();
 
+  /**
+   * Put everything back the way this file opened.
+   *
+   * The machine and the comments over it. The hook owns one and this component owns the other,
+   * and Reset means both: a comment is not part of the automaton, but it is something the
+   * reader added to this drawing, and leaving notes floating over a machine that has been put
+   * back is a half-reset. One function, so the menu's Reset and the toolbar's "Put it back"
+   * cannot come to mean different things.
+   */
+  const resetEverything = () => {
+    resetMachine();
+    textBoxes.clearAll();
+  };
+
   /** Choose a tool if this viewer has it, and do nothing at all if it does not. */
   const selectAvailableTool = (tool: CanvasTool) => {
     if (tools.includes(tool)) selectTool(tool);
@@ -1433,10 +1475,20 @@ export function JffCytoscapeViewer({
       setAutoArranged: () => {
         if (honorPositions) toggleHonorPositions();
       },
-      resetMachine,
+      resetMachine: resetEverything,
       // Through the same `selectTool` the palette buttons call, so a keyboard route has the
       // same consequences: the selection goes, a half-drawn line is given up, and a tool the
       // capabilities do not allow is refused here rather than corrected afterwards.
+      // Lining up and spreading out, one command each because `run` takes no arguments. The
+      // geometry is the hook's; these only say which of it is wanted.
+      alignLeft: () => alignStates('left'),
+      alignCenter: () => alignStates('center'),
+      alignRight: () => alignStates('right'),
+      alignTop: () => alignStates('top'),
+      alignMiddle: () => alignStates('middle'),
+      alignBottom: () => alignStates('bottom'),
+      distributeHorizontally: () => distributeStates('horizontal'),
+      distributeVertically: () => distributeStates('vertical'),
       selectSelectTool: () => selectAvailableTool('select'),
       selectStateTool: () => selectAvailableTool('state'),
       selectTransitionTool: () => selectAvailableTool('transition'),
@@ -1450,6 +1502,7 @@ export function JffCytoscapeViewer({
       canUndo,
       canRedo,
       tools,
+      selectedStates: selectedStateIds.length,
     },
   );
 
@@ -1745,10 +1798,10 @@ export function JffCytoscapeViewer({
       <ConfirmDialog
         open={resetOpen}
         title="Put the machine back?"
-        description="The states return to where the file has them, and the layout, the zoom and the undo history for this machine are forgotten. The submitted file is not changed."
+        description="The states return to where the file has them, your comments are removed, and the layout, the zoom and the undo history for this machine are forgotten. The submitted file is not changed."
         confirmText="Put it back"
         onConfirm={() => {
-          resetMachine();
+          resetEverything();
           setResetOpen(false);
         }}
         onCancel={() => setResetOpen(false)}
@@ -1860,15 +1913,19 @@ export function JffCytoscapeViewer({
         </div>
 
         {/* The canvas's own tools, opposite the inspector and treated the same way: floating over
-            the drawing, never taking width from it. Only on the pane being worked in, because
-            two palettes would be two answers to "which machine does this draw on", and only the
-            tools this viewer's capabilities allow. Those are two separate conditions on purpose:
-            room on the screen is not permission, and this used to be one flag doing both.
+            the drawing, never taking width from it.
+
+            Three conditions, each about something different. Only in the standalone window,
+            which is the same line the exports and the layout choice are on: a panel over a page
+            is for a look, and it has no room, no menus and no undo to work with. Only on the
+            pane being worked in, because two palettes would be two answers to "which machine
+            does this draw on". And only the tools this viewer's capabilities allow, because
+            room on the screen is not permission.
 
             A click on it never reaches cytoscape, so it cannot draw a state under itself. That
             is true of the toolbar, the tabs and the menus for the same reason: only the canvas
             fires the tap that places one. */}
-        {focused ? (
+        {focused && chromeHasViewControls ? (
           <CanvasToolPalette activeTool={activeTool} onSelectTool={selectTool} tools={tools} />
         ) : null}
 
@@ -1902,6 +1959,9 @@ export function JffCytoscapeViewer({
                 onEdit={setTransitionField}
                 canEdit={capabilities.editMachine}
                 focusSignal={drawnTransitions}
+                // The same thing the panel's own close button does: the selection goes with
+                // the panel, so no line is left lit up behind it.
+                onFinish={clearSelectedState}
                 onDelete={(indices) => setPendingDelete({ kind: 'transitions', indices })}
                 onClose={clearSelectedState}
               />

@@ -211,8 +211,23 @@ export function useViewerTextBoxes(documentId: string | null | undefined) {
     setEditingId(null);
   }, [commit, flush]);
 
+  /**
+   * Take every comment off this file.
+   *
+   * For Reset, which puts the automaton back the way it opened. A comment is the reader's own
+   * writing rather than part of the machine, but it is still something they added to this
+   * drawing, and leaving notes floating over a machine that has been put back would be a
+   * half-reset nobody asked for. Storage goes with them, so a refresh does not bring them back.
+   */
+  const clearAll = useCallback(() => {
+    commit([]);
+    setSelectedId(null);
+    setEditingId(null);
+  }, [commit]);
+
   return {
     boxes,
+    clearAll,
     selectedId,
     editingId,
     select,

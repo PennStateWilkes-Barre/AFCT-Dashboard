@@ -11,6 +11,14 @@ import {
   Scan,
   ListTree,
   BookOpen,
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalSpaceAround,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceAround,
   Info,
   Keyboard,
   Share,
@@ -34,9 +42,11 @@ import {
   MenubarSubTrigger,
   MenubarTrigger,
 } from '@/components/ui/menubar';
-import { useViewerActions } from '@/components/viewer/viewer-actions';
+import { useViewerActions, type ViewerActions } from '@/components/viewer/viewer-actions';
+import type { LucideIcon } from 'lucide-react';
 import { ConfirmDialog } from '@/components/dialogs/ConfirmDialog';
 import { VIEWER_DOCS_URL } from '@/lib/viewer-link';
+import { ALIGN_MINIMUM, DISTRIBUTE_MINIMUM } from '@/lib/viewer-align';
 import { viewerShortcut, shortcutKeys, type ViewerShortcutId } from '@/lib/viewer-shortcuts';
 import { useViewerShortcuts } from './useViewerShortcuts';
 import { ViewerShortcutsDialog, useMacKeys } from './ViewerShortcutsDialog';
@@ -61,6 +71,27 @@ import {
  * used rarely and need to be found by reading rather than recognised by icon. One menu today;
  * the shape is what makes adding the next one uneventful.
  */
+/**
+ * The six ways to line states up.
+ *
+ * A list rather than six blocks of markup: they differ only in a word, an icon and which
+ * command they run, and six near-identical blocks is six chances for one of them to call the
+ * wrong one. Every state is a circle of the same size, so Left and Center move them onto the
+ * same column and differ only in which column that is.
+ */
+const ALIGN_ITEMS: ReadonlyArray<{
+  action: keyof ViewerActions;
+  label: string;
+  icon: LucideIcon;
+}> = [
+  { action: 'alignLeft', label: 'Left', icon: AlignStartVertical },
+  { action: 'alignCenter', label: 'Center', icon: AlignCenterVertical },
+  { action: 'alignRight', label: 'Right', icon: AlignEndVertical },
+  { action: 'alignTop', label: 'Top', icon: AlignStartHorizontal },
+  { action: 'alignMiddle', label: 'Middle', icon: AlignCenterHorizontal },
+  { action: 'alignBottom', label: 'Bottom', icon: AlignEndHorizontal },
+];
+
 export function ViewerMenubar({
   downloadHref,
   properties,
@@ -100,7 +131,7 @@ export function ViewerMenubar({
   // False for a grammar or a regular expression, which have nothing to export: those viewers
   // register no actions, so the items disable themselves rather than being hidden. A missing
   // menu item reads as a bug; a greyed one reads as "not for this kind of file".
-  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools, run } =
+  const { ready, grid, notes, snapToGrid, layout, canUndo, canRedo, tools, selectedStates, run } =
     useViewerActions();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   /**
@@ -338,6 +369,51 @@ export function ViewerMenubar({
             </MenubarRadioItem>
           </MenubarRadioGroup>
           <MenubarSeparator />
+          {/* What to do with the states somebody has picked out. Greyed until there are enough
+              of them to mean anything: two to line up, three to spread out, since two states
+              are already evenly spaced whatever they are. Ctrl or Cmd click adds a state to the
+              selection. */}
+          <MenubarSub>
+            <MenubarSubTrigger disabled={selectedStates < ALIGN_MINIMUM}>
+              <AlignStartVertical aria-hidden="true" />
+              Align
+            </MenubarSubTrigger>
+            <MenubarSubContent>
+              {ALIGN_ITEMS.map(({ action, label, icon: Icon }) => (
+                <MenubarItem
+                  key={action}
+                  disabled={selectedStates < ALIGN_MINIMUM}
+                  onSelect={() => run(action)}
+                >
+                  <Icon aria-hidden="true" />
+                  {label}
+                </MenubarItem>
+              ))}
+            </MenubarSubContent>
+          </MenubarSub>
+          <MenubarSub>
+            <MenubarSubTrigger disabled={selectedStates < DISTRIBUTE_MINIMUM}>
+              <AlignHorizontalSpaceAround aria-hidden="true" />
+              Distribute
+            </MenubarSubTrigger>
+            <MenubarSubContent>
+              <MenubarItem
+                disabled={selectedStates < DISTRIBUTE_MINIMUM}
+                onSelect={() => run('distributeHorizontally')}
+              >
+                <AlignHorizontalSpaceAround aria-hidden="true" />
+                Horizontally
+              </MenubarItem>
+              <MenubarItem
+                disabled={selectedStates < DISTRIBUTE_MINIMUM}
+                onSelect={() => run('distributeVertically')}
+              >
+                <AlignVerticalSpaceAround aria-hidden="true" />
+                Vertically
+              </MenubarItem>
+            </MenubarSubContent>
+          </MenubarSub>
+          <MenubarSeparator />
           {/* Off by default: an automaton arrives with the positions its author chose, and
               quietly moving every state the first time one is nudged would be a change nobody
               asked for. */}
@@ -410,7 +486,7 @@ export function ViewerMenubar({
       <ConfirmDialog
         open={resetOpen}
         title="Reset this automaton?"
-        description="This discards every change you have made here: states and transitions you added, renamed, re-marked, re-worded or deleted, and where everything sits. The arrangement choice, the zoom and the undo history go with them. The submitted file is not changed, and the other open files are not affected."
+        description="This discards every change you have made here: states and transitions you added, renamed, re-marked, re-worded or deleted, where everything sits, and the comments you have written on it. The arrangement choice, the zoom and the undo history go with them. The submitted file is not changed, and the other open files are not affected."
         confirmText="Reset automaton"
         onConfirm={() => {
           // The action keeps its own name. What it does has not changed; what it is called on

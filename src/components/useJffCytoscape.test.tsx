@@ -3511,3 +3511,149 @@ describe('remembering which states were selected', () => {
     expect(api().selectedState?.name).toBe('q1');
   });
 });
+
+/**
+ * Lining up and spreading out the states that are picked out.
+ *
+ * The arrangement rather than the machine, like a drag: it moves the drawing, the file it came
+ * from is untouched, and the whole command is one undo step however many states it moved.
+ */
+describe('arranging the selected states', () => {
+  const tap = (id: string, modifier?: 'ctrlKey' | 'metaKey') => {
+    const cy = lastCy();
+    act(() =>
+      cy.handlers['tap']?.({
+        target: cy.byId(id),
+        ...(modifier ? { originalEvent: { [modifier]: true } } : {}),
+      }),
+    );
+  };
+  const positionOf = (id: string) => lastCy().byId(id)!.position();
+  const putAt = (id: string, at: { x: number; y: number }) => lastCy().byId(id)!.position(at);
+
+  const ready = async () => {
+    const view = renderViewer({ honorPositionsDefault: true });
+    await waitFor(() => expect(view.api().phase).toBe('ready'));
+    return view;
+  };
+
+  it('brings the selected states onto one line, leaving the other axis alone', async () => {
+    const { api } = await ready();
+    putAt('0', { x: 10, y: 100 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    act(() => api().alignStates('left'));
+
+    expect(positionOf('0')).toEqual({ x: 10, y: 100 });
+    expect(positionOf('1')).toEqual({ x: 10, y: 40 });
+  });
+
+  it('spreads three out evenly, keeping the two on the ends', async () => {
+    const { api } = await ready();
+    act(() => api().addState({ x: 200, y: 0 }));
+    await waitFor(() => expect(api().parsed?.states).toHaveLength(3));
+    const drawn = api().selectedStateIds[0]!;
+    putAt('0', { x: 0, y: 0 });
+    putAt('1', { x: 10, y: 0 });
+    putAt(drawn, { x: 100, y: 0 });
+    tap('0');
+    tap('1', 'ctrlKey');
+    act(() =>
+      lastCy().handlers['tap']?.({
+        target: lastCy().byId(drawn),
+        originalEvent: { ctrlKey: true },
+      }),
+    );
+
+    act(() => api().distributeStates('horizontal'));
+
+    expect(positionOf('0').x).toBe(0);
+    expect(positionOf('1').x).toBe(50);
+    expect(positionOf(drawn).x).toBe(100);
+  });
+
+  it('is one undo step, however many states it moved', async () => {
+    const { api } = await ready();
+    // Both states have to move, or one step and one step per state look the same.
+    putAt('0', { x: 10, y: 100 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+    tap('1', 'ctrlKey');
+    expect(api().canUndo).toBe(false);
+
+    act(() => api().alignStates('middle'));
+
+    expect(positionOf('0').y).toBe(70);
+    expect(positionOf('1').y).toBe(70);
+    await waitFor(() => expect(api().canUndo).toBe(true));
+
+    act(() => api().undo());
+
+    expect(positionOf('0')).toEqual({ x: 10, y: 100 });
+    expect(positionOf('1')).toEqual({ x: 90, y: 40 });
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('records nothing when the states are already where the command wants them', async () => {
+    const { api } = await ready();
+    putAt('0', { x: 10, y: 40 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    act(() => api().alignStates('top'));
+
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('does nothing with fewer states than the command needs', async () => {
+    const { api } = await ready();
+    putAt('0', { x: 10, y: 100 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+
+    act(() => api().alignStates('left'));
+    expect(positionOf('0')).toEqual({ x: 10, y: 100 });
+    expect(api().canUndo).toBe(false);
+
+    // Two is enough to line up and not enough to spread out.
+    tap('1', 'ctrlKey');
+    act(() => api().distributeStates('horizontal'));
+    expect(positionOf('0')).toEqual({ x: 10, y: 100 });
+    expect(api().canUndo).toBe(false);
+  });
+
+  it('leaves the states nobody picked out where they are', async () => {
+    const { api } = await ready();
+    putAt('0', { x: 10, y: 100 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+
+    // One selected is too few to align, so nothing moves at all; the point is that the
+    // command reads the selection rather than the whole machine.
+    act(() => api().alignStates('left'));
+
+    expect(positionOf('1')).toEqual({ x: 90, y: 40 });
+  });
+
+  it('puts the labels back in step with the states it moved', async () => {
+    const { api } = await ready();
+    putAt('0', { x: 10, y: 100 });
+    putAt('1', { x: 90, y: 40 });
+    tap('0');
+    tap('1', 'ctrlKey');
+
+    const line = lastCy().edgeList.find(
+      (e) => e.data('source') === '0' && e.data('target') === '1',
+    )!;
+    // Cleared first, so this is about the align putting them back rather than about the load
+    // having set them once at the start.
+    line.style_ = {};
+
+    act(() => api().alignStates('middle'));
+
+    await waitFor(() => expect(line.style()['text-margin-x']).toBeDefined());
+  });
+});

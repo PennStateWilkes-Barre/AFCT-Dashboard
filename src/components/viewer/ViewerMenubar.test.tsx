@@ -30,6 +30,14 @@ const actions = {
   setAutoArranged: vi.fn(),
   resetMachine: vi.fn(),
   centerInWindow: vi.fn(),
+  alignLeft: vi.fn(),
+  alignCenter: vi.fn(),
+  alignRight: vi.fn(),
+  alignTop: vi.fn(),
+  alignMiddle: vi.fn(),
+  alignBottom: vi.fn(),
+  distributeHorizontally: vi.fn(),
+  distributeVertically: vi.fn(),
   selectSelectTool: vi.fn(),
   selectStateTool: vi.fn(),
   selectTransitionTool: vi.fn(),
@@ -48,6 +56,7 @@ function FakeViewer({
   canUndo = false,
   canRedo = false,
   tools = ALL_TOOLS,
+  selectedStates = 0,
 }: {
   grid?: boolean;
   notes?: boolean;
@@ -56,6 +65,7 @@ function FakeViewer({
   canUndo?: boolean;
   canRedo?: boolean;
   tools?: readonly ('select' | 'state' | 'transition' | 'text')[];
+  selectedStates?: number;
 }) {
   useRegisterViewerActions(actions, {
     grid,
@@ -65,6 +75,7 @@ function FakeViewer({
     canUndo,
     canRedo,
     tools,
+    selectedStates,
   });
   return null;
 }
@@ -785,6 +796,7 @@ describe('several viewers mounted at once', () => {
       canUndo,
       canRedo: true,
       tools: ALL_TOOLS,
+      selectedStates: 0,
     });
     return null;
   }
@@ -1214,6 +1226,7 @@ describe('keyboard shortcuts', () => {
         canUndo: false,
         canRedo: false,
         tools: ALL_TOOLS,
+        selectedStates: 0,
       });
       return null;
     }
@@ -1294,5 +1307,87 @@ describe('the keyboard shortcuts dialog', () => {
     expect(within(dialog).getByText('N')).toBeInTheDocument();
     expect(within(dialog).getByText('Shift+G')).toBeInTheDocument();
     expect(within(dialog).getByText('Ctrl+Shift+Z')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Lining states up and spreading them out.
+ *
+ * Greyed until there are enough states picked out to mean anything: two to line up, three to
+ * spread out, since two are already evenly spaced whatever they are.
+ */
+describe('Arrange, Align and Distribute', () => {
+  const mount = (selectedStates: number) =>
+    render(
+      <ViewerActionsProvider>
+        <FakeViewer selectedStates={selectedStates} />
+        <ViewerMenubar downloadHref="/x?download=1" />
+      </ViewerActionsProvider>,
+    );
+
+  const openArrange = (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByRole('menuitem', { name: 'Arrange' }));
+
+  beforeEach(() => {
+    for (const fn of Object.values(actions)) fn.mockClear();
+  });
+
+  it.each([
+    ['Left', 'alignLeft'],
+    ['Center', 'alignCenter'],
+    ['Right', 'alignRight'],
+    ['Top', 'alignTop'],
+    ['Middle', 'alignMiddle'],
+    ['Bottom', 'alignBottom'],
+  ] as const)('runs %s', async (label, action) => {
+    const user = userEvent.setup();
+    mount(2);
+    await openArrange(user);
+    await user.click(await screen.findByRole('menuitem', { name: 'Align' }));
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+
+    expect(actions[action]).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['Horizontally', 'distributeHorizontally'],
+    ['Vertically', 'distributeVertically'],
+  ] as const)('runs Distribute %s', async (label, action) => {
+    const user = userEvent.setup();
+    mount(3);
+    await openArrange(user);
+    await user.click(await screen.findByRole('menuitem', { name: 'Distribute' }));
+
+    fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+
+    expect(actions[action]).toHaveBeenCalledTimes(1);
+  });
+
+  it('greys both while one state is selected', async () => {
+    const user = userEvent.setup();
+    mount(1);
+
+    await openArrange(user);
+
+    expect(await screen.findByRole('menuitem', { name: 'Align' })).toHaveAttribute('data-disabled');
+    expect(screen.getByRole('menuitem', { name: 'Distribute' })).toHaveAttribute('data-disabled');
+  });
+
+  it('offers Align at two states, and Distribute only at three', async () => {
+    const user = userEvent.setup();
+    const { unmount } = mount(2);
+    await openArrange(user);
+    expect(await screen.findByRole('menuitem', { name: 'Align' })).not.toHaveAttribute(
+      'data-disabled',
+    );
+    expect(screen.getByRole('menuitem', { name: 'Distribute' })).toHaveAttribute('data-disabled');
+
+    unmount();
+    mount(3);
+    await openArrange(user);
+    expect(await screen.findByRole('menuitem', { name: 'Distribute' })).not.toHaveAttribute(
+      'data-disabled',
+    );
   });
 });

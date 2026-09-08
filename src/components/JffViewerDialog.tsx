@@ -1451,6 +1451,20 @@ export function JffCytoscapeViewer({
     textBoxes.clearAll();
   };
 
+  /**
+   * Put everything back the way this file opened.
+   *
+   * The machine and the comments over it. The hook owns one and this component owns the other,
+   * and Reset means both: a comment is not part of the automaton, but it is something the
+   * reader added to this drawing, and leaving notes floating over a machine that has been put
+   * back is a half-reset. One function, so the menu's Reset and the toolbar's "Put it back"
+   * cannot come to mean different things.
+   */
+  const resetEverything = () => {
+    resetMachine();
+    textBoxes.clearAll();
+  };
+
   /** Choose a tool if this viewer has it, and do nothing at all if it does not. */
   const selectAvailableTool = (tool: CanvasTool) => {
     if (tools.includes(tool)) selectTool(tool);

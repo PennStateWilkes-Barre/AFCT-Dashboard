@@ -52,6 +52,7 @@ import type { ViewerWindowTarget } from '@/lib/viewer-tabs';
 import { parseViewerSrc } from '@/lib/viewer-link';
 import { VIEWER_FILE_KIND_BADGE, VIEWER_FILE_KIND_LABEL } from '@/lib/badge-presets';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import { isEditableShortcutTarget } from '@/lib/viewer-shortcuts';
 import type { ViewerProperties } from '@/lib/viewer-properties';
 import {
   useRegisterViewerActions,
@@ -1449,6 +1450,44 @@ export function JffCytoscapeViewer({
   useEffect(() => {
     if (machineSelectionKey) selectTextBoxRaw(null);
   }, [machineSelectionKey, selectTextBoxRaw]);
+
+  /**
+   * Delete takes the selected state off the drawing, after the same question the panel asks.
+   *
+   * Reaching for the key is what somebody does with a state already picked out, and the row
+   * that does it otherwise is at the foot of a panel they have to look down at. It goes through
+   * `pendingDelete` rather than calling `removeState`, so it is the same dialog naming the same
+   * state and the same single undo step: one way to delete a state, asked for two ways.
+   *
+   * On the window rather than on the canvas, because a state can be selected from the panel and
+   * focus can be anywhere in the viewer by the time the key is pressed. `isEditableShortcutTarget`
+   * is what keeps it out of the name and coordinate boxes, and out of the confirm dialog once
+   * that is open.
+   *
+   * Only ever one state. `selectedState` is null while several are picked out (see
+   * `selectedStateIds`), so a selection gathered to line states up cannot be emptied by a stray
+   * key press, and a reader who means to delete several does it one at a time. Only the focused
+   * pane, so a split window does not ask twice. And a comment cannot be selected at the same
+   * time as a state, which is what keeps this and the comment layer's own Delete apart.
+   */
+  const selectedStateId = selectedState?.id ?? null;
+  const selectedStateName = selectedState?.name ?? '';
+  const mayDeleteState = capabilities.editMachine && focused;
+  useEffect(() => {
+    if (!selectedStateId || !mayDeleteState) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (isEditableShortcutTarget(event.target)) return;
+      event.preventDefault();
+      // Never over the top of a question already being asked: the answer to that one is still
+      // outstanding, and replacing it would change what the reader is agreeing to.
+      setPendingDelete(
+        (current) => current ?? { kind: 'state', id: selectedStateId, name: selectedStateName },
+      );
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedStateId, selectedStateName, mayDeleteState]);
 
   const textApi = { ...textBoxes, select: selectTextBox };
 

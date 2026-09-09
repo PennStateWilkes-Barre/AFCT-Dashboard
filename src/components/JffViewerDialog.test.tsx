@@ -1251,6 +1251,67 @@ describe('clicking a state', () => {
     );
   });
 
+  /**
+   * The key and the panel's Delete row are the same act asked for two ways, so the key goes
+   * through the same question rather than deleting on the spot.
+   */
+  it('asks the same question when Delete is pressed with a state selected', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    expect(screen.getByText('Delete state q0?')).toBeInTheDocument();
+    // Still there: the key asked a question, the same as the button does.
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
+  });
+
+  it('answers Backspace the same way, which is the other key people reach for', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Backspace' });
+
+    expect(screen.getByText('Delete state q0?')).toBeInTheDocument();
+  });
+
+  it('leaves the key to the caret while the name is being typed', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    const field = await screen.findByLabelText('Name');
+    field.focus();
+
+    fireEvent.keyDown(field, { key: 'Delete' });
+
+    // The question was never asked, so the dialog is still rendering its other branch.
+    expect(screen.queryByText('Delete state q0?')).toBeNull();
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+  });
+
+  it('does nothing in a viewer that may not change the machine', async () => {
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    expect(screen.queryByText('Delete state q0?')).toBeNull();
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.

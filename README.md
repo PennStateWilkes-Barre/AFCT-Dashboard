@@ -31,13 +31,13 @@ This project is supported in part by the National Science Foundation under Grant
 
 ## AFCT Components
 
-AFCT is made up of three repositories:
+AFCT is composed of three related repositories:
 
-| Component | Repository | Purpose |
-| --- | --- | --- |
-| Dashboard | [AFCT](https://github.com/PennStateCS/AFCT) | Web application, courses, assignments, submissions, grading, and administration. |
-| Client | [AFCT-Client](https://github.com/PennStateCS/AFCT-Client) | Customized JFLAP desktop client used to create and submit automata. |
-| Evaluator | [AFCT-Evaluator](https://github.com/PennStateCS/AFCT-Evaluator) | Evaluates submitted automata against assignment requirements. |
+| Component | Repository | Purpose | Relationship |
+| --- | --- | --- | --- |
+| Dashboard | [AFCT](https://github.com/PennStateCS/AFCT) | Web application for courses, assignments, submissions, grading, and administration. | **Depends on AFCT-Evaluator** for automated evaluation. |
+| Evaluator | [AFCT-Evaluator](https://github.com/PennStateCS/AFCT-Evaluator) | Evaluates submitted automata and formal-language assignments. | Used by the AFCT Dashboard for automated grading. |
+| Client | [AFCT-Client](https://github.com/PennStateCS/AFCT-Client) | Customized JFLAP desktop client used to create, test, and submit automata. | Used by students and also provides functionality required by the current evaluator. |
 
 ## Participating Institutions
 

@@ -17,13 +17,16 @@ Built with:
 
 ## Tech Stack
 
-- Node.js 22+
-- Next.js 16 + React 19
-- PostgreSQL 15 + Prisma 7
-- Auth.js / NextAuth v5
-- Tailwind CSS 4
-- TypeScript 5.9
-- Docker + GHCR
+- **Runtime:** Node.js 22+
+- **Web:** Next.js 16, React 19, TypeScript 5.9
+- **Database:** PostgreSQL 15, Prisma 7
+- **Authentication:** Auth.js / NextAuth v5
+- **UI:** Tailwind CSS 4, Radix UI
+- **Data:** TanStack Query, TanStack Table
+- **Automata Viewer:** Cytoscape.js
+- **Rich Text:** TipTap
+- **Testing:** Vitest, Playwright, axe-core
+- **Deployment:** Docker, GitHub Container Registry (GHCR)
 
 ## Funding
 

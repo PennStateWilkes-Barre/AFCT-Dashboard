@@ -42,18 +42,6 @@ AFCT is composed of three related repositories:
 | Evaluator | [AFCT-Evaluator](https://github.com/PennStateCS/AFCT-Evaluator) | Evaluates submitted automata and formal-language assignments. | Used by the AFCT Dashboard for automated grading. |
 | Client | [AFCT-Client](https://github.com/PennStateCS/AFCT-Client) | Customized JFLAP desktop client used to create, test, and submit automata. | Used by students and also provides functionality required by the current evaluator. |
 
-## Participating Institutions
-
-AFCT is part of a multi-institutional collaboration involving:
-
-- College of the Holy Cross
-- Rochester Institute of Technology
-- The Pennsylvania State University
-- The University of New Mexico
-- University of Rochester
-
-This collaboration supports the continued development, deployment, and study of AFCT across undergraduate computing theory courses.
-
 ## Documentation
 
 Developer and user documentation is available at: **<https://pennstatecs.github.io/AFCT/>**
@@ -65,6 +53,18 @@ Names and Role Provisioning Services 2.0, and Assignment and Grade Services 2.0.
 Canvas, D2L Brightspace, Blackboard, and any other LMS that supports LTI 1.3.
 
 <a href="https://site.imsglobal.org/certifications/pennsylvania-state-university/afct"><img src="https://site.imsglobal.org/sites/default/files/media/images/logo_ims/1edtech_trusted-apps-certified.svg" alt="1EdTech Certified" width="140" border="0"></a>
+
+## Participating Institutions
+
+AFCT is part of a multi-institutional collaboration involving:
+
+- College of the Holy Cross
+- Rochester Institute of Technology
+- The Pennsylvania State University
+- The University of New Mexico
+- University of Rochester
+
+This collaboration supports the continued development, deployment, and study of AFCT across undergraduate computing theory courses.
 
 ## Acknowledgments
 

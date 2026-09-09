@@ -56,7 +56,7 @@ beforeEach(() => {
   vi.useRealTimers();
 });
 
-describe('comments on the machine s undo history', () => {
+describe("comments on the machine's undo history", () => {
   it('holds a step as a box is made, and turns it into one at the first keystroke', () => {
     const { steps, held, result } = setup();
 
@@ -130,7 +130,7 @@ describe('comments on the machine s undo history', () => {
     expect(held).toHaveLength(2);
   });
 
-  it('puts a step s comments back without recording one, and writes them down', () => {
+  it("puts a step's comments back without recording one, and writes them down", () => {
     const { steps, held, result } = setup();
     const boxes = [{ id: 'text-1', x: 5, y: 5, width: 200, height: 80, text: 'was here' }];
 
@@ -158,7 +158,7 @@ describe('comments on the machine s undo history', () => {
    * did not flush first would be overtaken by the timer and storage would keep the text the
    * screen no longer shows.
    */
-  it('does not let a keystroke s deferred write land after an undo', async () => {
+  it("does not let a keystroke's deferred write land after an undo", async () => {
     vi.useFakeTimers();
     const { result } = setup();
     act(() => result.current.addAt({ x: 0, y: 0 }));

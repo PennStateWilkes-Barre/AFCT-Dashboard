@@ -3096,6 +3096,12 @@ export function useJffCytoscape({
     rememberView();
   }, [
     phase,
+    // The depth of the history, which is the only sign of some changes. A drag moves states
+    // that cytoscape reports, so its own debounced write catches it; a comment written over the
+    // machine moves nothing cytoscape can see, and without this its step would sit unwritten
+    // until the next pan or the flush on the way out.
+    undoDepth,
+    redoDepth,
     selectedStateIds,
     selectedEdge,
     renames,

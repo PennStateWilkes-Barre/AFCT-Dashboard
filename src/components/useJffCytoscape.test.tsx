@@ -3993,6 +3993,34 @@ describe('comments on the undo history', () => {
     expect(comments.get()).toEqual([box('text-1', 'written before anything moved')]);
   });
 
+  /**
+   * A comment moves nothing cytoscape can see, so the debounced write a drag relies on never
+   * runs. Without the history's depth in the writer's dependencies the step would sit in memory
+   * until the next pan, and a refresh would come back to the comment with Undo greyed out.
+   */
+  it('writes the step down without waiting for the canvas to move', async () => {
+    const key = 'submissions:comments.jff';
+    window.sessionStorage.clear();
+    const comments = commentLayer();
+    const { api } = renderViewer({ ...comments.props, viewStateKey: key });
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // The opening view is written as the machine settles. Taken away here so that what the
+    // assertion below waits for can only be a write the comment itself caused.
+    const stored = `afct.viewer.view.${key}`;
+    await waitFor(() => expect(window.sessionStorage.getItem(stored)).not.toBeNull());
+    window.sessionStorage.removeItem(stored);
+
+    act(() => api().textBoxHistory.record());
+    comments.set([box('text-1', 'written and then refreshed')]);
+
+    await waitFor(() => {
+      const saved = JSON.parse(window.sessionStorage.getItem(stored)!);
+      expect(saved.history.undo).toHaveLength(1);
+      expect(saved.history.undo[0].textBoxes).toEqual([]);
+    });
+  });
+
   it('is unbothered by a viewer with no comment layer at all', async () => {
     const { api } = renderViewer();
     await waitFor(() => expect(instances).toHaveLength(1));

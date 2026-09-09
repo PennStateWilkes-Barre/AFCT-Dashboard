@@ -257,14 +257,17 @@ export function useViewerTextBoxes(
     const current = editingIdRef.current;
     if (current === null) return;
     const box = boxesRef.current.find((b) => b.id === current);
+    // Whatever this edit held, it is over. Nothing was typed if the snapshot is still held, and
+    // leaving it held would let the next thing that commits one (aligning states, say) turn it
+    // into a step that changes nothing. Naming the snapshot is what makes this safe: a state
+    // picked up since takes the same slot, and its snapshot is left alone.
+    historyRef.current?.discardHeld(heldStep.current);
+    heldStep.current = null;
     if (box && box.text.trim() === '') {
-      // No step for this. A box that was just made and never typed into is back to where the
-      // held snapshot was taken, so the snapshot goes rather than being recorded, and undo is
-      // not offered a step that would put an empty rectangle back. A box that HAD words and was
-      // emptied already recorded one at its first keystroke, and that step holds the words: an
-      // undo puts the whole box back, which is what somebody who cleared it by accident wants.
-      historyRef.current?.discardHeld(heldStep.current);
-      heldStep.current = null;
+      // No step for the removal either. A box that was just made and never typed into is back
+      // to where the discarded snapshot was taken. A box that HAD words and was emptied already
+      // recorded a step at its first keystroke, and that step holds the words, so one undo puts
+      // the whole box back: what somebody who cleared it by accident wants.
       commit(boxesRef.current.filter((b) => b.id !== current));
       setSelectedId((s) => (s === current ? null : s));
     } else {

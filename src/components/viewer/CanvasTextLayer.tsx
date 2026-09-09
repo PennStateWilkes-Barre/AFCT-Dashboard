@@ -233,8 +233,27 @@ function TextBoxItem({
         // names. The shadow is what lifts it off the grid; without one the fill just looks like
         // a hole cut in the drawing.
         'bg-card shadow-[0_2px_10px_rgba(15,23,42,0.08)] dark:shadow-[0_2px_10px_rgba(0,0,0,0.4)]',
+        // And a line round it, so where the note ends is not left to the shadow to say. Over a
+        // machine the shadow alone reads as a smudge: a state or a transition line passing
+        // under the corner takes the eye straight through the edge.
+        //
+        // `--input` rather than `--border`. The quieter structural line is 1.15:1 on the
+        // canvas and would all but vanish against the drawing, and this box is a control
+        // rather than structure, which 1.4.11 holds to 3:1; `--input` is the token that
+        // carries that promise (3.35:1 on the canvas).
+        'border-input border-solid',
       )}
-      style={{ left: rect.x, top: rect.y, width: rect.width, height: rect.height }}
+      style={{
+        left: rect.x,
+        top: rect.y,
+        width: rect.width,
+        height: rect.height,
+        // Counter-scaled, like the handles and the selection ring. A line drawn in the graph's
+        // own units would be a hairline at 30% and a bar at 300%. Inside the box rather than
+        // around it, since everything here is border-box, so the geometry that was stored is
+        // still the footprint the reader dragged out.
+        borderWidth: px(1),
+      }}
       data-testid={`viewer-text-box-${box.id}`}
     >
       {editing ? (

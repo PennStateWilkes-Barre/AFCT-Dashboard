@@ -3924,3 +3924,109 @@ describe('the standoff of a bundled label', () => {
     await waitFor(() => expect(loop!.style()['text-margin-y']).toBeDefined());
   });
 });
+
+/**
+ * The comments a reader writes over a machine are not part of it, and this hook never reads
+ * what they say. They ride in the snapshot so that one history covers the whole drawing: see
+ * `useViewerTextBoxes`, which owns them and hands this pair in.
+ */
+describe('comments on the undo history', () => {
+  const box = (id: string, text: string) => ({
+    id,
+    x: 10,
+    y: 20,
+    width: 200,
+    height: 80,
+    text,
+  });
+
+  /** Stands in for the comment layer: what is on the drawing, and what a step puts back. */
+  const commentLayer = () => {
+    let boxes: ReturnType<typeof box>[] = [];
+    return {
+      get: () => boxes,
+      set: (next: ReturnType<typeof box>[]) => {
+        boxes = next;
+      },
+      props: {
+        readTextBoxes: () => boxes,
+        restoreTextBoxes: (next: readonly ReturnType<typeof box>[]) => {
+          boxes = [...next];
+        },
+      },
+    };
+  };
+
+  it('steps back through a comment written after the step was recorded', async () => {
+    const comments = commentLayer();
+    const { api } = renderViewer(comments.props);
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // What the layer does when a box is made: record how things stand, then add the box.
+    act(() => api().textBoxHistory.record());
+    comments.set([box('text-1', 'this loop is the bug')]);
+
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    act(() => api().undo());
+    expect(comments.get()).toEqual([]);
+
+    act(() => api().redo());
+    expect(comments.get()).toEqual([box('text-1', 'this loop is the bug')]);
+  });
+
+  it('leaves the comments where they were when the step is about the machine', async () => {
+    const comments = commentLayer();
+    comments.set([box('text-1', 'written before anything moved')]);
+    const { api } = renderViewer(comments.props);
+    await waitFor(() => expect(instances).toHaveLength(1));
+    const cy = lastCy();
+    const before = { ...cy.byId('0')!.position() };
+
+    dragState('0', { x: 500, y: 500 });
+    // A second comment, after the drag. Undoing the drag is undoing the drag.
+    comments.set([box('text-1', 'written before anything moved'), box('text-2', 'and after')]);
+
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    act(() => api().undo());
+    expect(cy.byId('0')?.position()).toEqual(before);
+    // The step is the whole drawing as it stood, so the second comment goes with the drag.
+    expect(comments.get()).toEqual([box('text-1', 'written before anything moved')]);
+  });
+
+  /**
+   * A comment moves nothing cytoscape can see, so the debounced write a drag relies on never
+   * runs. Without the history's depth in the writer's dependencies the step would sit in memory
+   * until the next pan, and a refresh would come back to the comment with Undo greyed out.
+   */
+  it('writes the step down without waiting for the canvas to move', async () => {
+    const key = 'submissions:comments.jff';
+    window.sessionStorage.clear();
+    const comments = commentLayer();
+    const { api } = renderViewer({ ...comments.props, viewStateKey: key });
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    // The opening view is written as the machine settles. Taken away here so that what the
+    // assertion below waits for can only be a write the comment itself caused.
+    const stored = `afct.viewer.view.${key}`;
+    await waitFor(() => expect(window.sessionStorage.getItem(stored)).not.toBeNull());
+    window.sessionStorage.removeItem(stored);
+
+    act(() => api().textBoxHistory.record());
+    comments.set([box('text-1', 'written and then refreshed')]);
+
+    await waitFor(() => {
+      const saved = JSON.parse(window.sessionStorage.getItem(stored)!);
+      expect(saved.history.undo).toHaveLength(1);
+      expect(saved.history.undo[0].textBoxes).toEqual([]);
+    });
+  });
+
+  it('is unbothered by a viewer with no comment layer at all', async () => {
+    const { api } = renderViewer();
+    await waitFor(() => expect(instances).toHaveLength(1));
+
+    act(() => api().textBoxHistory.record());
+    await waitFor(() => expect(api().canUndo).toBe(true));
+    expect(() => act(() => api().undo())).not.toThrow();
+  });
+});

@@ -1251,6 +1251,67 @@ describe('clicking a state', () => {
     );
   });
 
+  /**
+   * The key and the panel's Delete row are the same act asked for two ways, so the key goes
+   * through the same question rather than deleting on the spot.
+   */
+  it('asks the same question when Delete is pressed with a state selected', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    expect(screen.getByText('Delete state q0?')).toBeInTheDocument();
+    // Still there: the key asked a question, the same as the button does.
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull(),
+    );
+  });
+
+  it('answers Backspace the same way, which is the other key people reach for', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Backspace' });
+
+    expect(screen.getByText('Delete state q0?')).toBeInTheDocument();
+  });
+
+  it('leaves the key to the caret while the name is being typed', async () => {
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    tapNode('0');
+    const field = await screen.findByLabelText('Name');
+    field.focus();
+
+    fireEvent.keyDown(field, { key: 'Delete' });
+
+    // The question was never asked, so the dialog is still rendering its other branch.
+    expect(screen.queryByText('Delete state q0?')).toBeNull();
+    expect(screen.getByRole('group', { name: /properties of state/i })).toBeInTheDocument();
+  });
+
+  it('does nothing in a viewer that may not change the machine', async () => {
+    renderInWindow(
+      <JffCytoscapeViewer src={SRC} title="abc.jff" capabilities={{ editMachine: false }} />,
+    );
+    await waitForEngine();
+    tapNode('0');
+    await screen.findByRole('group', { name: /properties of state/i });
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+
+    expect(screen.queryByText('Delete state q0?')).toBeNull();
+  });
+
   it('renames the state as it is typed', async () => {
     // A viewer that can be marked up: the label follows the box straight away, and the file is
     // untouched, which is what the toolbar's note is for.
@@ -2257,7 +2318,13 @@ describe('the Text tool', () => {
 
   /**
    * The one that matters. A note over a drawing must not become part of the drawing: no state,
-   * no transition, and nothing that says the reader has changed the submitted file.
+   * no transition, nothing in the panels.
+   *
+   * It does now say the drawing has changed, which it did not before comments joined the undo
+   * history. That is deliberate rather than a leak: the note beside the machine type is partly
+   * the depth of that history, and a comment is a change to the drawing the reader can step
+   * back through. What the note says stays true either way, since the submitted file is
+   * untouched and nothing here writes to it.
    */
   it('changes nothing about the machine', async () => {
     const user = userEvent.setup();
@@ -2269,8 +2336,30 @@ describe('the Text tool', () => {
     await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'not a state');
 
     expect(h.cy.add.mock.calls.length).toBe(drawnBefore);
-    expect(screen.queryByRole('button', { name: /file changed/i })).toBeNull();
     expect(screen.queryByRole('group', { name: /properties of state/i })).toBeNull();
+  });
+
+  /** And the other side of that: the comment is undoable, whole, in one step. */
+  it('steps back through a comment with Undo, and forward again with Redo', async () => {
+    const user = userEvent.setup();
+    renderInWindow(<JffCytoscapeViewer src={SRC} title="abc.jff" />);
+    await waitForEngine();
+    chooseText();
+    tapBackground();
+    await user.type(await screen.findByRole('textbox', { name: 'Text box' }), 'this loop');
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Text box' }));
+    expect(await screen.findByText('this loop')).toBeInTheDocument();
+
+    const undo = screen.getByRole('button', { name: /^undo$/i });
+    await waitFor(() => expect(undo).toBeEnabled());
+    await user.click(undo);
+
+    // The box and its words together: typing a sentence is one step, not one per letter.
+    await waitFor(() => expect(screen.queryByText('this loop')).toBeNull());
+    await waitFor(() => expect(stored()).toEqual([]));
+
+    await user.click(screen.getByRole('button', { name: /^redo$/i }));
+    expect(await screen.findByText('this loop')).toBeInTheDocument();
   });
 });
 

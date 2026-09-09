@@ -18,6 +18,7 @@ export type ViewerShortcutId =
   | 'commentTool'
   | 'undo'
   | 'redo'
+  | 'deleteSelection'
   | 'fit'
   | 'center'
   | 'grid'
@@ -120,6 +121,25 @@ export const VIEWER_SHORTCUTS: readonly ViewerShortcut[] = [
     matches: (e) =>
       command(e) &&
       ((e.shiftKey && e.key.toLowerCase() === 'z') || (!e.shiftKey && e.key.toLowerCase() === 'y')),
+  },
+  {
+    /**
+     * Listed here, answered elsewhere.
+     *
+     * Deleting needs to know what is selected, and that lives in the viewer rather than in the
+     * window's chrome: a state goes through the same confirmation the properties panel asks
+     * (JffViewerDialog), and a comment through the layer that owns it (CanvasTextLayer). Both
+     * bind the key themselves. This entry exists so the Help dialog can say the key does
+     * something, which is the whole reason that dialog is there. `useViewerShortcuts` matches
+     * it and finds no command, which is a no-op: it does not swallow the press.
+     */
+    id: 'deleteSelection',
+    group: 'Editing',
+    label: 'Delete the selected state or comment',
+    keys: 'Delete',
+    aria: 'Delete Backspace',
+    matches: (e) =>
+      noCommandKeys(e) && !e.shiftKey && (e.key === 'Delete' || e.key === 'Backspace'),
   },
   {
     id: 'fit',

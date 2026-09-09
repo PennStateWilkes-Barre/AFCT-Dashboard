@@ -77,6 +77,17 @@ function isTextBox(value: unknown): value is ViewerTextBox {
 }
 
 /**
+ * Whether a value is a list of well formed boxes.
+ *
+ * For the undo history, which stores the comments alongside the machine and validates a step
+ * the same way this file validates an entry: anything malformed reads as no boxes rather than
+ * as a step that would put a half-shaped record on the canvas.
+ */
+export function isTextBoxList(value: unknown): value is ViewerTextBox[] {
+  return Array.isArray(value) && value.every(isTextBox);
+}
+
+/**
  * Read one document's boxes back.
  *
  * Anything that is not a list of well formed boxes reads as none: hand-edited storage, an entry

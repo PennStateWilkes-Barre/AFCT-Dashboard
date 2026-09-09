@@ -49,6 +49,7 @@ import {
   type ViewerViewport,
   type ViewerViewState,
 } from '@/lib/viewer-view-state';
+import type { ViewerTextBox } from '@/lib/viewer-text-boxes';
 import {
   bundleEdges,
   describeMachine,
@@ -341,6 +342,18 @@ export type UseJffCytoscapeOptions = {
   onViewportChange?: ((viewport: ViewerViewport) => void) | null;
   /** Follow this camera. Set only on the pane that is not driving. */
   linkedViewport?: ViewerViewport | null;
+  /**
+   * The comments written over this machine, and how to put them back.
+   *
+   * They belong to `useViewerTextBoxes`, not to this hook, which never reads what they say and
+   * has no opinion about them. The pair exists so that one undo history covers the whole
+   * drawing: a snapshot asks `readTextBoxes` what was on it, and a step hands that back through
+   * `restoreTextBoxes`. Both optional, so a viewer with no comment layer is unaffected.
+   *
+   * Both have to be stable, since they are read from handlers built once per load.
+   */
+  readTextBoxes?: (() => readonly ViewerTextBox[]) | null;
+  restoreTextBoxes?: ((boxes: readonly ViewerTextBox[]) => void) | null;
 };
 
 /**
@@ -391,6 +404,14 @@ type ViewerSnapshot = Arrangement & {
   addedTransitions: ViewerAddedTransition[];
   /** What the reader took off the drawing. See `removeState` and `removeTransitions`. */
   removed: ViewerRemoved;
+  /**
+   * The comments written over the machine. See `useViewerTextBoxes`.
+   *
+   * Not part of the automaton, and nothing here reads them: they ride in the snapshot only so
+   * that one history covers everything a reader can change about the drawing in front of them.
+   * The hook that owns them hands them in and takes them back, through the two props below.
+   */
+  textBoxes: ViewerTextBox[];
 };
 
 /**
@@ -412,6 +433,7 @@ function toStoredStep(snapshot: ViewerSnapshot): ViewerHistoryStep {
     addedStates: snapshot.addedStates,
     addedTransitions: snapshot.addedTransitions,
     removed: snapshot.removed,
+    textBoxes: snapshot.textBoxes,
   };
 }
 
@@ -427,6 +449,10 @@ function fromStoredStep(step: ViewerHistoryStep): ViewerSnapshot {
     // Absent in a step written before drawn transitions existed, which is a step with none.
     addedTransitions: step.addedTransitions ?? [],
     removed: step.removed ?? { states: [], transitions: [] },
+    // Absent in a step written before comments were part of the history, which is a step from
+    // before this existed rather than a step with no comments. Treating it as none is the only
+    // reading available, and the cost of being wrong is one undo that clears the notes.
+    textBoxes: step.textBoxes ?? [],
   };
 }
 
@@ -995,6 +1021,8 @@ export function useJffCytoscape({
   viewStateKey = null,
   onViewportChange = null,
   linkedViewport = null,
+  readTextBoxes = null,
+  restoreTextBoxes = null,
 }: UseJffCytoscapeOptions) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<any | null>(null);
@@ -1242,6 +1270,13 @@ export function useJffCytoscape({
   const mayEditMachine = () => canEditMachineRef.current;
   const graphOverlayRefRef = useRef(graphOverlayRef);
   graphOverlayRefRef.current = graphOverlayRef;
+  // Through refs, like everything else a cytoscape handler reaches: the graph's handlers are
+  // built once per load and would otherwise hold the pair as it stood when the machine was
+  // drawn. It also lets the viewer wire these up after this hook has run.
+  const readTextBoxesRef = useRef(readTextBoxes);
+  readTextBoxesRef.current = readTextBoxes;
+  const restoreTextBoxesRef = useRef(restoreTextBoxes);
+  restoreTextBoxesRef.current = restoreTextBoxes;
   const onStateLinkRef = useRef(onStateLink);
   onStateLinkRef.current = onStateLink;
   const onLinkAnchorRef = useRef(onLinkAnchor);
@@ -1603,6 +1638,7 @@ export function useJffCytoscape({
         states: [...removedRef.current.states],
         transitions: [...removedRef.current.transitions],
       },
+      textBoxes: [...(readTextBoxesRef.current?.() ?? [])],
     };
   }, []);
 
@@ -1645,6 +1681,34 @@ export function useJffCytoscape({
     pendingSnapshot.current = null;
     pushUndoStep(before);
   }, [pushUndoStep]);
+
+  /**
+   * The same three moves, offered to whoever owns the comments.
+   *
+   * A comment is not part of the machine, but changing one changes the drawing, and a reader
+   * pressing Ctrl+Z means the last thing they did whichever kind of thing it was. So the layer
+   * that holds the comments records its steps here rather than keeping a history of its own,
+   * and the snapshot it records already carries the boxes (see `readSnapshot`).
+   *
+   * Stable, because the hook that receives it puts it in dependency lists.
+   */
+  const textBoxHistory = useMemo(
+    () => ({
+      record: recordStep,
+      hold: () => {
+        const before = readSnapshot();
+        pendingSnapshot.current = before;
+        // Handed back so the caller can throw away its own held snapshot and nobody else's.
+        // There is one of these for the whole viewer, and picking up a state takes it too.
+        return before;
+      },
+      commitHeld: commitPendingMove,
+      discardHeld: (held: object | null) => {
+        if (held && pendingSnapshot.current === held) pendingSnapshot.current = null;
+      },
+    }),
+    [commitPendingMove, readSnapshot, recordStep],
+  );
 
   /**
    * Draw a new state where the reader clicked.
@@ -3032,6 +3096,12 @@ export function useJffCytoscape({
     rememberView();
   }, [
     phase,
+    // The depth of the history, which is the only sign of some changes. A drag moves states
+    // that cytoscape reports, so its own debounced write catches it; a comment written over the
+    // machine moves nothing cytoscape can see, and without this its step would sit unwritten
+    // until the next pan or the flush on the way out.
+    undoDepth,
+    redoDepth,
     selectedStateIds,
     selectedEdge,
     renames,
@@ -3095,6 +3165,8 @@ export function useJffCytoscape({
     addedStatesRef.current = snapshot.addedStates;
     addedTransitionsRef.current = snapshot.addedTransitions;
     removedRef.current = snapshot.removed;
+    // The comments live in their own hook, so this is the one place a step reaches them.
+    restoreTextBoxesRef.current?.(snapshot.textBoxes);
 
     const pristine = pristineParsed.current;
     if (!pristine) return;
@@ -3385,6 +3457,8 @@ export function useJffCytoscape({
     viewModified: viewModifiedRef.current,
     canUndo: undoDepth > 0,
     canRedo: redoDepth > 0,
+    /** How the comment layer records its changes on this history. See `textBoxHistory`. */
+    textBoxHistory,
     undo: () => step(undoStack, redoStack),
     redo: () => step(redoStack, undoStack),
     selectedState:

@@ -52,6 +52,7 @@ import type { ViewerWindowTarget } from '@/lib/viewer-tabs';
 import { parseViewerSrc } from '@/lib/viewer-link';
 import { VIEWER_FILE_KIND_BADGE, VIEWER_FILE_KIND_LABEL } from '@/lib/badge-presets';
 import type { ViewerViewport } from '@/lib/viewer-view-state';
+import { isEditableShortcutTarget } from '@/lib/viewer-shortcuts';
 import type { ViewerProperties } from '@/lib/viewer-properties';
 import {
   useRegisterViewerActions,
@@ -71,7 +72,10 @@ import {
   ViewerFileProperties,
   useViewerFileProperties,
 } from '@/components/viewer/ViewerFileProperties';
-import { useViewerTextBoxes } from '@/components/viewer/useViewerTextBoxes';
+import {
+  useViewerTextBoxes,
+  type ViewerTextBoxHistory,
+} from '@/components/viewer/useViewerTextBoxes';
 import {
   Grid,
   Copy,
@@ -1250,6 +1254,24 @@ export function JffCytoscapeViewer({
    */
   const backgroundClickRef = useRef<((at: { x: number; y: number }) => boolean) | null>(null);
   /**
+   * The undo history, reached before the hook that owns it has run.
+   *
+   * The comments and the machine share one history, so the comment hook has to be able to
+   * record a step. It is created first, because the graph hook needs to be able to read and
+   * restore the comments, so what it is handed is this stable shim over a ref that is filled in
+   * below. The same knot `backgroundClickRef` ties, for the same reason.
+   */
+  const textHistoryRef = useRef<ViewerTextBoxHistory | null>(null);
+  const textHistory = useMemo<ViewerTextBoxHistory>(
+    () => ({
+      record: () => textHistoryRef.current?.record(),
+      hold: () => textHistoryRef.current?.hold() ?? null,
+      commitHeld: () => textHistoryRef.current?.commitHeld(),
+      discardHeld: (held) => textHistoryRef.current?.discardHeld(held),
+    }),
+    [],
+  );
+  /**
    * The reader's own writing over this machine, and where it is kept between visits.
    *
    * Keyed by the file's own route, which is the one thing every way into this viewer agrees on:
@@ -1257,7 +1279,7 @@ export function JffCytoscapeViewer({
    * split window keep their own. Not `viewStateKey`, which the standalone window supplies and
    * the dialog does not, so the same file would have had two sets of notes.
    */
-  const textBoxes = useViewerTextBoxes(src);
+  const textBoxes = useViewerTextBoxes(src, textHistory);
   const selectTextBoxRaw = textBoxes.select;
   // The element the graph's transform is written to, so the boxes ride the pan and the zoom.
   const textOverlayRef = useRef<HTMLDivElement | null>(null);
@@ -1325,6 +1347,7 @@ export function JffCytoscapeViewer({
     toggleSnapToGrid,
     canUndo,
     canRedo,
+    textBoxHistory,
     undo,
     redo,
     selectedState,
@@ -1372,6 +1395,8 @@ export function JffCytoscapeViewer({
     onStateLink,
     onLinkAnchor,
     graphOverlayRef: textOverlayRef,
+    readTextBoxes: textBoxes.readBoxes,
+    restoreTextBoxes: textBoxes.restore,
     canEditMachine: capabilities.editMachine,
     lockArrangement: preview,
     initialZoom,
@@ -1391,6 +1416,10 @@ export function JffCytoscapeViewer({
    * this is the only place that hears about it. Only that one direction, deliberately: two
    * effects pointing at each other would each undo the other within one commit.
    */
+  // The other half of the knot tied above: from here on, a comment's changes reach the
+  // machine's undo history. Assigned during render, so the very first note is undoable.
+  textHistoryRef.current = textBoxHistory;
+
   const clearSelectedStateRef = useRef(clearSelectedState);
   clearSelectedStateRef.current = clearSelectedState;
   const selectTextBox = useCallback(
@@ -1421,6 +1450,44 @@ export function JffCytoscapeViewer({
   useEffect(() => {
     if (machineSelectionKey) selectTextBoxRaw(null);
   }, [machineSelectionKey, selectTextBoxRaw]);
+
+  /**
+   * Delete takes the selected state off the drawing, after the same question the panel asks.
+   *
+   * Reaching for the key is what somebody does with a state already picked out, and the row
+   * that does it otherwise is at the foot of a panel they have to look down at. It goes through
+   * `pendingDelete` rather than calling `removeState`, so it is the same dialog naming the same
+   * state and the same single undo step: one way to delete a state, asked for two ways.
+   *
+   * On the window rather than on the canvas, because a state can be selected from the panel and
+   * focus can be anywhere in the viewer by the time the key is pressed. `isEditableShortcutTarget`
+   * is what keeps it out of the name and coordinate boxes, and out of the confirm dialog once
+   * that is open.
+   *
+   * Only ever one state. `selectedState` is null while several are picked out (see
+   * `selectedStateIds`), so a selection gathered to line states up cannot be emptied by a stray
+   * key press, and a reader who means to delete several does it one at a time. Only the focused
+   * pane, so a split window does not ask twice. And a comment cannot be selected at the same
+   * time as a state, which is what keeps this and the comment layer's own Delete apart.
+   */
+  const selectedStateId = selectedState?.id ?? null;
+  const selectedStateName = selectedState?.name ?? '';
+  const mayDeleteState = capabilities.editMachine && focused;
+  useEffect(() => {
+    if (!selectedStateId || !mayDeleteState) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      if (isEditableShortcutTarget(event.target)) return;
+      event.preventDefault();
+      // Never over the top of a question already being asked: the answer to that one is still
+      // outstanding, and replacing it would change what the reader is agreeing to.
+      setPendingDelete(
+        (current) => current ?? { kind: 'state', id: selectedStateId, name: selectedStateName },
+      );
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedStateId, selectedStateName, mayDeleteState]);
 
   const textApi = { ...textBoxes, select: selectTextBox };
 

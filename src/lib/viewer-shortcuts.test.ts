@@ -36,6 +36,8 @@ describe('which shortcut a key press is', () => {
     ['z', { ctrlKey: true, shiftKey: true }, 'redo'],
     ['z', { metaKey: true, shiftKey: true }, 'redo'],
     ['y', { ctrlKey: true }, 'redo'],
+    ['Delete', {}, 'deleteSelection'],
+    ['Backspace', {}, 'deleteSelection'],
   ])('reads %s with %j as %s', (key, mods, id) => {
     expect(matchViewerShortcut(press(key, mods))).toBe(id);
   });
@@ -59,6 +61,8 @@ describe('which shortcut a key press is', () => {
     ['z', { ctrlKey: true, altKey: true }],
     ['y', { ctrlKey: true, shiftKey: true }],
     ['x', {}],
+    ['Delete', { ctrlKey: true }],
+    ['Backspace', { metaKey: true }],
   ])('leaves %s with %j alone', (key, mods) => {
     expect(matchViewerShortcut(press(key, mods))).toBeNull();
   });

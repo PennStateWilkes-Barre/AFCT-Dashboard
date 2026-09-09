@@ -4,16 +4,16 @@ A modern Next.js 16 dashboard for the Automated Feedback for CS Theory (AFCT) sy
 Built with:
 
 ![Node.js](https://img.shields.io/badge/Node.js-22%2B-brightgreen?logo=node.js)
-![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)
 ![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=next.js)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql&logoColor=white)
-![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma&logoColor=white)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38B2AC?logo=tailwindcss&logoColor=white)
-![Auth.js](https://img.shields.io/badge/Auth.js-NextAuth%20v5-black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue?logo=typescript)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-336791?logo=postgresql&logoColor=white)
+![Prisma](https://img.shields.io/badge/Prisma-7-2D3748?logo=prisma)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind-4-38B2AC?logo=tailwindcss&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)
+
 [![CI](https://github.com/PennStateCS/AFCT/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/PennStateCS/AFCT/actions/workflows/ci.yml)
-[![Publish Docker image to GHCR](https://github.com/PennStateCS/AFCT/actions/workflows/publish-ghcr.yml/badge.svg?branch=main)](https://github.com/PennStateCS/AFCT/actions/workflows/publish-ghcr.yml)
+[![Publish](https://github.com/PennStateCS/AFCT/actions/workflows/publish-ghcr.yml/badge.svg?branch=main)](https://github.com/PennStateCS/AFCT/actions/workflows/publish-ghcr.yml)
 
 ## Tech Stack
 
